@@ -26,6 +26,15 @@ jobs:
             command: flutter build apk --release
 
     steps:
+      - name: Free disk space
+        if: matrix.target == 'android'
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android/sdk/emulator
+          sudo rm -rf /opt/hostedtoolcache
+          sudo rm -rf /usr/local/share/boost
+          df -h
+
       - uses: actions/checkout@v5
 
       - name: Install Linux desktop deps
