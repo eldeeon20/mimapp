@@ -130,7 +130,7 @@ class _AiScreenState extends State<AiScreen> {
                     final m = _messages[i];
                     return Align(
                       alignment:
-                          m.isUser ? Alignment.centerRight : Alignment.centerLeft,
+                          m.user ? Alignment.centerRight : Alignment.centerLeft,
                       child: Container(
                         margin: const EdgeInsets.only(bottom: 8),
                         padding: const EdgeInsets.symmetric(
