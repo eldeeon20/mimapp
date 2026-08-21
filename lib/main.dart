@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -101,7 +100,6 @@ Future<void> _initBackgroundService() async {
 
 @pragma('vm:entry-point')
 Future<void> _onServiceStart(ServiceInstance service) async {
-  DartPluginRegistrant.ensureInitialized();
   service.on('stop').listen((_) {
     service.stopSelf();
   });
