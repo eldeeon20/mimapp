@@ -3,11 +3,25 @@ import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import 'toolsec.dart';
 
+/// Pide permisos de almacenamiento necesarios.
+Future<bool> _requestStoragePermission() async {
+  if (Platform.isAndroid) {
+    if (await Permission.manageExternalStorage.isGranted) return true;
+    if (await Permission.manageExternalStorage.request().isGranted) return true;
+    if (await Permission.storage.isGranted) return true;
+    if (await Permission.storage.request().isGranted) return true;
+    final audio = await Permission.audio.request();
+    if (audio.isGranted) return true;
+    return false;
+  }
+  return true;
+}
+
 /// Diálogo ToolSec: cifra/descifra archivos con XOR por semilla.
-/// Muestra preview hexadecimal y la ruta del archivo resultado.
 Future<void> showToolSecDialog(BuildContext context) async {
   final seedCtrl = TextEditingController();
   String? filePath;
@@ -39,6 +53,12 @@ Future<void> showToolSecDialog(BuildContext context) async {
                 onPressed: processing
                     ? null
                     : () async {
+                        final perm = await _requestStoragePermission();
+                        if (!perm) {
+                          setDlgState(() =>
+                              resultMsg = 'Permiso de almacenamiento denegado');
+                          return;
+                        }
                         final result =
                             await FilePicker.platform.pickFiles();
                         if (result != null &&
@@ -68,7 +88,8 @@ Future<void> showToolSecDialog(BuildContext context) async {
                 Text(resultMsg!,
                     style: TextStyle(
                         fontSize: 12,
-                        color: resultMsg!.startsWith('Error')
+                        color: resultMsg!.startsWith('Error') ||
+                                resultMsg!.startsWith('Permiso')
                             ? Colors.red
                             : Colors.green)),
               ],
@@ -126,8 +147,7 @@ Future<void> showToolSecDialog(BuildContext context) async {
                               b.toRadixString(16).padLeft(2, '0'))
                           .join(' ');
                       setDlgState(() {
-                        resultMsg =
-                            'Guardado en: ${outPath.split('/').last}';
+                        resultMsg = 'Cifrado guardado en:\n$outPath';
                         hexPreview = preview;
                       });
                     } catch (e) {

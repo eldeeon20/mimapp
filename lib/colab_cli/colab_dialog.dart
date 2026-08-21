@@ -57,12 +57,15 @@ class _ColabDialogBodyState extends State<_ColabDialogBody> {
     }
   }
 
+  String? _authUrl;
+
   Future<void> _startLogin() async {
     setState(() {
       _loading = true;
       _error = null;
       _info = null;
       _waitingCode = false;
+      _authUrl = null;
     });
     try {
       await widget.auth.openBrowser();
@@ -73,7 +76,9 @@ class _ColabDialogBodyState extends State<_ColabDialogBody> {
       });
     } catch (e) {
       setState(() {
-        _error = '$e';
+        _authUrl = widget.auth.buildAuthUrl();
+        _error = 'No se pudo abrir el navegador. Tocá la URL de abajo para copiarla.';
+        _waitingCode = true;
         _loading = false;
       });
     }

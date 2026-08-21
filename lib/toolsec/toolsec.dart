@@ -65,8 +65,7 @@ class ToolSec {
   Uint8List encodeBytes(Uint8List data) => processBytes(data);
 
   /// Cifra/descifra un archivo: siempre guarda en appSupportDir/toolsec/.
-  /// En Android el path del file_picker es read-only, así que siempre
-  /// copiamos el resultado a un lugar seguro.
+  /// Verifica que el archivo se escribió correctamente.
   /// Retorna la ruta final del archivo cifrado/descifrado.
   Future<String> encodeFileSecure(String path) async {
     final file = File(path);
@@ -74,7 +73,12 @@ class ToolSec {
       throw FileSystemException('Archivo no encontrado', path);
     }
 
-    final data = processBytes(file.readAsBytesSync());
+    final originalBytes = file.readAsBytesSync();
+    if (originalBytes.isEmpty) {
+      throw Exception('El archivo está vacío: $path');
+    }
+
+    final data = processBytes(originalBytes);
 
     final appDir = await getApplicationSupportDirectory();
     final toolsecDir = Directory('${appDir.path}/toolsec');
@@ -83,7 +87,25 @@ class ToolSec {
     }
     final safeName = path.split(Platform.pathSeparator).last;
     final outPath = '${toolsecDir.path}/$safeName';
-    File(outPath).writeAsBytesSync(data);
+    final outFile = File(outPath);
+    outFile.writeAsBytesSync(data);
+
+    // Verificar que se escribió correctamente
+    if (!outFile.existsSync()) {
+      throw Exception('No se pudo crear el archivo de salida: $outPath');
+    }
+    final written = outFile.readAsBytesSync();
+    if (written.length != data.length) {
+      throw Exception(
+          'Escritura incompleta: esperaba ${data.length} bytes, '
+          'obtuve ${written.length} bytes');
+    }
+    if (outFile.lengthSync() != originalBytes.length) {
+      throw Exception(
+          'Tamaño inesperado: original ${originalBytes.length} bytes, '
+          'resultado ${outFile.lengthSync()} bytes');
+    }
+
     return outPath;
   }
 

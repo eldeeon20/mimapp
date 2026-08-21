@@ -67,10 +67,14 @@ class ColabAuth {
   }
 
   /// Abre el navegador con la URL de autorización.
+  /// Si no puede abrir, lanza excepción con la URL para copiar a mano.
   Future<void> openBrowser() async {
     final url = Uri.parse(buildAuthUrl());
-    if (await canLaunchUrl(url)) {
+    try {
       await launchUrl(url, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      throw Exception(
+          'No se pudo abrir el navegador. Copiá esta URL en tu navegador:\n$url');
     }
   }
 

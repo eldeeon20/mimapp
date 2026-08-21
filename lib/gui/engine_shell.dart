@@ -1,16 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
+import 'package:pr_app/src/rust/frb_generated.dart';
 
-import '../ai/laurelia_chat.dart';
 import '../colab_cli/colab_dialog.dart';
-import '../toolsec/toolsec_dialog.dart';
 import '../lua/lua_controller.dart';
 import '../lua/page_model.dart';
 import '../lua/page_registry.dart';
 import '../media/media_player.dart';
+import '../toolsec/toolsec_dialog.dart';
+import '../ai/laurelia_chat.dart';
 import '../widgets/gui_renderer.dart';
+import 'ai_screen.dart';
+import 'media_screen.dart';
 
-/// Shell de la app: barra de URL + lista de widgets definidos por Lua.
+/// Shell principal: home con 3 herramientas + ToolSec/Colab en AppBar.
 class PrApp extends StatelessWidget {
   const PrApp({super.key});
 
@@ -32,11 +35,173 @@ class EngineShell extends StatefulWidget {
 }
 
 class _EngineShellState extends State<EngineShell> {
-  late final MediaPlayer _mediaPlayer;
-  final _urlController = TextEditingController();
-  final _controller = LuaController();
-  final _laurelia = LaureliaChat();
+  int _currentIndex = -1; // -1 = home
 
+  // Servicios compartidos (viven mientras la app viva)
+  late final MediaPlayer _mediaPlayer;
+  late final LaureliaChat _laurelia;
+
+  @override
+  void initState() {
+    super.initState();
+    MediaKit.ensureInitialized();
+    _mediaPlayer = MediaPlayer();
+    _laurelia = LaureliaChat();
+  }
+
+  @override
+  void dispose() {
+    _mediaPlayer.dispose();
+    super.dispose();
+  }
+
+  void _openTool(int index) => setState(() => _currentIndex = index);
+  void _goHome() => setState(() => _currentIndex = -1);
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(_titles[_currentIndex]),
+        leading: _currentIndex >= 0
+            ? IconButton(
+                icon: const Icon(Icons.arrow_back),
+                onPressed: _goHome,
+              )
+            : null,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.lock_outline),
+            tooltip: 'ToolSec: cifrar/descifrar',
+            onPressed: () => showToolSecDialog(context),
+          ),
+          IconButton(
+            icon: const Icon(Icons.cloud_outlined),
+            tooltip: 'Google Colab',
+            onPressed: () => showColabDialog(context),
+          ),
+        ],
+      ),
+      body: _currentIndex < 0
+          ? _buildHome()
+          : _buildTool(_currentIndex),
+    );
+  }
+
+  static const _titles = ['pr_app', 'Lua', 'Media', 'Laurelia AI'];
+
+  Widget _buildHome() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Herramientas',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 32),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _ToolCard(
+                  icon: Icons.code,
+                  label: 'Lua',
+                  color: Colors.orange,
+                  onTap: () => _openTool(1),
+                ),
+                const SizedBox(width: 24),
+                _ToolCard(
+                  icon: Icons.music_note,
+                  label: 'Media',
+                  color: Colors.teal,
+                  onTap: () => _openTool(2),
+                ),
+                const SizedBox(width: 24),
+                _ToolCard(
+                  icon: Icons.smart_toy,
+                  label: 'Laurelia',
+                  color: Colors.purple,
+                  onTap: () => _openTool(3),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTool(int index) {
+    switch (index) {
+      case 1:
+        return _LuaTool(
+          mediaPlayer: _mediaPlayer,
+          laurelia: _laurelia,
+        );
+      case 2:
+        return MediaScreen(mediaPlayer: _mediaPlayer);
+      case 3:
+        return AiScreen(laurelia: _laurelia);
+      default:
+        return const Center(child: Text('??'));
+    }
+  }
+}
+
+class _ToolCard extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+
+  const _ToolCard({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Card(
+        elevation: 4,
+        child: SizedBox(
+          width: 120,
+          height: 120,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 40, color: color),
+              const SizedBox(height: 8),
+              Text(label,
+                  style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: color)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Herramienta Lua: motor Lua que puede llamar a Media y Laurelia.
+class _LuaTool extends StatefulWidget {
+  final MediaPlayer mediaPlayer;
+  final LaureliaChat laurelia;
+
+  const _LuaTool({required this.mediaPlayer, required this.laurelia});
+
+  @override
+  State<_LuaTool> createState() => _LuaToolState();
+}
+
+class _LuaToolState extends State<_LuaTool> {
+  final _controller = LuaController();
+  final _urlController = TextEditingController();
   PageModel? _page;
   String? _pageName;
   bool _loading = false;
@@ -45,29 +210,34 @@ class _EngineShellState extends State<EngineShell> {
   @override
   void initState() {
     super.initState();
-    MediaKit.ensureInitialized();
-    _mediaPlayer = MediaPlayer();
-    _controller.mediaPlayer = _mediaPlayer;
-    _controller.laureliaChat = _laurelia;
+    _controller.mediaPlayer = widget.mediaPlayer;
+    _controller.laureliaChat = widget.laurelia;
     _controller.onUpdate = (_, __) => setState(() {});
     _controller.onNavigate = _loadPageByName;
-    _mediaPlayer.onChanged = () {
+    widget.mediaPlayer.onChanged = () {
       if (mounted) setState(() {});
     };
-    _mediaPlayer.onPush = (id, value) {
+    widget.mediaPlayer.onPush = (id, value) {
       _controller.setInputValue(id, value);
       if (mounted) setState(() {});
     };
-    _laurelia.onProgress = (_) {
+    widget.laurelia.onProgress = (_) {
       if (mounted) setState(() {});
     };
     _loadPageByName('demo');
   }
 
+  @override
+  void dispose() {
+    _urlController.dispose();
+    _controller.dispose();
+    super.dispose();
+  }
+
   Future<void> _loadPageByName(String name) async {
     final asset = PageRegistry.assetFor(name);
     if (asset == null) {
-      setState(() => _error = 'Página desconocida: $name');
+      setState(() => _error = 'Página: $name');
       return;
     }
     await _loadFromAsset(asset);
@@ -114,99 +284,67 @@ class _EngineShellState extends State<EngineShell> {
   }
 
   @override
-  void dispose() {
-    _urlController.dispose();
-    _controller.dispose();
-    _mediaPlayer.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(_page?.title ?? 'pr_app'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.lock_outline),
-            tooltip: 'ToolSec: cifrar/descifrar archivo',
-            onPressed: () => showToolSecDialog(context),
-          ),
-          IconButton(
-            icon: const Icon(Icons.cloud_outlined),
-            tooltip: 'Google Colab',
-            onPressed: () => showColabDialog(context),
-          ),
-          for (final name in PageRegistry.names)
-            TextButton(
-              onPressed: () => _loadPageByName(name),
-              child: Text(name),
-            ),
-        ],
-      ),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _urlController,
-                    decoration: const InputDecoration(
-                      hintText: 'URL de una página Lua…',
-                      isDense: true,
-                      border: OutlineInputBorder(),
-                    ),
-                    onSubmitted: (_) => _loadFromUrl(),
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _urlController,
+                  decoration: const InputDecoration(
+                    hintText: 'URL de una página Lua…',
+                    isDense: true,
+                    border: OutlineInputBorder(),
                   ),
+                  onSubmitted: (_) => _loadFromUrl(),
                 ),
-                const SizedBox(width: 8),
-                FilledButton(
-                  onPressed: _loading ? null : _loadFromUrl,
-                  child: const Text('Cargar'),
-                ),
-                const SizedBox(width: 8),
-                OutlinedButton(
-                  onPressed: _loading ? null : () => _loadPageByName('demo'),
-                  child: const Text('Demo'),
-                ),
-              ],
-            ),
-          ),
-          if (_loading) const LinearProgressIndicator(minHeight: 2),
-          if (_error != null)
-            Padding(
-              padding: const EdgeInsets.all(12),
-              child: Text(
-                _error!,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
               ),
-            ),
-          Expanded(
-            child: _page == null
-                ? const Center(child: Text('Sin página cargada'))
-                : ListView(
-                    padding: const EdgeInsets.all(16),
-                    children: [
-                      for (final node in _page!.body)
-                        GuiRenderer.build(
-                          context,
-                          node,
-                          values: _controller.values,
-                          onInput: (id, value) {
-                            _controller.setInputValue(id, value);
-                            setState(() {});
-                          },
-                          onAction: (name) =>
-                              _controller.invokeHandler(name),
-                          videoController: _mediaPlayer.videoController,
-                        ),
-                    ],
-                  ),
+              const SizedBox(width: 8),
+              FilledButton(
+                onPressed: _loading ? null : _loadFromUrl,
+                child: const Text('Cargar'),
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton(
+                onPressed: _loading ? null : () => _loadPageByName('demo'),
+                child: const Text('Demo'),
+              ),
+            ],
           ),
-        ],
-      ),
+        ),
+        if (_loading) const LinearProgressIndicator(minHeight: 2),
+        if (_error != null)
+          Padding(
+            padding: const EdgeInsets.all(8),
+            child: Text(_error!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error)),
+          ),
+        Expanded(
+          child: _page == null
+              ? const Center(child: Text('Sin página'))
+              : ListView(
+                  padding: const EdgeInsets.all(12),
+                  children: [
+                    for (final node in _page!.body)
+                      GuiRenderer.build(
+                        context,
+                        node,
+                        values: _controller.values,
+                        onInput: (id, value) {
+                          _controller.setInputValue(id, value);
+                          setState(() {});
+                        },
+                        onAction: (name) =>
+                            _controller.invokeHandler(name),
+                        videoController: widget.mediaPlayer.videoController,
+                      ),
+                  ],
+                ),
+        ),
+      ],
     );
   }
 }
