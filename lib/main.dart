@@ -16,24 +16,31 @@ const _notifChannelName = 'pr_app';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+  try {
+    await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+  } catch (_) {}
   MediaKit.ensureInitialized();
 
-  const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
-  const initSettings = InitializationSettings(android: androidSettings);
-  await flutterLocalNotificationsPlugin.initialize(initSettings);
+  // Init notificaciones con channel obligatorio para Android 8+
+  try {
+    const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const initSettings = InitializationSettings(android: androidSettings);
+    await flutterLocalNotificationsPlugin.initialize(initSettings);
 
-  final androidPlugin = flutterLocalNotificationsPlugin
-      .resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin>();
-  if (androidPlugin != null) {
-    await androidPlugin.createNotificationChannel(
-      const AndroidNotificationChannel(
-        _notifChannelId,
-        _notifChannelName,
-        importance: Importance.high,
-      ),
-    );
+    final androidPlugin = flutterLocalNotificationsPlugin
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>();
+    if (androidPlugin != null) {
+      await androidPlugin.createNotificationChannel(
+        const AndroidNotificationChannel(
+          _notifChannelId,
+          _notifChannelName,
+          importance: Importance.high,
+        ),
+      );
+    }
+  } catch (e) {
+    debugPrint('Notificaciones init error: $e');
   }
 
   try {
