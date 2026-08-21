@@ -7,7 +7,7 @@ import 'package:flutter/material.dart';
 import 'toolsec.dart';
 
 /// Diálogo ToolSec: cifra/descifra archivos con XOR por semilla.
-/// Muestra preview hexadecimal de los primeros 50 bytes tras procesar.
+/// Muestra preview hexadecimal y la ruta del archivo resultado.
 Future<void> showToolSecDialog(BuildContext context) async {
   final seedCtrl = TextEditingController();
   String? filePath;
@@ -116,18 +116,23 @@ Future<void> showToolSecDialog(BuildContext context) async {
                     });
                     try {
                       final ts = ToolSec(seedCtrl.text);
-                      ts.encodeFile(filePath!);
-                      // Leer primeros 50 bytes para preview
+                      final outPath =
+                          await ts.encodeFileWithFallback(filePath!);
                       final bytes =
-                          await File(filePath!).readAsBytes();
+                          await File(outPath).readAsBytes();
                       final preview = bytes
                           .take(50)
                           .map((b) =>
                               b.toRadixString(16).padLeft(2, '0'))
                           .join(' ');
                       setDlgState(() {
-                        resultMsg =
-                            'Listo: $fileName procesado (XOR aplicado)';
+                        if (outPath == filePath) {
+                          resultMsg =
+                              'Listo: $fileName procesado en el mismo archivo';
+                        } else {
+                          resultMsg =
+                              'Guardado en: ${outPath.split('/').last}';
+                        }
                         hexPreview = preview;
                       });
                     } catch (e) {

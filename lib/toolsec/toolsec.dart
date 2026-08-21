@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:typed_data';
+import 'package:path_provider/path_provider.dart';
 
 /// Cifrado/descifrado XOR por semilla — algoritmo idéntico a ToolSec (Godot/Rust).
 ///
@@ -10,6 +11,7 @@ import 'dart:typed_data';
 ///   final ts = ToolSec('mi_secreto');
 ///   ts.encodeFile('script.gd');        // archivos chicos (todo en RAM)
 ///   ts.encodeFileLarge('model.pt');    // archivos grandes (streaming 1MB chunks)
+///   await ts.encodeFileWithFallback('script.gd'); // fallback Android
 class ToolSec {
   final int _seed;
 
@@ -49,16 +51,47 @@ class ToolSec {
   }
 
   /// Cifra/descifra un archivo chico (todo en RAM).
-  void encodeFile(String path) {
+  /// Retorna la ruta donde quedó el resultado.
+  String encodeFile(String path) {
     final file = File(path);
     if (!file.existsSync()) {
       throw FileSystemException('Archivo no encontrado', path);
     }
     file.writeAsBytesSync(processBytes(file.readAsBytesSync()));
+    return path;
   }
 
   /// Cifra/descifra bytes sin tocar disco.
   Uint8List encodeBytes(Uint8List data) => processBytes(data);
+
+  /// Cifra/descifra con fallback: intenta escribir en el path original;
+  /// si falla (permisos Android), copia a appSupportDir/toolsec/ y cifra ahí.
+  /// Retorna la ruta final del archivo cifrado.
+  Future<String> encodeFileWithFallback(String path) async {
+    final file = File(path);
+    if (!file.existsSync()) {
+      throw FileSystemException('Archivo no encontrado', path);
+    }
+
+    final data = processBytes(file.readAsBytesSync());
+
+    // Intento directo
+    try {
+      file.writeAsBytesSync(data);
+      return path;
+    } catch (_) {}
+
+    // Fallback: app support directory
+    final appDir = await getApplicationSupportDirectory();
+    final toolsecDir = Directory('${appDir.path}/toolsec');
+    if (!toolsecDir.existsSync()) {
+      toolsecDir.createSync(recursive: true);
+    }
+    final safeName = path.split(Platform.pathSeparator).last;
+    final outPath = '${toolsecDir.path}/$safeName';
+    File(outPath).writeAsBytesSync(data);
+    return outPath;
+  }
 
   /// Cifra/descifra archivo grande por streaming (1MB chunks, sin OOM).
   /// Escribe el resultado en el mismo archivo (overwrite).
@@ -88,7 +121,6 @@ class ToolSec {
       raf.closeSync();
       waf.closeSync();
     }
-    // Sobreescribe el original con el resultado
     file.writeAsBytesSync(temp.readAsBytesSync());
     temp.deleteSync();
   }

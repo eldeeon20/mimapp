@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 
 import '../ai/laurelia_chat.dart';
-import '../ai/toolsec_dialog.dart';
+import '../colab_cli/colab_dialog.dart';
+import '../toolsec/toolsec_dialog.dart';
 import '../lua/lua_controller.dart';
 import '../lua/page_model.dart';
 import '../lua/page_registry.dart';
@@ -130,6 +131,11 @@ class _EngineShellState extends State<EngineShell> {
             icon: const Icon(Icons.lock_outline),
             tooltip: 'ToolSec: cifrar/descifrar archivo',
             onPressed: () => showToolSecDialog(context),
+          ),
+          IconButton(
+            icon: const Icon(Icons.cloud_outlined),
+            tooltip: 'Google Colab',
+            onPressed: () => showColabDialog(context),
           ),
           for (final name in PageRegistry.names)
             TextButton(
