@@ -172,7 +172,7 @@ class ColabAuth {
   Future<String> _waitForCode(HttpServer server, String expectedState) async {
     final completer = Completer<String>();
 
-    server.timeout(const Duration(minutes: 5), onTimeout: () {
+    server.timeout(const Duration(minutes: 5), onTimeout: (_) {
       server.close();
       if (!completer.isCompleted) {
         completer.completeError(TimeoutException('Tiempo agotado esperando autorización'));
