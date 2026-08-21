@@ -53,7 +53,9 @@ Future<void> _initNotifications() async {
       android: androidSettings,
       iOS: iosSettings,
     );
-    await flutterLocalNotificationsPlugin.initialize(initSettings);
+    await flutterLocalNotificationsPlugin.initialize(
+      initializationSettings: initSettings,
+    );
 
     final androidPlugin = flutterLocalNotificationsPlugin
         .resolvePlatformSpecificImplementation<
@@ -79,8 +81,12 @@ Future<void> _initBackgroundService() async {
     await service.configure(
       androidConfiguration: AndroidConfiguration(
         onStart: _onServiceStart,
-        autoStart: false,
-        isForegroundMode: false,
+        autoStart: true,
+        isForegroundMode: true,
+        notificationChannelId: _notifChannelId,
+        initialNotificationTitle: 'pr_app',
+        initialNotificationContent: 'Servicio activo',
+        foregroundServiceNotificationId: 888,
       ),
       iosConfiguration: IosConfiguration(
         autoStart: false,
@@ -94,9 +100,7 @@ Future<void> _initBackgroundService() async {
 
 @pragma('vm:entry-point')
 Future<void> _onServiceStart(ServiceInstance service) async {
-  if (service is AndroidServiceInstance) {
-    service.setAsForegroundService();
-  }
+  DartPluginRegistrant.ensureInitialized();
   service.on('stop').listen((_) {
     service.stopSelf();
   });
