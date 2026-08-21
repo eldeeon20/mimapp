@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -21,10 +23,36 @@ Future<void> main() async {
   } catch (_) {}
   MediaKit.ensureInitialized();
 
-  // Init notificaciones con channel obligatorio para Android 8+
+  await _initNotifications();
+  await _initBackgroundService();
+
   try {
-    const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
-    const initSettings = InitializationSettings(android: androidSettings);
+    await RustLib.init();
+  } catch (e) {
+    debugPrint('Rust init error: $e');
+  }
+
+  try {
+    await ColabService().init();
+  } catch (e) {
+    debugPrint('ColabService init error: $e');
+  }
+
+  runApp(const PrApp());
+}
+
+Future<void> _initNotifications() async {
+  try {
+    const androidSettings = AndroidInitializationSettings('ic_bg_service_small');
+    const iosSettings = DarwinInitializationSettings(
+      requestAlertPermission: false,
+      requestBadgePermission: false,
+      requestSoundPermission: false,
+    );
+    const initSettings = InitializationSettings(
+      android: androidSettings,
+      iOS: iosSettings,
+    );
     await flutterLocalNotificationsPlugin.initialize(initSettings);
 
     final androidPlugin = flutterLocalNotificationsPlugin
@@ -38,11 +66,14 @@ Future<void> main() async {
           importance: Importance.high,
         ),
       );
+      await androidPlugin.requestNotificationsPermission();
     }
   } catch (e) {
     debugPrint('Notificaciones init error: $e');
   }
+}
 
+Future<void> _initBackgroundService() async {
   try {
     final service = FlutterBackgroundService();
     await service.configure(
@@ -59,20 +90,6 @@ Future<void> main() async {
   } catch (e) {
     debugPrint('BackgroundService init error: $e');
   }
-
-  try {
-    await RustLib.init();
-  } catch (e) {
-    debugPrint('Rust init error: $e');
-  }
-
-  try {
-    await ColabService().init();
-  } catch (e) {
-    debugPrint('ColabService init error: $e');
-  }
-
-  runApp(const PrApp());
 }
 
 @pragma('vm:entry-point')
