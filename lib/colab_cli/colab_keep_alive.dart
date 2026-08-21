@@ -58,15 +58,17 @@ class ColabKeepAlive {
     }
 
     try {
-      final token = await _auth.getToken();
-      final url = Uri.parse(
-        'https://${ColabConfig.colabHost}/tun/m/$_endpoint/keep-alive/',
+      final headers = await _auth.authHeaders();
+      headers['X-Colab-Tunnel'] = 'Google';
+      final params = {'authuser': '0'};
+      final url = Uri.https(
+        ColabConfig.colabHost,
+        '/tun/m/$_endpoint/keep-alive/',
+        params,
       );
 
-      final response = await http.get(url, headers: {
-        'Authorization': 'Bearer $token',
-        'X-Colab-Tunnel': 'Google',
-      }).timeout(ColabConfig.keepAliveTimeout);
+      final response =
+          await http.get(url, headers: headers).timeout(ColabConfig.keepAliveTimeout);
 
       if (response.statusCode >= 400 && response.statusCode < 500) {
         _consecutive4xx++;

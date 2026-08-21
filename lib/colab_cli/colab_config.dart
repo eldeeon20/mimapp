@@ -5,7 +5,9 @@ class ColabConfig {
   static const clientId =
       '764086051850-6qr4p6gpi6hn506pt8ejuq83di341hur.apps.googleusercontent.com';
   static const clientSecret = 'd-FL95Q19q7MQmFpd7hHD0Ty';
-  static const redirect = 'http://localhost:8737';
+  static const redirect = 'http://localhost';
+  static const remoteRedirect =
+      'https://sdk.cloud.google.com/applicationdefaultauthcode.html';
   static const authUri = 'https://accounts.google.com/o/oauth2/v2/auth';
   static const tokenUri = 'https://oauth2.googleapis.com/token';
 

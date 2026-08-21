@@ -5,6 +5,9 @@ import 'package:http/http.dart' as http;
 import 'colab_auth.dart';
 import 'colab_config.dart';
 
+/// Prefijo XSSI que Google antepone a las respuestas JSON.
+const _xssiPrefix = ")]}'\n";
+
 /// Sesión de Colab activa.
 class ColabSession {
   final String endpoint;
@@ -36,22 +39,37 @@ class ColabSessions {
 
   ColabSessions(this._auth);
 
+  /// Strips XSSI prefix y parsea JSON.
+  dynamic _parseResponse(http.Response r) {
+    var body = r.body;
+    if (body.startsWith(_xssiPrefix)) {
+      body = body.substring(_xssiPrefix.length);
+    }
+    return jsonDecode(body);
+  }
+
+  /// Headers estándar con authuser=0.
+  Future<Map<String, String>> _headers() async {
+    return _auth.authHeaders();
+  }
+
+  Uri _colabUri(String path, [Map<String, String>? extraQuery]) {
+    final params = {'authuser': '0'};
+    if (extraQuery != null) params.addAll(extraQuery);
+    return Uri.https(ColabConfig.colabHost, path, params);
+  }
+
   /// Lista sesiones activas del usuario.
   Future<List<ColabSession>> list() async {
-    final token = await _auth.getToken();
-    final url = Uri.parse(
-      'https://${ColabConfig.colabHost}/tun/m/sessions',
-    );
-
-    final response = await http.get(url, headers: {
-      'Authorization': 'Bearer $token',
-    });
+    final url = _colabUri('/tun/m/sessions');
+    final response = await http.get(url, headers: await _headers());
 
     if (response.statusCode != 200) {
-      throw Exception('Error listando sesiones: ${response.statusCode} ${response.body}');
+      throw Exception(
+          'Error listando sesiones: ${response.statusCode} ${response.body}');
     }
 
-    final data = jsonDecode(response.body);
+    final data = _parseResponse(response);
     final sessions = <ColabSession>[];
 
     if (data is List) {
@@ -73,51 +91,63 @@ class ColabSessions {
 
   /// Asigna un runtime de Colab.
   Future<String> assign(String sessionId) async {
-    final token = await _auth.getToken();
-    final url = Uri.parse(
-      'https://${ColabConfig.colabHost}/tun/m/$sessionId/assign',
-    );
+    final url = _colabUri('/tun/m/$sessionId/assign');
 
-    final response = await http.post(url, headers: {
-      'Authorization': 'Bearer $token',
-    });
+    // Primero GET para obtener XSRF token
+    final getResp = await http.get(url, headers: await _headers());
+    final getXsrf = _parseResponse(getResp);
+    final xsrfToken = getXsrf is Map ? getXsrf['token'] ?? '' : '';
 
-    if (response.statusCode != 200) {
-      throw Exception('Error asignando sesión: ${response.statusCode} ${response.body}');
+    // Luego POST con XSRF token
+    final headers = await _headers();
+    if (xsrfToken.isNotEmpty) {
+      headers['X-Goog-Colab-Token'] = xsrfToken;
     }
 
-    final data = jsonDecode(response.body);
+    final postResp = await http.post(url, headers: headers);
+
+    if (postResp.statusCode == 412) {
+      throw Exception('Demasiadas asignaciones activas');
+    }
+    if (postResp.statusCode != 200) {
+      throw Exception(
+          'Error asignando sesión: ${postResp.statusCode} ${postResp.body}');
+    }
+
+    final data = _parseResponse(postResp);
     return data['endpoint'] ?? data['tunnel'] ?? '';
   }
 
   /// Desasigna un runtime de Colab.
   Future<void> unassign(String sessionId) async {
-    final token = await _auth.getToken();
-    final url = Uri.parse(
-      'https://${ColabConfig.colabHost}/tun/m/$sessionId/unassign',
-    );
+    final url = _colabUri('/tun/m/$sessionId/unassign');
 
-    final response = await http.post(url, headers: {
-      'Authorization': 'Bearer $token',
-    });
+    final getResp = await http.get(url, headers: await _headers());
+    final getXsrf = _parseResponse(getResp);
+    final xsrfToken = getXsrf is Map ? getXsrf['token'] ?? '' : '';
 
-    if (response.statusCode != 200) {
-      throw Exception('Error desasignando: ${response.statusCode} ${response.body}');
+    final headers = await _headers();
+    if (xsrfToken.isNotEmpty) {
+      headers['X-Goog-Colab-Token'] = xsrfToken;
+    }
+
+    final postResp = await http.post(url, headers: headers);
+
+    if (postResp.statusCode != 200) {
+      throw Exception(
+          'Error desasignando: ${postResp.statusCode} ${postResp.body}');
     }
   }
 
   /// Keep-alive manual (un solo ping).
   Future<bool> keepAlivePing(String endpoint) async {
     try {
-      final token = await _auth.getToken();
-      final url = Uri.parse(
-        'https://${ColabConfig.colabHost}/tun/m/$endpoint/keep-alive/',
-      );
+      final headers = await _headers();
+      headers['X-Colab-Tunnel'] = 'Google';
 
-      final response = await http.get(url, headers: {
-        'Authorization': 'Bearer $token',
-        'X-Colab-Tunnel': 'Google',
-      }).timeout(ColabConfig.keepAliveTimeout);
+      final url = _colabUri('/tun/m/$endpoint/keep-alive/');
+      final response =
+          await http.get(url, headers: headers).timeout(ColabConfig.keepAliveTimeout);
 
       return response.statusCode < 400;
     } catch (_) {

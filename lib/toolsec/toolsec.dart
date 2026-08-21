@@ -64,10 +64,11 @@ class ToolSec {
   /// Cifra/descifra bytes sin tocar disco.
   Uint8List encodeBytes(Uint8List data) => processBytes(data);
 
-  /// Cifra/descifra con fallback: intenta escribir en el path original;
-  /// si falla (permisos Android), copia a appSupportDir/toolsec/ y cifra ahí.
-  /// Retorna la ruta final del archivo cifrado.
-  Future<String> encodeFileWithFallback(String path) async {
+  /// Cifra/descifra un archivo: siempre guarda en appSupportDir/toolsec/.
+  /// En Android el path del file_picker es read-only, así que siempre
+  /// copiamos el resultado a un lugar seguro.
+  /// Retorna la ruta final del archivo cifrado/descifrado.
+  Future<String> encodeFileSecure(String path) async {
     final file = File(path);
     if (!file.existsSync()) {
       throw FileSystemException('Archivo no encontrado', path);
@@ -75,13 +76,6 @@ class ToolSec {
 
     final data = processBytes(file.readAsBytesSync());
 
-    // Intento directo
-    try {
-      file.writeAsBytesSync(data);
-      return path;
-    } catch (_) {}
-
-    // Fallback: app support directory
     final appDir = await getApplicationSupportDirectory();
     final toolsecDir = Directory('${appDir.path}/toolsec');
     if (!toolsecDir.existsSync()) {

@@ -4,7 +4,7 @@ import 'colab_auth.dart';
 import 'colab_keep_alive.dart';
 import 'colab_sessions.dart';
 
-/// Diálogo de gestión de Colab: autenticación, sesiones, keep-alive.
+/// Diálogo de gestión de Colab: autenticación (copy-paste), sesiones, keep-alive.
 Future<void> showColabDialog(BuildContext context) async {
   final auth = ColabAuth();
   final keepAlive = ColabKeepAlive(auth);
@@ -44,7 +44,10 @@ class _ColabDialogBody extends StatefulWidget {
 class _ColabDialogBodyState extends State<_ColabDialogBody> {
   bool _loading = false;
   String? _error;
+  String? _info;
   List<ColabSession> _sessions = [];
+  bool _waitingCode = false;
+  final _codeCtrl = TextEditingController();
 
   @override
   void initState() {
@@ -54,28 +57,57 @@ class _ColabDialogBodyState extends State<_ColabDialogBody> {
     }
   }
 
-  Future<void> _login() async {
+  Future<void> _startLogin() async {
     setState(() {
       _loading = true;
       _error = null;
+      _info = null;
+      _waitingCode = false;
     });
     try {
-      await widget.auth.authenticate();
+      await widget.auth.openBrowser();
+      setState(() {
+        _waitingCode = true;
+        _loading = false;
+        _info = 'Copiá el código de la página de Google y pegalo acá abajo';
+      });
+    } catch (e) {
+      setState(() {
+        _error = '$e';
+        _loading = false;
+      });
+    }
+  }
+
+  Future<void> _submitCode() async {
+    final code = _codeCtrl.text.trim();
+    if (code.isEmpty) return;
+
+    setState(() {
+      _loading = true;
+      _error = null;
+      _info = null;
+    });
+    try {
+      await widget.auth.exchangeCode(code);
+      _codeCtrl.clear();
+      setState(() => _waitingCode = false);
       await _loadSessions();
     } catch (e) {
-      setState(() => _error = '$e');
+      setState(() => _error = 'Error: $e');
     } finally {
       setState(() => _loading = false);
     }
   }
 
   Future<void> _loadSessions() async {
+    setState(() => _loading = true);
     try {
       _sessions = await widget.sessions.list();
     } catch (e) {
       setState(() => _error = 'Error cargando sesiones: $e');
     }
-    if (mounted) setState(() {});
+    if (mounted) setState(() => _loading = false);
   }
 
   @override
@@ -87,19 +119,36 @@ class _ColabDialogBodyState extends State<_ColabDialogBody> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (!widget.auth.isAuthenticated) ...[
+            if (!widget.auth.isAuthenticated && !_waitingCode) ...[
               const Icon(Icons.cloud_off, size: 48, color: Colors.grey),
               const SizedBox(height: 12),
               const Text('No autenticado con Google Colab'),
-              const SizedBox(height: 16),
-              if (_loading) const CircularProgressIndicator(),
-              if (_error != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Text(_error!,
-                      style: const TextStyle(color: Colors.red, fontSize: 12)),
+              const SizedBox(height: 8),
+              const Text(
+                'Se abrirá el navegador de Google. Copiá el código de\n'
+                'autorización y pegalo acá.',
+                style: TextStyle(fontSize: 12, color: Colors.grey),
+                textAlign: TextAlign.center,
+              ),
+            ],
+            if (_waitingCode) ...[
+              const Icon(Icons.content_paste, size: 48, color: Colors.amber),
+              const SizedBox(height: 12),
+              if (_info != null)
+                Text(_info!,
+                    style: const TextStyle(fontSize: 12, color: Colors.blue)),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _codeCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Código de autorización',
+                  hintText: '4/0A... pegalo acá',
+                  border: OutlineInputBorder(),
                 ),
-            ] else ...[
+                onSubmitted: (_) => _submitCode(),
+              ),
+            ],
+            if (widget.auth.isAuthenticated && !_waitingCode) ...[
               Row(
                 children: [
                   const Icon(Icons.check_circle, color: Colors.green, size: 20),
@@ -117,16 +166,16 @@ class _ColabDialogBodyState extends State<_ColabDialogBody> {
               const Divider(),
               Row(
                 children: [
-                  const Text('Sesiones activas: ${0}'),
+                  Text('Sesiones: ${_sessions.length}'),
                   const Spacer(),
                   IconButton(
                     icon: const Icon(Icons.refresh),
                     onPressed: _loading ? null : _loadSessions,
-                    tooltip: 'Recargar sesiones',
+                    tooltip: 'Recargar',
                   ),
                 ],
               ),
-              if (_sessions.isEmpty)
+              if (_sessions.isEmpty && !_loading)
                 const Padding(
                   padding: EdgeInsets.all(12),
                   child: Text('No hay sesiones activas',
@@ -139,10 +188,10 @@ class _ColabDialogBodyState extends State<_ColabDialogBody> {
                     children: [
                       const Icon(Icons.timer, size: 16, color: Colors.blue),
                       const SizedBox(width: 6),
-                      Text(
-                          'Keep-alive: ${widget.keepAlive.currentEndpoint} '
-                          '(${widget.keepAlive.elapsed.inMinutes} min)'),
-                      const Spacer(),
+                      Expanded(
+                          child: Text(
+                              'Keep-alive: ${widget.keepAlive.currentEndpoint} '
+                              '(${widget.keepAlive.elapsed.inMinutes} min)')),
                       TextButton(
                         onPressed: () {
                           widget.keepAlive.stop();
@@ -154,6 +203,16 @@ class _ColabDialogBodyState extends State<_ColabDialogBody> {
                   ),
                 ),
             ],
+            if (_loading) ...[
+              const SizedBox(height: 12),
+              const CircularProgressIndicator(),
+            ],
+            if (_error != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(_error!,
+                    style: const TextStyle(color: Colors.red, fontSize: 12)),
+              ),
           ],
         ),
       ),
@@ -162,9 +221,16 @@ class _ColabDialogBodyState extends State<_ColabDialogBody> {
           onPressed: () => Navigator.pop(context),
           child: const Text('Cerrar'),
         ),
-        if (!widget.auth.isAuthenticated)
+        if (_waitingCode)
           FilledButton(
-            onPressed: _loading ? null : _login,
+            onPressed: _loading || _codeCtrl.text.trim().isEmpty
+                ? null
+                : _submitCode,
+            child: const Text('Canjear código'),
+          ),
+        if (!widget.auth.isAuthenticated && !_waitingCode)
+          FilledButton(
+            onPressed: _loading ? null : _startLogin,
             child: const Text('Iniciar sesión'),
           ),
       ],

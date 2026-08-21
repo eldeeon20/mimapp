@@ -40,12 +40,12 @@ class ColabTokens {
       );
 }
 
-/// Autenticación OAuth2 loopback (RFC 8252) contra Google Colab.
+/// Autenticación OAuth2 copy-paste (mismo flow que gcloud / google-colab-cli).
 ///
 /// Flujo:
-/// 1. Abre servidor HTTP en 127.0.0.1:8737
-/// 2. Abre navegador en URL de autorización
-/// 3. Captura el código de autorización
+/// 1. Genera URL de autorización con redirect al landing page de Google
+/// 2. Abre navegador → usuario copia el code de la landing page
+/// 3. Usuario pega el code en el diálogo
 /// 4. Canjea por access_token + refresh_token
 /// 5. Refresca automáticamente
 class ColabAuth {
@@ -54,38 +54,56 @@ class ColabAuth {
   ColabTokens? get tokens => _tokens;
   bool get isAuthenticated => _tokens != null;
 
-  /// Abre navegador y completa el flujo OAuth2.
-  /// Retorna los tokens si todo salió bien.
-  Future<ColabTokens> authenticate() async {
-    final state = _randomState();
+  /// Genera la URL de autorización para abrir en el navegador.
+  String buildAuthUrl() {
+    return '${ColabConfig.authUri}'
+        '?response_type=code'
+        '&client_id=${ColabConfig.clientId}'
+        '&redirect_uri=${Uri.encodeComponent(ColabConfig.remoteRedirect)}'
+        '&scope=${Uri.encodeComponent(ColabConfig.scopes)}'
+        '&access_type=offline'
+        '&prompt=consent'
+        '&token_usage=remote';
+  }
 
-    // Iniciar servidor local ANTES de abrir navegador
-    final server = await HttpServer.bind('127.0.0.1', 8737);
-    final codeFuture = _waitForCode(server, state);
+  /// Abre el navegador con la URL de autorización.
+  Future<void> openBrowser() async {
+    final url = Uri.parse(buildAuthUrl());
+    if (await canLaunchUrl(url)) {
+      await launchUrl(url, mode: LaunchMode.externalApplication);
+    }
+  }
 
-    // Abrir navegador con URL de autorización
-    final authUrl = Uri.parse(
-      '${ColabConfig.authUri}'
-      '?response_type=code'
-      '&client_id=${ColabConfig.clientId}'
-      '&redirect_uri=${Uri.encodeComponent(ColabConfig.redirect)}'
-      '&scope=${Uri.encodeComponent(ColabConfig.scopes)}'
-      '&access_type=offline'
-      '&prompt=consent'
-      '&state=$state',
+  /// Canjea el código de autorización (copiado del landing page) por tokens.
+  Future<ColabTokens> exchangeCode(String code) async {
+    final response = await http.post(
+      Uri.parse(ColabConfig.tokenUri),
+      body: {
+        'code': code.trim(),
+        'client_id': ColabConfig.clientId,
+        'client_secret': ColabConfig.clientSecret,
+        'redirect_uri': ColabConfig.remoteRedirect,
+        'grant_type': 'authorization_code',
+      },
     );
 
-    if (await canLaunchUrl(authUrl)) {
-      await launchUrl(authUrl, mode: LaunchMode.externalApplication);
+    if (response.statusCode != 200) {
+      throw Exception('Error canjeando código: ${response.body}');
     }
 
-    final code = await codeFuture;
+    final data = jsonDecode(response.body);
+    if (data['refresh_token'] == null) {
+      throw Exception('No se recibió refresh_token');
+    }
 
-    // Canjear código por tokens
-    final tokenData = await _exchangeCode(code);
-    _tokens = ColabTokens.fromJson(tokenData);
+    _tokens = ColabTokens(
+      accessToken: data['access_token'],
+      refreshToken: data['refresh_token'],
+      expiry: DateTime.now()
+          .add(Duration(seconds: data['expires_in'] ?? 3600)),
+      scopes: (data['scope'] as String?)?.split(' ') ?? [],
+    );
     await _saveTokens();
-
     return _tokens!;
   }
 
@@ -111,7 +129,8 @@ class ColabAuth {
     _tokens = ColabTokens(
       accessToken: data['access_token'],
       refreshToken: _tokens!.refreshToken,
-      expiry: DateTime.now().add(Duration(seconds: data['expires_in'] ?? 3600)),
+      expiry: DateTime.now()
+          .add(Duration(seconds: data['expires_in'] ?? 3600)),
       scopes: _tokens!.scopes,
     );
     await _saveTokens();
@@ -125,6 +144,16 @@ class ColabAuth {
       await refreshToken();
     }
     return _tokens!.accessToken;
+  }
+
+  /// Headers estándar para llamadas a Colab.
+  Future<Map<String, String>> authHeaders() async {
+    final token = await getToken();
+    return {
+      'Authorization': 'Bearer $token',
+      'Accept': 'application/json',
+      'X-Colab-Client-Agent': 'colab-cli',
+    };
   }
 
   /// Carga tokens desde disco (si existen).
@@ -143,7 +172,7 @@ class ColabAuth {
   /// Guarda tokens en disco.
   Future<void> _saveTokens() async {
     if (_tokens == null) return;
-    final dir = Directory('${await _configDir}');
+    final dir = Directory(await _configDir);
     if (!dir.existsSync()) dir.createSync(recursive: true);
     final file = File('${dir.path}/colab_tokens.json');
     await file.writeAsString(jsonEncode(_tokens!.toJson()));
@@ -156,85 +185,8 @@ class ColabAuth {
     if (await file.exists()) await file.delete();
   }
 
-  // --- Internos ---
-
   Future<String> get _configDir async {
     final appDir = await getApplicationSupportDirectory();
     return '${appDir.path}/colab';
-  }
-
-  String _randomState() {
-    final random = DateTime.now().microsecondsSinceEpoch.toRadixString(36);
-    return '$random${random.hashCode.toRadixString(36)}';
-  }
-
-  /// Espera UNA request del navegador en el servidor local.
-  Future<String> _waitForCode(HttpServer server, String expectedState) async {
-    final completer = Completer<String>();
-
-    server.timeout(const Duration(minutes: 5), onTimeout: (_) {
-      server.close();
-      if (!completer.isCompleted) {
-        completer.completeError(TimeoutException('Tiempo agotado esperando autorización'));
-      }
-    });
-
-    server.listen((request) {
-      final code = request.uri.queryParameters['code'];
-      final state = request.uri.queryParameters['state'];
-
-      // Responder al navegador
-      request.response.headers.contentType = ContentType.html;
-      if (code != null && state == expectedState) {
-        request.response.write('<html><body><h2>Autenticado.</h2>'
-            '<p>Cerrá esta ventana.</p></body></html>');
-        request.response.close();
-        server.close();
-        if (!completer.isCompleted) completer.complete(code);
-      } else {
-        request.response.write('<html><body><h2>Error</h2>'
-            '<p>${state != expectedState ? 'State inválido' : 'Código faltante'}</p>'
-            '</body></html>');
-        request.response.close();
-        server.close();
-        if (!completer.isCompleted) {
-          completer.completeError(Exception('State mismatch o código faltante'));
-        }
-      }
-    });
-
-    return completer.future;
-  }
-
-  /// Canjea código de autorización por tokens.
-  Future<Map<String, dynamic>> _exchangeCode(String code) async {
-    final response = await http.post(
-      Uri.parse(ColabConfig.tokenUri),
-      body: {
-        'code': code,
-        'client_id': ColabConfig.clientId,
-        'client_secret': ColabConfig.clientSecret,
-        'redirect_uri': ColabConfig.redirect,
-        'grant_type': 'authorization_code',
-      },
-    );
-
-    if (response.statusCode != 200) {
-      throw Exception('Error canjeando código: ${response.body}');
-    }
-
-    final data = jsonDecode(response.body);
-    if (data['refresh_token'] == null) {
-      throw Exception('No se recibió refresh_token');
-    }
-
-    return {
-      'access_token': data['access_token'],
-      'refresh_token': data['refresh_token'],
-      'expiry': DateTime.now()
-          .add(Duration(seconds: data['expires_in'] ?? 3600))
-          .toIso8601String(),
-      'scopes': (data['scope'] as String?)?.split(' ') ?? [],
-    };
   }
 }

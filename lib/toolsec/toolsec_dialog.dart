@@ -117,7 +117,7 @@ Future<void> showToolSecDialog(BuildContext context) async {
                     try {
                       final ts = ToolSec(seedCtrl.text);
                       final outPath =
-                          await ts.encodeFileWithFallback(filePath!);
+                          await ts.encodeFileSecure(filePath!);
                       final bytes =
                           await File(outPath).readAsBytes();
                       final preview = bytes
@@ -126,13 +126,8 @@ Future<void> showToolSecDialog(BuildContext context) async {
                               b.toRadixString(16).padLeft(2, '0'))
                           .join(' ');
                       setDlgState(() {
-                        if (outPath == filePath) {
-                          resultMsg =
-                              'Listo: $fileName procesado en el mismo archivo';
-                        } else {
-                          resultMsg =
-                              'Guardado en: ${outPath.split('/').last}';
-                        }
+                        resultMsg =
+                            'Guardado en: ${outPath.split('/').last}';
                         hexPreview = preview;
                       });
                     } catch (e) {
