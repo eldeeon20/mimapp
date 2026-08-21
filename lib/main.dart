@@ -10,7 +10,18 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   MediaKit.ensureInitialized();
-  await RustLib.init();
-  await ColabService().init();
+
+  try {
+    await RustLib.init();
+  } catch (e) {
+    debugPrint('Rust init error: $e');
+  }
+
+  try {
+    await ColabService().init();
+  } catch (e) {
+    debugPrint('ColabService init error: $e');
+  }
+
   runApp(const PrApp());
 }
