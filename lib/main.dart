@@ -23,7 +23,7 @@ Future<void> main() async {
   } catch (_) {}
   MediaKit.ensureInitialized();
 
-  await _initNotifications();
+  // await _initNotifications();
   await _initBackgroundService();
 
   try {
