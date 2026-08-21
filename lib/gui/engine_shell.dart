@@ -44,7 +44,6 @@ class _EngineShellState extends State<EngineShell> {
   @override
   void initState() {
     super.initState();
-    MediaKit.ensureInitialized();
     _mediaPlayer = MediaPlayer();
     _laurelia = LaureliaChat();
   }
