@@ -19,7 +19,6 @@ class PrApp extends StatelessWidget {
       title: 'Secure App',
       theme: ThemeData.dark().copyWith(
         scaffoldBackgroundColor: const Color(0xFF020617),
-        fontFamily: 'Arial',
       ),
       home: const HomePage(),
     );
