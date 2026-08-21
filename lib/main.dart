@@ -32,11 +32,11 @@ Future<void> main() async {
     debugPrint('Rust init error: $e');
   }
 
-  try {
-    await ColabService().init();
-  } catch (e) {
-    debugPrint('ColabService init error: $e');
-  }
+  // try {
+  //   await ColabService().init();
+  // } catch (e) {
+  //   debugPrint('ColabService init error: $e');
+  // }
 
   runApp(const PrApp());
 }
