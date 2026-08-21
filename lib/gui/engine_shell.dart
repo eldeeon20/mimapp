@@ -10,8 +10,8 @@ import '../media/media_player.dart';
 import '../toolsec/toolsec_dialog.dart';
 import '../ai/laurelia_chat.dart';
 import '../widgets/gui_renderer.dart';
-import 'ai_screen.dart';
-import 'media_screen.dart';
+import '../screens/ai_screen.dart';
+import '../screens/media_screen.dart';
 
 /// Shell principal: home con 3 herramientas + ToolSec/Colab en AppBar.
 class PrApp extends StatelessWidget {
