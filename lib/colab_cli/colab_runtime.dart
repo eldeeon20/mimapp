@@ -161,43 +161,26 @@ class ColabRuntime {
     return <String, dynamic>{};
   }
 
-  /// Parsea frame binario v1 de Jupyter sobre WS:
-  /// 6 bytes magic (0x00) + HMAC(32) + frames con longitud de 4 bytes (BE).
-  /// El primer frame ZMQ es un delimitador vacío y se salta.
+  /// Frame binario del protocolo DEFAULT (jupyter_kernel_client/utils.py):
+  /// [4B BE nbufs][nbufs x 4B BE offsets] donde el JSON va de offsets[0]
+  /// a offsets[1] y el resto son buffers binarios.
   Map<String, dynamic>? _parseBinary(List<int> b) {
     try {
-      var off = 0;
-      if (b.length >= 38 &&
-          b[0] == 0 &&
-          b[1] == 0 &&
-          b[2] == 0 &&
-          b[3] == 0 &&
-          b[4] == 0 &&
-          b[5] == 0) {
-        off = 38; // magic (6) + HMAC (32)
+      if (b.length < 8) return null;
+      final nbufs = _be32(b, 0);
+      if (nbufs < 2 || 4 * (nbufs + 1) > b.length) return null;
+      final offsets = [for (var i = 0; i < nbufs; i++) _be32(b, 4 * (i + 1))];
+      final jsonStart = offsets[0];
+      final jsonStop = offsets[1];
+      if (jsonStart < 0 || jsonStart > jsonStop || jsonStop > b.length) {
+        return null;
       }
-      final frames = <List<int>>[];
-      while (off + 4 <= b.length) {
-        final len = _be32(b, off);
-        off += 4;
-        if (len < 0 || off + len > b.length) break;
-        frames.add(b.sublist(off, off + len));
-        off += len;
-      }
-      if (frames.length < 4) return null;
-      var idx = 0;
-      if (frames[0].isEmpty) idx = 1; // salta delimitador
-      final header = jsonDecode(utf8.decode(frames[idx])) as Map<String, dynamic>;
-      final parent = (idx + 1 < frames.length)
-          ? jsonDecode(utf8.decode(frames[idx + 1])) as Map<String, dynamic>
-          : <String, dynamic>{};
-      final content = (idx + 3 < frames.length)
-          ? jsonDecode(utf8.decode(frames[idx + 3])) as Map<String, dynamic>
-          : <String, dynamic>{};
+      final msg =
+          jsonDecode(utf8.decode(b.sublist(jsonStart, jsonStop))) as Map;
       return <String, dynamic>{
-        'header': header,
-        'content': content,
-        '_parent': parent,
+        'header': _asMap(msg['header']),
+        'content': _asMap(msg['content']),
+        '_parent': _asMap(msg['parent_header']),
       };
     } catch (_) {
       return null;
@@ -225,8 +208,11 @@ class ColabRuntime {
       if (last != null && (last.output.isNotEmpty || last.isError)) {
         return last;
       }
-      // Sin salida: recreamos kernel + WS y reintentamos.
+      // Sin salida: cerramos y recreamos kernel + WS y reintentamos.
       _started = false;
+      try {
+        await _channel?.sink.close();
+      } catch (_) {}
       _channel = null;
     }
     return last ?? ColabExecResult();
@@ -312,8 +298,10 @@ class ColabRuntime {
       {String? msgId}) {
     final id = msgId ?? _uuid();
     final now = DateTime.now().toUtc().toIso8601String().replaceAll('000Z', 'Z');
-    final frame = [
-      {
+    // Protocolo DEFAULT de jupyter_server: UN objeto JSON con campo `channel`.
+    // (jupyter_kernel_client/wsclient.py:226 msg['channel'] = channel)
+    final msg = <String, dynamic>{
+      'header': {
         'msg_id': id,
         'username': 'pr_app',
         'session': _sessionId,
@@ -321,12 +309,13 @@ class ColabRuntime {
         'msg_type': type,
         'version': '5.3',
       },
-      {},
-      {},
-      content,
-      [],
-    ];
-    _channel!.sink.add(jsonEncode(frame));
+      'parent_header': <String, dynamic>{},
+      'metadata': <String, dynamic>{},
+      'content': content,
+      'buffers': <dynamic>[],
+      'channel': channel,
+    };
+    _channel!.sink.add(jsonEncode(msg));
   }
 
   Future<void> close() async {
