@@ -99,9 +99,22 @@ class ColabRuntime {
     // Listener ÚNICO: enruta todos los frames al router _msgs.
     _channel!.stream.listen(
       _onFrame,
-      onError: (e) => _msgs.add({'__error': true, 'text': e.toString()}),
+      onError: (e) {
+        // Canal muerto: lo marcamos para forzar reconexión en el próximo execute.
+        if (!_closedByUs) {
+          _started = false;
+          _channel = null;
+        }
+        _msgs.add({'__error': true, 'text': e.toString()});
+      },
       onDone: () {
-        if (!_closedByUs) _msgs.add({'__closed': true});
+        if (!_closedByUs) {
+          // Colab cerró el WS (inactividad / rotación de token). Reset para
+          // que el próximo execute() recree el kernel + WS (evita el cuelgue).
+          _started = false;
+          _channel = null;
+          _msgs.add({'__closed': true});
+        }
       },
     );
     await _channel!.ready;
@@ -110,79 +123,117 @@ class ColabRuntime {
 
   void _onFrame(dynamic raw) {
     try {
-      Map<String, dynamic> msg;
-      if (raw is String) {
-        final decoded = jsonDecode(raw);
-        if (decoded is List && decoded.length >= 4) {
-          msg = <String, dynamic>{
-            'header': decoded[0],
-            'content': Map<String, dynamic>.from(decoded[3] as Map),
-            '_parent': decoded[1],
-          };
-        } else {
-          return;
-        }
-      } else if (raw is List<int>) {
-        final parsed = _parseBinary(raw);
-        if (parsed == null) return;
-        msg = parsed;
-      } else {
-        return;
-      }
-      _msgs.add(msg);
+      final msg = _decodeFrame(raw);
+      if (msg != null) _msgs.add(msg);
     } catch (_) {
       // Frame no parseable: ignorar.
     }
   }
 
-  /// Parsea frame binario (v1) devolviendo {content, header, _parent, ...}.
-  Map<String, dynamic>? _parseBinary(List<int> b) {
-    try {
-      if (b.length >= 16) {
-        final n = _le64(b, 0);
-        if (n >= 4 && 8 * (n + 1) <= b.length) {
-          final offs = [for (var i = 0; i < n; i++) _le64(b, 8 * (i + 1))];
-          if (offs.last <= b.length) {
-            List<int> seg(int i) =>
-                (offs[i] < offs[i + 1] && offs[i + 1] <= b.length)
-                    ? b.sublist(offs[i], offs[i + 1])
-                    : const <int>[];
-            final header =
-                jsonDecode(utf8.decode(seg(0))) as Map<String, dynamic>;
-            final parent =
-                jsonDecode(utf8.decode(seg(1))) as Map<String, dynamic>;
-            final content =
-                jsonDecode(utf8.decode(seg(3))) as Map<String, dynamic>;
-            return <String, dynamic>{
-              'header': header,
-              'content': content,
-              '_parent': parent,
-            };
-          }
-        }
+  /// Decodifica un frame (texto lista, texto mapa o binario v1) en
+  /// {header, content, _parent}. Devuelve null si no se entiende.
+  Map<String, dynamic>? _decodeFrame(dynamic raw) {
+    if (raw is String) {
+      final decoded = jsonDecode(raw);
+      if (decoded is List && decoded.length >= 4) {
+        return <String, dynamic>{
+          'header': _asMap(decoded[0]),
+          'content': _asMap(decoded[3]),
+          '_parent': _asMap(decoded[1]),
+        };
+      } else if (decoded is Map) {
+        // Variante Colab: objeto {header, parent_header, metadata, content}.
+        return <String, dynamic>{
+          'header': _asMap(decoded['header']),
+          'content': _asMap(decoded['content']),
+          '_parent': _asMap(decoded['parent_header'] ?? decoded['parent']),
+        };
       }
-    } catch (_) {}
+      return <String, dynamic>{'__raw': raw.toString()};
+    } else if (raw is List<int>) {
+      return _parseBinary(raw);
+    }
     return null;
   }
 
-  static int _le64(List<int> b, int off) {
-    var v = 0;
-    for (var i = 0; i < 8; i++) {
-      v |= b[off + i] << (8 * i);
+  static Map<String, dynamic> _asMap(dynamic v) {
+    if (v is Map) return Map<String, dynamic>.from(v);
+    return <String, dynamic>{};
+  }
+
+  /// Parsea frame binario v1 de Jupyter sobre WS:
+  /// 6 bytes magic (0x00) + HMAC(32) + frames con longitud de 4 bytes (BE).
+  /// El primer frame ZMQ es un delimitador vacío y se salta.
+  Map<String, dynamic>? _parseBinary(List<int> b) {
+    try {
+      var off = 0;
+      if (b.length >= 38 &&
+          b[0] == 0 &&
+          b[1] == 0 &&
+          b[2] == 0 &&
+          b[3] == 0 &&
+          b[4] == 0 &&
+          b[5] == 0) {
+        off = 38; // magic (6) + HMAC (32)
+      }
+      final frames = <List<int>>[];
+      while (off + 4 <= b.length) {
+        final len = _be32(b, off);
+        off += 4;
+        if (len < 0 || off + len > b.length) break;
+        frames.add(b.sublist(off, off + len));
+        off += len;
+      }
+      if (frames.length < 4) return null;
+      var idx = 0;
+      if (frames[0].isEmpty) idx = 1; // salta delimitador
+      final header = jsonDecode(utf8.decode(frames[idx])) as Map<String, dynamic>;
+      final parent = (idx + 1 < frames.length)
+          ? jsonDecode(utf8.decode(frames[idx + 1])) as Map<String, dynamic>
+          : <String, dynamic>{};
+      final content = (idx + 3 < frames.length)
+          ? jsonDecode(utf8.decode(frames[idx + 3])) as Map<String, dynamic>
+          : <String, dynamic>{};
+      return <String, dynamic>{
+        'header': header,
+        'content': content,
+        '_parent': parent,
+      };
+    } catch (_) {
+      return null;
     }
-    return v;
+  }
+
+  static int _be32(List<int> b, int off) {
+    return (b[off] << 24) | (b[off + 1] << 16) | (b[off + 2] << 8) | b[off + 3];
   }
 
   Future<ColabExecResult> execute(
     String code, {
     Duration timeout = const Duration(minutes: 10),
   }) async {
-    if (!_started || _channel == null) await start();
-    return _executeWithRetry(code, timeout, 1);
+    ColabExecResult? last;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      if (!_started || _channel == null) await start();
+      try {
+        last = await _executeWithRetry(code, timeout);
+      } catch (e) {
+        last = ColabExecResult()
+          ..errorBuf.writeln('WS error: $e')
+          ..status = 'error';
+      }
+      if (last != null && (last.output.isNotEmpty || last.isError)) {
+        return last;
+      }
+      // Sin salida: recreamos kernel + WS y reintentamos.
+      _started = false;
+      _channel = null;
+    }
+    return last ?? ColabExecResult();
   }
 
   Future<ColabExecResult> _executeWithRetry(
-      String code, Duration timeout, int retries) async {
+      String code, Duration timeout) async {
     final result = ColabExecResult();
     final msgId = _uuid();
     _send('shell', 'execute_request', {
@@ -199,29 +250,29 @@ class ColabRuntime {
     sub = _msgs.stream.listen((msg) {
       if (msg['__closed'] == true) {
         if (!completer.isCompleted) completer.complete();
+        unawaited(sub.cancel());
         return;
       }
       if (msg['__error'] == true) {
         result.errorBuf.writeln('WS error: ${msg['text']}');
         result.status = 'error';
         if (!completer.isCompleted) completer.complete();
+        unawaited(sub.cancel());
         return;
       }
       final header = (msg['header'] ?? msg) as Map<String, dynamic>? ?? {};
       final content = msg['content'] as Map<String, dynamic>? ?? {};
       final type = header['msg_type'] ?? msg['msg_type'];
-      final parent = msg['_parent'];
-      final ours = parent is Map && parent['msg_id'] == msgId;
 
       switch (type) {
         case 'stream':
-          result.stdoutBuf.write('${content['text']}');
+          result.stdoutBuf.write('${content['text'] ?? ''}');
           break;
         case 'execute_result':
         case 'display_data':
           final dataMap = content['data'] ?? {};
           final text = dataMap['text/plain'];
-          if (text is String && ours) result.results.add(text);
+          if (text is String) result.results.add(text);
           break;
         case 'error':
           final tb = content['traceback'];
@@ -229,21 +280,19 @@ class ColabRuntime {
           result.status = 'error';
           break;
         case 'status':
-          if (content['execution_state'] == 'idle' && ours) {
+          if (content['execution_state'] == 'idle') {
             if (!completer.isCompleted) completer.complete();
             unawaited(sub.cancel());
           }
           break;
         case 'execute_reply':
-          if (ours) {
-            final st = content['status'];
-            if (st == 'error' || st == 'abort') result.status = 'error';
-            if (!completer.isCompleted) completer.complete();
-            unawaited(sub.cancel());
-          }
+          final st = content['status'];
+          if (st == 'error' || st == 'abort') result.status = 'error';
+          if (!completer.isCompleted) completer.complete();
+          unawaited(sub.cancel());
           break;
         case 'error_output':
-          result.stderrBuf.write('${content['text']}');
+          result.stderrBuf.write('${content['text'] ?? ''}');
           break;
       }
     });
@@ -256,21 +305,7 @@ class ColabRuntime {
       await sub.cancel();
     }
 
-    // Si el canal se cerró y no hubo salida, reconectamos 1 vez.
-    if (retries > 0 && !completer.isCompleted && result.output.isEmpty) {
-      await _reconnect();
-      return _executeWithRetry(code, timeout, retries - 1);
-    }
     return result;
-  }
-
-  Future<void> _reconnect() async {
-    try {
-      await _channel?.sink.close();
-    } catch (_) {}
-    _channel = null;
-    _started = false;
-    await start();
   }
 
   void _send(String channel, String type, Map<String, dynamic> content,

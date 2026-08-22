@@ -225,7 +225,6 @@ class MediaPlayer extends BaseAudioHandler with SeekHandler {
     return MediaItem(
       id: path,
       title: _titleOf(path),
-      artist: 'Secure App',
     );
   }
 
