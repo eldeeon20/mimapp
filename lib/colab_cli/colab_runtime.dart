@@ -208,12 +208,13 @@ class ColabRuntime {
   Future<ColabExecResult> execute(
     String code, {
     Duration timeout = const Duration(minutes: 10),
+    void Function(String partial)? onTick,
   }) async {
     ColabExecResult? last;
     for (var attempt = 0; attempt < 3; attempt++) {
       if (!_started || _channel == null) await start();
       try {
-        last = await _executeWithRetry(code, timeout);
+        last = await _executeWithRetry(code, timeout, onTick: onTick);
       } catch (e) {
         last = ColabExecResult()
           ..errorBuf.writeln('WS error: $e')
@@ -243,7 +244,8 @@ class ColabRuntime {
   }
 
   Future<ColabExecResult> _executeWithRetry(
-      String code, Duration timeout) async {
+      String code, Duration timeout,
+      {void Function(String partial)? onTick}) async {
     final result = ColabExecResult();
     final msgId = _uuid();
     _send('shell', 'execute_request', {
@@ -280,17 +282,22 @@ class ColabRuntime {
       switch (type) {
         case 'stream':
           result.stdoutBuf.write('${content['text'] ?? ''}');
+          onTick?.call(result.output);
           break;
         case 'execute_result':
         case 'display_data':
           final dataMap = content['data'] ?? {};
           final text = dataMap['text/plain'];
-          if (text is String) result.results.add(text);
+          if (text is String) {
+            result.results.add(text);
+            onTick?.call(result.output);
+          }
           break;
         case 'error':
           final tb = content['traceback'];
           if (tb is List) result.errorBuf.writeln(tb.join('\n'));
           result.status = 'error';
+          onTick?.call(result.output);
           break;
         case 'status':
           if (content['execution_state'] == 'idle') {
@@ -306,6 +313,7 @@ class ColabRuntime {
           break;
         case 'error_output':
           result.stderrBuf.write('${content['text'] ?? ''}');
+          onTick?.call(result.output);
           break;
       }
     });

@@ -84,7 +84,15 @@ print("Python:", sys.version.split()[0])''';
       cell.output = '';
     });
     try {
-      final res = await _runtime.execute(cell.code.text);
+      final res = await _runtime.execute(
+        cell.code.text,
+        onTick: (partial) {
+          // Salida EN VIVO: se pinta a medida que el kernel emite mensajes.
+          if (partial.isNotEmpty && mounted) {
+            setState(() => cell.output = partial);
+          }
+        },
+      );
       setState(() {
         cell.output = res.output.isEmpty ? '(sin salida)' : res.output;
         cell.status = res.isError ? 'error' : 'ok';
