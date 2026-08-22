@@ -2,12 +2,14 @@ import 'package:flutter/material.dart';
 
 import '../ai/laurelia_chat.dart';
 import '../lua/lua_controller.dart';
+import '../lua/gui_runtime.dart';
 import '../lua/page_model.dart';
 import '../lua/page_registry.dart';
 import '../media/media_player.dart';
-import '../widgets/gui_renderer.dart';
 
-/// Herramienta Lua: motor Lua que puede llamar a Media y Laurelia.
+/// Herramienta Lua (variante de _LuaTool en engine_shell). Orquesta
+/// [LuaController] + [GuiRuntime]; los valores actualizan solo el nodo
+/// enlazado, no todo el árbol.
 class LuaPage extends StatefulWidget {
   final MediaPlayer mediaPlayer;
   final LaureliaChat laurelia;
@@ -20,8 +22,8 @@ class LuaPage extends StatefulWidget {
 
 class _LuaPageState extends State<LuaPage> {
   final _controller = LuaController();
+  late final GuiRuntime _runtime;
   final _urlController = TextEditingController();
-  PageModel? _page;
   String? _pageName;
   bool _loading = false;
   String? _error;
@@ -29,17 +31,13 @@ class _LuaPageState extends State<LuaPage> {
   @override
   void initState() {
     super.initState();
+    _runtime = GuiRuntime(store: _controller.store);
     _controller.mediaPlayer = widget.mediaPlayer;
     _controller.laureliaChat = widget.laurelia;
-    _controller.onUpdate = (_, __) => setState(() {});
     _controller.onNavigate = _loadPageByName;
-    widget.mediaPlayer.onPush = (id, value) {
-      _controller.setInputValue(id, value);
-      if (mounted) setState(() {});
-    };
-    widget.laurelia.onProgress = (_) {
-      if (mounted) setState(() {});
-    };
+    widget.mediaPlayer.onPush =
+        (id, value) => _controller.setInputValue(id, value);
+    widget.laurelia.onProgress = null;
     _loadPageByName('demo');
   }
 
@@ -68,7 +66,8 @@ class _LuaPageState extends State<LuaPage> {
     try {
       final page = await _controller.loadFromAsset(asset);
       if (!mounted) return;
-      setState(() => _page = page);
+      _runtime.setTree(page.body);
+      setState(() {});
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = '$e');
@@ -87,10 +86,8 @@ class _LuaPageState extends State<LuaPage> {
     try {
       final page = await _controller.loadFromUrl(url);
       if (!mounted) return;
-      setState(() {
-        _page = page;
-        _pageName = null;
-      });
+      _runtime.setTree(page.body);
+      setState(() => _pageName = null);
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = 'No se pudo cargar: $e');
@@ -139,24 +136,14 @@ class _LuaPageState extends State<LuaPage> {
                 style: TextStyle(color: Theme.of(context).colorScheme.error)),
           ),
         Expanded(
-          child: _page == null
+          child: _runtime.nodes.isEmpty
               ? const Center(child: Text('Sin página'))
-              : ListView(
-                  padding: const EdgeInsets.all(12),
-                  children: [
-                    for (final node in _page!.body)
-                      GuiRenderer.build(
-                        context,
-                        node,
-                        values: _controller.values,
-                        onInput: (id, value) {
-                          _controller.setInputValue(id, value);
-                          setState(() {});
-                        },
-                        onAction: (name) => _controller.invokeHandler(name),
-                        videoController: widget.mediaPlayer.videoController,
-                      ),
-                  ],
+              : _runtime.build(
+                  context,
+                  onInput: (id, value) =>
+                      _controller.setInputValue(id, value),
+                  onAction: (name) => _controller.invokeHandler(name),
+                  videoController: widget.mediaPlayer.videoController,
                 ),
         ),
       ],

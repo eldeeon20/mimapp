@@ -6,10 +6,10 @@ import '../colab_cli/colab_dialog.dart';
 import '../lua/lua_controller.dart';
 import '../lua/page_model.dart';
 import '../lua/page_registry.dart';
+import '../lua/gui_runtime.dart';
 import '../media/media_player.dart';
 import '../toolsec/toolsec_dialog.dart';
 import '../ai/laurelia_chat.dart';
-import '../widgets/gui_renderer.dart';
 import '../screens/ai_screen.dart';
 import '../screens/media_screen.dart';
 
@@ -187,7 +187,9 @@ class _ToolCard extends StatelessWidget {
   }
 }
 
-/// Herramienta Lua: motor Lua que puede llamar a Media y Laurelia.
+/// Herramienta Lua. Ya NO es el "engine": solo orquesta [LuaController] y
+/// [GuiRuntime]. Los valores (engine_set) actualizan solo el nodo enlazado;
+/// aquí solo hacemos setState en cambios ESTRUCTURALES (navigate/load).
 class _LuaTool extends StatefulWidget {
   final MediaPlayer mediaPlayer;
   final LaureliaChat laurelia;
@@ -200,8 +202,8 @@ class _LuaTool extends StatefulWidget {
 
 class _LuaToolState extends State<_LuaTool> {
   final _controller = LuaController();
+  late final GuiRuntime _runtime;
   final _urlController = TextEditingController();
-  PageModel? _page;
   String? _pageName;
   bool _loading = false;
   String? _error;
@@ -209,20 +211,17 @@ class _LuaToolState extends State<_LuaTool> {
   @override
   void initState() {
     super.initState();
+    // Mismo store: engine_set escribe y los nodos enlazados escuchan.
+    _runtime = GuiRuntime(store: _controller.store);
     _controller.mediaPlayer = widget.mediaPlayer;
     _controller.laureliaChat = widget.laurelia;
-    _controller.onUpdate = (_, __) => setState(() {});
     _controller.onNavigate = _loadPageByName;
-    widget.mediaPlayer.onChanged = () {
-      if (mounted) setState(() {});
-    };
-    widget.mediaPlayer.onPush = (id, value) {
-      _controller.setInputValue(id, value);
-      if (mounted) setState(() {});
-    };
-    widget.laurelia.onProgress = (_) {
-      if (mounted) setState(() {});
-    };
+    // El player empuja valores al store (sin setState global). El renderer
+    // de ese nodo se repinta solo.
+    widget.mediaPlayer.onPush = (id, value) =>
+        _controller.setInputValue(id, value);
+    // Laurelia ya escribe en el store desde el controller; nada que hacer aquí.
+    widget.laurelia.onProgress = null;
     _loadPageByName('demo');
   }
 
@@ -251,7 +250,9 @@ class _LuaToolState extends State<_LuaTool> {
     try {
       final page = await _controller.loadFromAsset(asset);
       if (!mounted) return;
-      setState(() => _page = page);
+      // STRUCTURAL: cambia el árbol (raro, no por cada engine_set).
+      _runtime.setTree(page.body);
+      setState(() {});
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = '$e');
@@ -270,8 +271,8 @@ class _LuaToolState extends State<_LuaTool> {
     try {
       final page = await _controller.loadFromUrl(url);
       if (!mounted) return;
+      _runtime.setTree(page.body);
       setState(() {
-        _page = page;
         _pageName = null;
       });
     } catch (e) {
@@ -322,25 +323,13 @@ class _LuaToolState extends State<_LuaTool> {
                 style: TextStyle(color: Theme.of(context).colorScheme.error)),
           ),
         Expanded(
-          child: _page == null
+          child: _runtime.nodes.isEmpty
               ? const Center(child: Text('Sin página'))
-              : ListView(
-                  padding: const EdgeInsets.all(12),
-                  children: [
-                    for (final node in _page!.body)
-                      GuiRenderer.build(
-                        context,
-                        node,
-                        values: _controller.values,
-                        onInput: (id, value) {
-                          _controller.setInputValue(id, value);
-                          setState(() {});
-                        },
-                        onAction: (name) =>
-                            _controller.invokeHandler(name),
-                        videoController: widget.mediaPlayer.videoController,
-                      ),
-                  ],
+              : _runtime.build(
+                  context,
+                  onInput: (id, value) => _controller.setInputValue(id, value),
+                  onAction: (name) => _controller.invokeHandler(name),
+                  videoController: widget.mediaPlayer.videoController,
                 ),
         ),
       ],

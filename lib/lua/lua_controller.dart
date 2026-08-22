@@ -9,19 +9,36 @@ import '../ai/laurelia_chat.dart';
 import '../media/media_player.dart';
 import '../widgets/gui_node.dart';
 import 'page_model.dart';
+import 'state_store.dart';
+
+part 'lua_rust.dart';
+part 'lua_player.dart';
+part 'lua_laurelia.dart';
 
 /// Controlador Lua: lee la página desde Lua y controla los bucles (recorrido
 /// de `page.body`) y las llamadas (handlers Lua y funciones Rust).
 ///
 /// Lua puede llamar a:
 ///   - engine_get(id)               -> leer el valor actual de un widget
-///   - engine_set(id, valor)        -> actualizar un widget (re-render)
-///   - navigate("página")           -> cambiar de página
+///   - engine_set(id, valor)        -> actualizar un widget (VALUE update)
+///   - navigate("página")           -> cambiar de página (STRUCTURAL update)
 ///   - gui_* (guión inyectado)      -> construir la GUI llamando funciones
 ///   - rust_greet / rust_sum / rust_fibonacci -> llamar a Rust
+///
+/// Solo Lua toca el motor: cualquier cambio de valor pasa por [engine_set]
+/// y cae en [StateStore]. NO hay setState global; el nodo enlazado se
+/// reconstruye solo (ver [GuiRuntime]).
+///
+/// El archivo está dividido en partes:
+///   - lua_rust.dart     (globals rust_*)
+///   - lua_player.dart   (globals player_*)
+///   - lua_laurelia.dart (globals laurelia_*)
 class LuaController {
   late LuaState _lua;
-  final Map<String, String> _values = {};
+
+  /// Estado de la GUI. Es el ÚNICO lugar donde viven los valores; se
+  /// actualiza vía engine_set (o funciones que llaman a engine_set).
+  final StateStore store = StateStore();
 
   /// Guión inyectado antes del script del usuario. Define la API `gui_*`
   /// (Godot-like): Lua construye la GUI llamando funciones en vez de
@@ -62,15 +79,18 @@ end
   /// Llamado por `navigate()` para cambiar de página.
   void Function(String page)? onNavigate;
 
-  /// Llamado por engine_set para que la UI se re-renderice.
-  void Function(String id, String value)? onUpdate;
+  // Estado de tokens/vocab para los handlers laurelia_* (ver lua_laurelia.dart).
+  Future<String>? _pendingGen;
+  String _pendingGenId = '';
+  int _lastTokenCount = -1;
+  int _lastVocab = -1;
 
-  Map<String, String> get values => _values;
-
-  void setInputValue(String id, String value) => _values[id] = value;
+  /// Actualiza un valor (vía engine_set o internamente). Solo parchea el
+  /// nodo enlazado; no reconstruye el árbol.
+  void setInputValue(String id, String value) => store.set(id, value);
 
   void dispose() {
-    _values.clear();
+    store.clear();
   }
 
   /// Carga una página desde un asset empaquetado.
@@ -108,7 +128,7 @@ end
 
   /// Ejecuta el script Lua, recorre `page.body` (bucle) y devuelve el modelo.
   PageModel load(String code) {
-    _values.clear();
+    store.clear();
     _lua = LuaState.newState();
     _lua.openLibs();
     _registerGlobals();
@@ -143,32 +163,9 @@ end
     _registerSync('engine_get', _luaEngineGet);
     _registerSync('engine_set', _luaEngineSet);
     _registerSync('navigate', _luaNavigate);
-    _registerSync('rust_greet', _luaRustGreet);
-    _registerSync('rust_sum', _luaRustSum);
-    _registerSync('rust_fibonacci', _luaRustFibonacci);
-    if (mediaPlayer != null) {
-      _registerSync('player_pick', _luaPlayerPick);
-      _registerSync('player_open', _luaPlayerOpen);
-      _registerSync('player_play', _luaPlayerPlay);
-      _registerSync('player_pause', _luaPlayerPause);
-      _registerSync('player_toggle', _luaPlayerToggle);
-      _registerSync('player_stop', _luaPlayerStop);
-      _registerSync('player_status', _luaPlayerStatus);
-    }
-    if (laureliaChat != null) {
-      _registerSync('laurelia_download', _luaLaureliaDownload);
-      _registerSync('laurelia_download_and_load', _luaLaureliaDownloadAndLoad);
-      _registerSync('laurelia_load', _luaLaureliaLoad);
-      _registerSync('laurelia_generate', _luaLaureliaGenerate);
-      _registerSync('laurelia_count_tokens', _luaLaureliaCountTokens);
-      _registerSync('laurelia_status', _luaLaureliaStatus);
-      _registerSync('laurelia_is_loaded', _luaLaureliaIsLoaded);
-      _registerSync('laurelia_vocab', _luaLaureliaVocab);
-      _registerSync('laurelia_unload', _luaLaureliaUnload);
-      _registerSync('laurelia_info', _luaLaureliaInfo);
-      _registerSync('laurelia_set_model', _luaLaureliaSetModel);
-      _registerSync('laurelia_delete_model', _luaLaureliaDeleteModel);
-    }
+    _registerRustGlobals(this);
+    _registerPlayerGlobals(this);
+    _registerLaureliaGlobals(this);
   }
 
   void _registerSync(String name, int Function(LuaState) fn) {
@@ -179,7 +176,7 @@ end
   int _luaEngineGet(LuaState ls) {
     final id = ls.checkString(1) ?? '';
     ls.pop(1);
-    ls.pushString(_values[id] ?? '');
+    ls.pushString(store.get(id));
     return 1;
   }
 
@@ -187,31 +184,8 @@ end
     final id = ls.checkString(1) ?? '';
     final value = ls.checkString(2) ?? '';
     ls.pop(2);
-    _values[id] = value;
-    onUpdate?.call(id, value);
+    store.set(id, value);
     return 0;
-  }
-
-  int _luaRustGreet(LuaState ls) {
-    final name = ls.checkString(1) ?? '';
-    ls.pop(1);
-    ls.pushString(greet(name: name));
-    return 1;
-  }
-
-  int _luaRustSum(LuaState ls) {
-    final a = ls.checkInteger(1) ?? 0;
-    final b = ls.checkInteger(2) ?? 0;
-    ls.pop(2);
-    ls.pushInteger(sum(a: a, b: b));
-    return 1;
-  }
-
-  int _luaRustFibonacci(LuaState ls) {
-    final n = ls.checkInteger(1) ?? 0;
-    ls.pop(1);
-    ls.pushInteger(fibonacci(n: n));
-    return 1;
   }
 
   // ----------------------------------------------------------- navegación
@@ -222,268 +196,6 @@ end
     ls.pop(1);
     if (page.isNotEmpty) onNavigate?.call(page);
     return 0;
-  }
-
-  // -------------------------------------------------------------- player
-
-  /// Abre el selector de archivos de Android y reproduce lo elegido.
-  int _luaPlayerPick(LuaState ls) {
-    ls.pop(0);
-    mediaPlayer!.pickAndPlay();
-    return 0;
-  }
-
-  /// Reproduce una ruta, p. ej. player_open("/storage/emulated/0/Music/x.mp3").
-  int _luaPlayerOpen(LuaState ls) {
-    final path = ls.checkString(1) ?? '';
-    ls.pop(1);
-    if (path.isNotEmpty) mediaPlayer!.openPath(path);
-    return 0;
-  }
-
-  int _luaPlayerPlay(LuaState ls) {
-    ls.pop(0);
-    mediaPlayer!.play();
-    return 0;
-  }
-
-  int _luaPlayerPause(LuaState ls) {
-    ls.pop(0);
-    mediaPlayer!.pause();
-    return 0;
-  }
-
-  int _luaPlayerToggle(LuaState ls) {
-    ls.pop(0);
-    mediaPlayer!.playOrPause();
-    return 0;
-  }
-
-  int _luaPlayerStop(LuaState ls) {
-    ls.pop(0);
-    mediaPlayer!.stop();
-    return 0;
-  }
-
-  /// Devuelve el estado actual del reproductor.
-  int _luaPlayerStatus(LuaState ls) {
-    ls.pop(0);
-    ls.pushString(mediaPlayer!.status);
-    return 1;
-  }
-
-  // -------------------------------------------------------------- laurelia
-
-  /// Descarga el modelo por HTTP (streaming). El progreso re-renderiza la UI
-  /// en vivo y al terminar escribe el estado real en `laurelia_status`.
-  int _luaLaureliaDownload(LuaState ls) {
-    ls.pop(0);
-    final chat = laureliaChat!;
-    chat.onProgress = (msg) {
-      _values['laurelia_status'] = msg;
-      onUpdate?.call('laurelia_status', msg);
-    };
-    _values['laurelia_status'] = 'Descargando…';
-    onUpdate?.call('laurelia_status', 'Descargando…');
-    chat.download().then((ok) {
-      if (ok) {
-        _values['laurelia_status'] =
-            '${chat.modelName} descargado. Tocá "Cargar en Rust".';
-      } else {
-        _values['laurelia_status'] = chat.status;
-      }
-      onUpdate?.call('laurelia_status', _values['laurelia_status']!);
-      _refreshLaureliaInfo();
-    });
-    return 0;
-  }
-
-  /// Descarga el modelo por HTTP (streaming) y luego lo carga en Rust desde
-  /// disco en una sola acción. El progreso re-renderiza la UI en vivo.
-  int _luaLaureliaDownloadAndLoad(LuaState ls) {
-    ls.pop(0);
-    final chat = laureliaChat!;
-    chat.onProgress = (msg) {
-      _values['laurelia_status'] = msg;
-      onUpdate?.call('laurelia_status', msg);
-    };
-    chat.download().then((ok) {
-      if (!ok) {
-        _values['laurelia_status'] = chat.status;
-        onUpdate?.call('laurelia_status', _values['laurelia_status']!);
-        _refreshLaureliaInfo();
-        return;
-      }
-      chat.load().then((loaded) {
-        _values['laurelia_status'] =
-            loaded ? 'Modelo cargado en Rust. Tocá Generar.' : chat.status;
-        onUpdate?.call('laurelia_status', _values['laurelia_status']!);
-        _refreshLaureliaInfo();
-      });
-    });
-    return 0;
-  }
-
-  /// Carga el modelo descargado en Rust.
-  int _luaLaureliaLoad(LuaState ls) {
-    ls.pop(0);
-    final chat = laureliaChat!;
-    chat.onProgress = (msg) {
-      _values['laurelia_status'] = msg;
-      onUpdate?.call('laurelia_status', msg);
-    };
-    _values['laurelia_status'] = 'Cargando en Rust…';
-    onUpdate?.call('laurelia_status', 'Cargando en Rust…');
-    chat.load().then((ok) {
-      _values['laurelia_status'] =
-          ok ? 'Modelo cargado en Rust. Tocá Generar.' : chat.status;
-      onUpdate?.call('laurelia_status', _values['laurelia_status']!);
-      _refreshLaureliaInfo();
-    });
-    return 0;
-  }
-
-  /// Cambia el modelo seleccionado (base/fine).
-  int _luaLaureliaSetModel(LuaState ls) {
-    final name = ls.checkString(1) ?? 'base';
-    ls.pop(1);
-    final chat = laureliaChat!;
-    chat.setModel(name).then((_) {
-      _values['laurelia_status'] = 'Modelo seleccionado: ${chat.modelName}';
-      onUpdate?.call('laurelia_status', _values['laurelia_status']!);
-      _refreshLaureliaInfo();
-    });
-    return 0;
-  }
-
-  /// Elimina el modelo indicado (borra su carpeta en disco).
-  int _luaLaureliaDeleteModel(LuaState ls) {
-    final name = ls.checkString(1) ?? '';
-    ls.pop(1);
-    final chat = laureliaChat!;
-    chat.deleteModel(name).then((ok) {
-      _values['laurelia_status'] =
-          ok ? 'Modelo $name eliminado.' : 'Modelo $name: no existe.';
-      onUpdate?.call('laurelia_status', _values['laurelia_status']!);
-      _refreshLaureliaInfo();
-    });
-    return 0;
-  }
-
-  /// Refresca `laurelia_info` (detalle en disco + Rust) sin esperar al usuario.
-  void _refreshLaureliaInfo() {
-    final chat = laureliaChat;
-    if (chat == null) return;
-    chat.detailedStatus().then((s) {
-      _values['laurelia_info'] = s;
-      onUpdate?.call('laurelia_info', s);
-    });
-  }
-
-  /// Genera texto con el prompt del argumento 1. El resultado queda en
-  /// `laurelia_out` (lo muestra un gui_text con id "laurelia_out").
-  int _luaLaureliaGenerate(LuaState ls) {
-    final prompt = ls.checkString(1) ?? '';
-    final maxTokens = ls.checkInteger(2) ?? 50;
-    ls.pop(2);
-    final chat = laureliaChat;
-    if (chat == null) {
-      _values['laurelia_out'] = 'Chat no disponible';
-      onUpdate?.call('laurelia_out', 'Chat no disponible');
-      return 0;
-    }
-    if (!chat.loaded) {
-      _values['laurelia_out'] = 'Primero tocá "Cargar en Rust".';
-      onUpdate?.call('laurelia_out', 'Primero tocá "Cargar en Rust".');
-      return 0;
-    }
-    _values['laurelia_out'] = 'Generando… (puede tardar)';
-    onUpdate?.call('laurelia_out', 'Generando… (puede tardar)');
-    chat.generate(prompt, maxNewTokens: maxTokens).then((s) {
-      _values['laurelia_out'] = s.isEmpty ? 'Generación vacía (¿modelo cargado?).' : s;
-      onUpdate?.call('laurelia_out', _values['laurelia_out']!);
-    });
-    return 0;
-  }
-
-  /// Devuelve la cantidad de tokens del texto (o -1 si no hay tokenizer).
-  int _luaLaureliaCountTokens(LuaState ls) {
-    final text = ls.checkString(1) ?? '';
-    ls.pop(1);
-    final n = laureliaChat!.countTokens(text);
-    n.then((v) {
-      _lastTokenCount = v;
-      onUpdate?.call('laurelia_status', '');
-    });
-    ls.pushInteger(_lastTokenCount);
-    return 1;
-  }
-
-  /// Estado del chat (texto). La UI lo muestra en un gui_text.
-  int _luaLaureliaStatus(LuaState ls) {
-    ls.pop(0);
-    final s = _luaChatStatus();
-    ls.pushString(s);
-    return 1;
-  }
-
-  /// Info detallada: ruta, tamaño de archivos, si descarga completa y si el
-  /// modelo está cargado en Rust. Escribe el resultado en `laurelia_info`.
-  int _luaLaureliaInfo(LuaState ls) {
-    ls.pop(0);
-    _values['laurelia_info'] = 'Leyendo disco…';
-    onUpdate?.call('laurelia_info', _values['laurelia_info']!);
-    laureliaChat!.detailedStatus().then((s) {
-      _values['laurelia_info'] = s;
-      onUpdate?.call('laurelia_info', s);
-    });
-    ls.pushString(_values['laurelia_info']!);
-    return 1;
-  }
-
-  int _luaLaureliaIsLoaded(LuaState ls) {
-    ls.pop(0);
-    ls.pushBoolean(laureliaChat!.loaded);
-    return 1;
-  }
-
-  /// Vocabulario del tokenizer (o -1).
-  int _luaLaureliaVocab(LuaState ls) {
-    ls.pop(0);
-    ls.pushInteger(_lastVocab);
-    laureliaChat!.vocabSize().then((v) {
-      _lastVocab = v;
-      onUpdate?.call('laurelia_status', '');
-    });
-    return 1;
-  }
-
-  int _luaLaureliaUnload(LuaState ls) {
-    ls.pop(0);
-    final chat = laureliaChat!;
-    chat.unload().then((_) {
-      _values['laurelia_status'] = 'Modelo liberado.';
-      onUpdate?.call('laurelia_status', 'Modelo liberado.');
-      _refreshLaureliaInfo();
-    });
-    return 0;
-  }
-
-  Future<String>? _pendingGen;
-  String _pendingGenId = '';
-  int _lastTokenCount = -1;
-  int _lastVocab = -1;
-
-  /// Texto de estado del chat para mostrar en la UI.
-  String _luaChatStatus() {
-    final c = laureliaChat;
-    if (c == null) return 'Chat no disponible';
-    final base = c.status;
-    final extra = <String>[];
-    if (_lastTokenCount >= 0) extra.add('tokens: $_lastTokenCount');
-    if (_lastVocab > 0) extra.add('vocab: $_lastVocab');
-    if (c.loaded) extra.add('cargado');
-    return extra.isEmpty ? base : '$base | ${extra.join(', ')}';
   }
 
   // ---------------------------------------------------------------- parsing
@@ -516,7 +228,7 @@ end
   Map<String, Object?> _readNodeMap() {
     final m = <String, Object?>{};
     for (final k in [
-      'type', 'id', 'text', 'label', 'value', 'on_click', 'align',
+      'type', 'id', 'bind', 'text', 'label', 'value', 'on_click', 'align',
       'color', 'bg_color', 'border_color', 'src', 'fit',
     ]) {
       final v = _field(-1, k);

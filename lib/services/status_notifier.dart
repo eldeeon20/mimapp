@@ -86,7 +86,7 @@ class StatusNotifier {
 Conexión: $connection
 $extra''';
 
-    const details = NotificationDetails(
+    final details = NotificationDetails(
       android: AndroidNotificationDetails(
         _channelId,
         _channelName,
@@ -100,17 +100,17 @@ $extra''';
     );
     try {
       await NotificationService.plugin.show(
-        _id,
-        'Estado de Secure App',
-        body,
-        details,
+        id: _id,
+        title: 'Estado de Secure App',
+        body: body,
+        notificationDetails: details,
       );
     } catch (_) {}
   }
 
   Future<void> cancel() async {
     _timer?.cancel();
-    await NotificationService.plugin.cancel(_id);
+    await NotificationService.plugin.cancel(id: _id);
   }
 
   static String _fmt(int bytes) {

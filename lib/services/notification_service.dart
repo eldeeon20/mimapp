@@ -36,7 +36,7 @@ class NotificationService {
           // Botón "Salir": detiene el servicio en primer plano y quita
           // la notificación.
           FlutterBackgroundService().invoke('stop');
-          _plugin.cancel(serviceNotificationId);
+          _plugin.cancel(id: serviceNotificationId);
         }
       },
     );
@@ -89,10 +89,10 @@ class NotificationService {
       ),
     );
     await _plugin.show(
-      serviceNotificationId,
-      'Secure App',
-      'Servicio activo · toca Salir para detener',
-      details,
+      id: serviceNotificationId,
+      title: 'Secure App',
+      body: 'Servicio activo · toca Salir para detener',
+      notificationDetails: details,
     );
   }
 }

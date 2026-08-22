@@ -11,6 +11,7 @@ import 'gui_video.dart';
 /// Estilo/layout común a todo nodo de la GUI, leído desde Lua.
 typedef NodeStyle = ({
   String? id,
+  String? bind,
   String text,
   String? align,
   double? width,
@@ -52,6 +53,7 @@ abstract class GuiNode {
   /// Extrae los campos de estilo/layout comunes desde el mapa Lua.
   static NodeStyle parseStyle(Map<String, Object?> m) => (
         id: m['id'] as String?,
+        bind: m['bind'] as String?,
         text: m['text'] as String? ?? '',
         align: m['align'] as String?,
         width: (m['width'] as num?)?.toDouble(),
