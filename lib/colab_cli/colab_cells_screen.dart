@@ -42,6 +42,7 @@ class _ColabCellsScreenState extends State<ColabCellsScreen> {
   bool _connected = false;
   bool _connecting = false;
   String? _lastConnError;
+  int? _runningIndex;
 
   static const _helloWorld = '''# Ejemplo de prueba
 print("Hola Mundo desde Colab 🚀")
@@ -53,9 +54,41 @@ print("Python:", sys.version.split()[0])''';
     super.initState();
     _runtime =
         ColabRuntime(serverUrl: widget.serverUrl, proxyToken: widget.proxyToken);
+    // Input interactivo: cuando el kernel pide datos (input()), abrir diálogo.
+    _runtime.onInputRequest = _askInput;
     // Celda de ejemplo precargada para probar al instante.
     _cells.add(_Cell(_helloWorld));
     _connect();
+  }
+
+  Future<String?> _askInput(String prompt, bool password) async {
+    final ctrl = TextEditingController();
+    String? value;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('El programa pide datos'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          obscureText: password,
+          decoration: InputDecoration(
+            labelText: prompt.isEmpty ? 'Ingresá un valor:' : prompt,
+            border: const OutlineInputBorder(),
+          ),
+          onSubmitted: (v) => Navigator.pop(ctx),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Enviar')),
+        ],
+      ),
+    );
+    value = ctrl.text;
+    ctrl.dispose();
+    return value;
   }
 
   Future<void> _connect() async {
@@ -82,6 +115,7 @@ print("Python:", sys.version.split()[0])''';
       cell.running = true;
       cell.status = 'running';
       cell.output = '';
+      _runningIndex = i;
     });
     try {
       final res = await _runtime.execute(
@@ -103,9 +137,16 @@ print("Python:", sys.version.split()[0])''';
         cell.status = 'error';
       });
     } finally {
-      if (mounted) setState(() => cell.running = false);
+      if (mounted) {
+        setState(() {
+          cell.running = false;
+          _runningIndex = null;
+        });
+      }
     }
   }
+
+  void _stopCell() => _runtime.interruptCurrent();
 
   @override
   Widget build(BuildContext context) {
@@ -113,6 +154,12 @@ print("Python:", sys.version.split()[0])''';
       appBar: AppBar(
         title: Text('Colab Python ${_connected ? "●" : "○"}'),
         actions: [
+          if (_runningIndex != null)
+            IconButton(
+              tooltip: 'Frenar celda',
+              onPressed: _stopCell,
+              icon: const Icon(Icons.stop, color: Colors.redAccent),
+            ),
           IconButton(
             tooltip: 'Nueva celda',
             onPressed: () => setState(() => _cells.add(_Cell())),

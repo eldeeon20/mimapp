@@ -49,6 +49,14 @@ class ColabRuntime {
   /// socket viejo se ignoran si su generación ya no es la actual.
   int _gen = 0;
 
+  /// Pide datos al usuario cuando el kernel lanza input_request (input()).
+  /// Retorna lo tipeado (o null para vacío).
+  Future<String?> Function(String prompt, bool password)? onInputRequest;
+
+  /// Ejecución activa (para poder frenarla con [interruptCurrent]).
+  Completer<void>? _activeCompleter;
+  ColabExecResult? _activeResult;
+
   /// Router de mensajes (1 sola suscripción al stream del canal).
   final StreamController<Map<String, dynamic>> _msgs =
       StreamController<Map<String, dynamic>>.broadcast();
@@ -205,6 +213,21 @@ class ColabRuntime {
     return (b[off] << 24) | (b[off + 1] << 16) | (b[off + 2] << 8) | b[off + 3];
   }
 
+  /// Frena la celda en ejecución: manda interrupt_request al kernel (control)
+  /// y libera la espera local marcando el resultado como interrumpido.
+  void interruptCurrent() {
+    try {
+      _send('control', 'interrupt_request', <String, dynamic>{});
+    } catch (_) {}
+    final r = _activeResult;
+    if (r != null && !r.isError) {
+      r.status = 'error';
+      r.errorBuf.writeln('(celda interrumpida por el usuario)');
+    }
+    final c = _activeCompleter;
+    if (c != null && !c.isCompleted) c.complete();
+  }
+
   Future<ColabExecResult> execute(
     String code, {
     Duration timeout = const Duration(minutes: 10),
@@ -248,16 +271,17 @@ class ColabRuntime {
       {void Function(String partial)? onTick}) async {
     final result = ColabExecResult();
     final msgId = _uuid();
+    final completer = Completer<void>();
+    _activeResult = result;
+    _activeCompleter = completer;
     _send('shell', 'execute_request', {
       'code': code,
       'silent': false,
       'store_history': true,
       'user_expressions': {},
-      'allow_stdin': false,
+      'allow_stdin': true, // soporte input() con input_request/input_reply
       'stop_on_error': true,
     }, msgId: msgId);
-
-    final completer = Completer<void>();
     late final StreamSubscription sub;
     sub = _msgs.stream.listen((msg) {
       if (msg['__closed'] == true) {
@@ -315,6 +339,13 @@ class ColabRuntime {
           result.stderrBuf.write('${content['text'] ?? ''}');
           onTick?.call(result.output);
           break;
+        case 'input_request':
+          // El kernel pide datos (input() de Python): delegar en la UI.
+          unawaited(_answerInput(
+            content['prompt']?.toString() ?? '',
+            content['password'] == true,
+          ));
+          break;
       }
     });
 
@@ -326,7 +357,22 @@ class ColabRuntime {
       await sub.cancel();
     }
 
+    _activeCompleter = null;
+    _activeResult = null;
     return result;
+  }
+
+  Future<void> _answerInput(String prompt, bool password) async {
+    String value = '';
+    final cb = onInputRequest;
+    if (cb != null) {
+      try {
+        value = await cb(prompt, password) ?? '';
+      } catch (_) {}
+    }
+    try {
+      _send('stdin', 'input_reply', {'value': value});
+    } catch (_) {}
   }
 
   void _send(String channel, String type, Map<String, dynamic> content,
