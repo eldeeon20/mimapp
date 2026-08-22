@@ -14,6 +14,8 @@ class ColabExecResult {
   final List<String> results = [];
   final StringBuffer errorBuf = StringBuffer();
   String status = 'ok'; // ok | error | timeout
+  bool connLost = false; // el WS se cerró/dio error durante la ejecución
+  bool gotFrames = false; // llegó al menos un frame del kernel
 
   String get output => [
         if (stdoutBuf.isNotEmpty) stdoutBuf.toString(),
@@ -42,7 +44,10 @@ class ColabRuntime {
   String? _kernelId;
   final String _sessionId = _uuid();
   bool _started = false;
-  bool _closedByUs = false;
+
+  /// Generación de conexión. Cada start() la incrementa; los listeners de un
+  /// socket viejo se ignoran si su generación ya no es la actual.
+  int _gen = 0;
 
   /// Router de mensajes (1 sola suscripción al stream del canal).
   final StreamController<Map<String, dynamic>> _msgs =
@@ -59,25 +64,32 @@ class ColabRuntime {
         'X-Colab-Runtime-Proxy-Token': proxyToken,
       };
 
-  /// Crea el kernel y abre el WebSocket (un listener persistente).
+  /// Abre el WebSocket del kernel. Reutiliza el kernel existente si ya hay
+  /// uno (NO crea kernels nuevos en cada reconexión: se pierden variables).
   Future<void> start() async {
     if (_started) return;
+    _gen++;
+    final gen = _gen;
 
-    final resp = await http.post(
-      Uri.parse('$serverUrl/api/kernels'),
-      headers: _headers,
-      body: jsonEncode({'name': 'python3', 'path': ''}),
-    );
-    if (resp.statusCode != 200 && resp.statusCode != 201) {
-      var body = resp.body.replaceAll(RegExp(r'<[^>]*>'), ' ');
-      body = body.replaceAll(RegExp(r'\s+'), ' ').trim();
-      throw Exception('Error creando kernel (${resp.statusCode}): '
-          '${body.length > 150 ? '${body.substring(0, 150)}…' : body}');
-    }
-    final data = jsonDecode(resp.body);
-    _kernelId = data['id'] as String?;
-    if (_kernelId == null || _kernelId!.isEmpty) {
-      throw Exception('Respuesta sin kernel id: ${resp.body.substring(0, 120)}');
+    if (_kernelId == null) {
+      // Solo la PRIMERA vez: crear el kernel.
+      final resp = await http.post(
+        Uri.parse('$serverUrl/api/kernels'),
+        headers: _headers,
+        body: jsonEncode({'name': 'python3', 'path': ''}),
+      );
+      if (resp.statusCode != 200 && resp.statusCode != 201) {
+        var body = resp.body.replaceAll(RegExp(r'<[^>]*>'), ' ');
+        body = body.replaceAll(RegExp(r'\s+'), ' ').trim();
+        throw Exception('Error creando kernel (${resp.statusCode}): '
+            '${body.length > 150 ? '${body.substring(0, 150)}…' : body}');
+      }
+      final data = jsonDecode(resp.body);
+      _kernelId = data['id'] as String?;
+      if (_kernelId == null || _kernelId!.isEmpty) {
+        throw Exception(
+            'Respuesta sin kernel id: ${resp.body.substring(0, 120)}');
+      }
     }
 
     // Canal único multiplexado POR KERNEL (no /api/channels).
@@ -95,29 +107,31 @@ class ColabRuntime {
       headers: _headers,
       pingInterval: const Duration(seconds: 30),
     );
-    _closedByUs = false;
-    // Listener ÚNICO: enruta todos los frames al router _msgs.
+    // Listener ÚNICO por conexión: los de generaciones viejas no tocan nada.
     _channel!.stream.listen(
       _onFrame,
       onError: (e) {
-        // Canal muerto: lo marcamos para forzar reconexión en el próximo execute.
-        if (!_closedByUs) {
-          _started = false;
-          _channel = null;
-        }
+        if (gen != _gen) return;
+        _started = false;
+        _channel = null;
         _msgs.add({'__error': true, 'text': e.toString()});
       },
       onDone: () {
-        if (!_closedByUs) {
-          // Colab cerró el WS (inactividad / rotación de token). Reset para
-          // que el próximo execute() recree el kernel + WS (evita el cuelgue).
-          _started = false;
-          _channel = null;
-          _msgs.add({'__closed': true});
-        }
+        if (gen != _gen) return;
+        // Colab cerró el WS: reset para que el próximo execute() reconecte
+        // AL MISMO kernel (sin perder variables).
+        _started = false;
+        _channel = null;
+        _msgs.add({'__closed': true});
       },
     );
     await _channel!.ready;
+    if (gen != _gen) {
+      try {
+        await _channel?.sink.close();
+      } catch (_) {}
+      return;
+    }
     _started = true;
   }
 
@@ -203,19 +217,29 @@ class ColabRuntime {
       } catch (e) {
         last = ColabExecResult()
           ..errorBuf.writeln('WS error: $e')
-          ..status = 'error';
+          ..status = 'error'
+          ..connLost = true;
       }
-      if (last != null && (last.output.isNotEmpty || last.isError)) {
-        return last;
-      }
-      // Sin salida: cerramos y recreamos kernel + WS y reintentamos.
-      _started = false;
-      try {
-        await _channel?.sink.close();
-      } catch (_) {}
-      _channel = null;
+      // Reintentar SOLO si la conexión está muerta. Una celda sin salida
+      // (ej: `x = 1`) es un resultado VÁLIDO: no se toca el kernel.
+      final dead = last.output.isEmpty &&
+          !last.isError &&
+          (last.connLost || !last.gotFrames);
+      if (!dead) return last;
+      await _killChannel();
     }
     return last ?? ColabExecResult();
+  }
+
+  /// Cierra el WS actual invalidando sus listeners (sin borrar el kernel:
+  /// se conserva el estado de las variables para la reconexión).
+  Future<void> _killChannel() async {
+    _started = false;
+    _gen++;
+    try {
+      await _channel?.sink.close();
+    } catch (_) {}
+    _channel = null;
   }
 
   Future<ColabExecResult> _executeWithRetry(
@@ -235,17 +259,20 @@ class ColabRuntime {
     late final StreamSubscription sub;
     sub = _msgs.stream.listen((msg) {
       if (msg['__closed'] == true) {
+        result.connLost = true;
         if (!completer.isCompleted) completer.complete();
         unawaited(sub.cancel());
         return;
       }
       if (msg['__error'] == true) {
+        result.connLost = true;
         result.errorBuf.writeln('WS error: ${msg['text']}');
         result.status = 'error';
         if (!completer.isCompleted) completer.complete();
         unawaited(sub.cancel());
         return;
       }
+      result.gotFrames = true;
       final header = (msg['header'] ?? msg) as Map<String, dynamic>? ?? {};
       final content = msg['content'] as Map<String, dynamic>? ?? {};
       final type = header['msg_type'] ?? msg['msg_type'];
@@ -319,6 +346,7 @@ class ColabRuntime {
   }
 
   Future<void> close() async {
+    _gen++; // invalida los listeners del socket actual
     try {
       if (_kernelId != null && _started) {
         await http
@@ -329,7 +357,6 @@ class ColabRuntime {
             .timeout(const Duration(seconds: 5));
       }
     } catch (_) {}
-    _closedByUs = true;
     try {
       await _channel?.sink.close();
     } catch (_) {}
