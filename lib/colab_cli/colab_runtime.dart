@@ -209,6 +209,11 @@ class ColabRuntime {
     }
   }
 
+  static final RegExp _ansiRe = RegExp(r'\x1b\[[0-9;]*[A-Za-z]');
+
+  /// Saca códigos de escape ANSI (colores) de la salida del kernel.
+  static String _stripAnsi(String s) => s.replaceAll(_ansiRe, '');
+
   static int _be32(List<int> b, int off) {
     return (b[off] << 24) | (b[off + 1] << 16) | (b[off + 2] << 8) | b[off + 3];
   }
@@ -305,7 +310,7 @@ class ColabRuntime {
 
       switch (type) {
         case 'stream':
-          result.stdoutBuf.write('${content['text'] ?? ''}');
+          result.stdoutBuf.write(_stripAnsi('${content['text'] ?? ''}'));
           onTick?.call(result.output);
           break;
         case 'execute_result':
@@ -313,13 +318,15 @@ class ColabRuntime {
           final dataMap = content['data'] ?? {};
           final text = dataMap['text/plain'];
           if (text is String) {
-            result.results.add(text);
+            result.results.add(_stripAnsi(text));
             onTick?.call(result.output);
           }
           break;
         case 'error':
           final tb = content['traceback'];
-          if (tb is List) result.errorBuf.writeln(tb.join('\n'));
+          if (tb is List) {
+            result.errorBuf.writeln(_stripAnsi(tb.join('\n')));
+          }
           result.status = 'error';
           onTick?.call(result.output);
           break;
