@@ -40,53 +40,93 @@ class ColabTokens {
       );
 }
 
-/// Autenticación OAuth2 copy-paste (mismo flow que gcloud / google-colab-cli).
-///
-/// Flujo:
-/// 1. Genera URL de autorización con redirect al landing page de Google
-/// 2. Abre navegador → usuario copia el code de la landing page
-/// 3. Usuario pega el code en el diálogo
-/// 4. Canjea por access_token + refresh_token
-/// 5. Refresca automáticamente
+/// Autenticación OAuth2 con loopback: la app abre un servidor local,
+/// el navegador del mismo dispositivo redirige a 127.0.0.1 y el código
+/// se captura solo (sin copiar ni pegar).
 class ColabAuth {
   ColabTokens? _tokens;
+  HttpServer? _loopbackServer;
 
   ColabTokens? get tokens => _tokens;
   bool get isAuthenticated => _tokens != null;
 
-  /// Genera la URL de autorización para abrir en el navegador.
-  String buildAuthUrl() {
+  /// Genera la URL de autorización para un redirect loopback dado.
+  String buildAuthUrl(String redirectUri) {
     return '${ColabConfig.authUri}'
         '?response_type=code'
         '&client_id=${ColabConfig.clientId}'
-        '&redirect_uri=${Uri.encodeComponent(ColabConfig.remoteRedirect)}'
+        '&redirect_uri=${Uri.encodeComponent(redirectUri)}'
         '&scope=${Uri.encodeComponent(ColabConfig.scopes)}'
         '&access_type=offline'
-        '&prompt=consent'
-        '&token_usage=remote';
+        '&prompt=consent';
   }
 
-  /// Abre el navegador con la URL de autorización.
-  /// Si no puede abrir, lanza excepción con la URL para copiar a mano.
-  Future<void> openBrowser() async {
-    final url = Uri.parse(buildAuthUrl());
+  /// Flujo interactivo completo:
+  /// 1. Abre servidor local en puerto aleatorio
+  /// 2. Abre el navegador con redirect a 127.0.0.1
+  /// 3. Captura el código automáticamente y canjea por tokens
+  Future<ColabTokens> signInInteractive({
+    Duration timeout = const Duration(minutes: 5),
+  }) async {
+    await stopInteractive();
+
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    _loopbackServer = server;
+    final redirect = 'http://${ColabConfig.redirectHost}:${server.port}';
+
+    final url = Uri.parse(buildAuthUrl(redirect));
     try {
       await launchUrl(url, mode: LaunchMode.externalApplication);
     } catch (_) {
-      throw Exception(
-          'No se pudo abrir el navegador. Copiá esta URL en tu navegador:\n$url');
+      // Si no puede abrir el navegador, igual esperamos:
+      // el usuario puede abrir la URL a mano en el mismo equipo.
+    }
+
+    try {
+      final request = await server.first.timeout(timeout);
+      final params = request.uri.queryParameters;
+
+      final ok = params.containsKey('code');
+      request.response.headers.contentType = ContentType.html;
+      request.response.write(
+        '<html><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        '</head><body style="font-family:sans-serif;text-align:center;'
+        'padding-top:60px;background:#020617;color:#fff">'
+        '<h2>${ok ? '✅ Autenticado' : '❌ Error'}</h2>'
+        '<p>${ok ? 'Podés cerrar esta pestaña y volver a la app.'
+                : 'Google devolvió: ${params['error'] ?? 'sin código'}'}</p>'
+        '</body></html>',
+      );
+      await request.response.close();
+
+      if (!ok) {
+        throw Exception(
+            'Google devolvió error: ${params['error'] ?? 'sin código'}');
+      }
+      return await exchangeCode(params['code']!, redirect);
+    } finally {
+      await stopInteractive();
     }
   }
 
-  /// Canjea el código de autorización (copiado del landing page) por tokens.
-  Future<ColabTokens> exchangeCode(String code) async {
+  /// Cierra el servidor loopback si está abierto.
+  Future<void> stopInteractive() async {
+    final s = _loopbackServer;
+    _loopbackServer = null;
+    await s?.close(force: true);
+  }
+
+  /// Canjea el código de autorización por tokens.
+  /// El [redirectUri] debe ser exactamente el mismo que en la URL de auth.
+  Future<ColabTokens> exchangeCode(String code, String redirectUri) async {
     final response = await http.post(
       Uri.parse(ColabConfig.tokenUri),
       body: {
         'code': code.trim(),
         'client_id': ColabConfig.clientId,
         'client_secret': ColabConfig.clientSecret,
-        'redirect_uri': ColabConfig.remoteRedirect,
+        'redirect_uri': redirectUri,
         'grant_type': 'authorization_code',
       },
     );

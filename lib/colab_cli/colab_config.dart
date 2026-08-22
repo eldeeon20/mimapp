@@ -1,13 +1,15 @@
-/// Constantes OAuth2 del Google Cloud SDK (mismas que usa gcloud/colab-cli).
+/// Constantes OAuth2 del cliente propio de pr_app.
 class ColabConfig {
   ColabConfig._();
 
   static const clientId =
-      '764086051850-6qr4p6gpi6hn506pt8ejuq83di341hur.apps.googleusercontent.com';
-  static const clientSecret = 'd-FL95Q19q7MQmFpd7hHD0Ty';
-  static const redirect = 'http://localhost';
-  static const remoteRedirect =
-      'https://sdk.cloud.google.com/applicationdefaultauthcode.html';
+      '';
+  static const clientSecret = '';
+
+  /// Loopback: la app abre un servidor local y Google redirige acá
+  /// (el navegador corre en el mismo dispositivo).
+  static const redirectHost = '127.0.0.1';
+
   static const authUri = 'https://accounts.google.com/o/oauth2/v2/auth';
   static const tokenUri = 'https://oauth2.googleapis.com/token';
 
