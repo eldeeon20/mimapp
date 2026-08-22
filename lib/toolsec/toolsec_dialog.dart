@@ -6,7 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:saf_stream/saf_stream.dart';
 import 'package:saf_util/saf_util.dart';
-import 'package:saf_util_platform_interface/saf_util_platform_interface.dart';
+import 'package:saf_util/saf_util_platform_interface.dart';
 
 import 'toolsec.dart';
 

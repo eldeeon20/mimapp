@@ -3,7 +3,7 @@ import 'dart:typed_data';
 import 'package:path_provider/path_provider.dart';
 import 'package:saf_stream/saf_stream.dart';
 import 'package:saf_util/saf_util.dart';
-import 'package:saf_util_platform_interface/saf_util_platform_interface.dart';
+import 'package:saf_util/saf_util_platform_interface.dart';
 
 /// Excepción cuando no se puede escribir sobre el archivo original.
 /// Lleva los bytes ya cifrados para ofrecer guardar una copia.

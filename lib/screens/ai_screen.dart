@@ -179,7 +179,7 @@ class _AiScreenState extends State<AiScreen> {
                 isDense: true,
                 style: const TextStyle(fontSize: 12, color: Colors.white),
                 dropdownColor: Colors.grey[850],
-                items: widget.laurelia.models
+                items: LaureliaChat.models
                     .map((m) => DropdownMenuItem(
                           value: m,
                           child: Text(m == 'fine' ? 'Laurelia Fine' : 'Laurelia Base'),
