@@ -24,6 +24,10 @@ class Settings {
   /// Espacio para cuentas/otros datos del usuario (cifrado junto con el resto).
   Map<String, dynamic> accounts = {};
 
+  /// Tareas Colab guardadas (plantillas Python) + pockets enviados.
+  List<Map<String, dynamic>> tasks = [];
+  List<Map<String, dynamic>> pockets = [];
+
   bool _loaded = false;
 
   Future<void> load() async {
@@ -39,6 +43,18 @@ class Settings {
         if (map['accounts'] is Map) {
           accounts = Map<String, dynamic>.from(map['accounts']);
         }
+        if (map['tasks'] is List) {
+          tasks = map['tasks']
+              .whereType<Map>()
+              .map((e) => Map<String, dynamic>.from(e))
+              .toList();
+        }
+        if (map['pockets'] is List) {
+          pockets = map['pockets']
+              .whereType<Map>()
+              .map((e) => Map<String, dynamic>.from(e))
+              .toList();
+        }
       }
     } catch (e) {
       // Archivo corrupto/ilegible: se quedan los defaults.
@@ -53,6 +69,8 @@ class Settings {
       final map = {
         'mediaShowUri': mediaShowUri,
         'accounts': accounts,
+        'tasks': tasks,
+        'pockets': pockets,
       };
       final plain = utf8.encode(jsonEncode(map));
       final enc = ToolSec(masterKey).processBytes(Uint8List.fromList(plain));

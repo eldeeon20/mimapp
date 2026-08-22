@@ -5,6 +5,7 @@ import 'colab_auth.dart';
 import 'colab_cells_screen.dart';
 import 'colab_keep_alive.dart';
 import 'colab_sessions.dart';
+import 'colab_tasks_screen.dart';
 import '../services/colab_service.dart';
 import '../services/status_notifier.dart';
 
@@ -151,6 +152,17 @@ class _ColabDialogBodyState extends State<_ColabDialogBody> {
     ));
   }
 
+  void _openTasks(ColabSession s) {
+    final nav = Navigator.of(context, rootNavigator: true);
+    Navigator.pop(context);
+    nav.push(MaterialPageRoute(
+      builder: (_) => ColabTasksScreen(
+        serverUrl: s.proxyUrl,
+        proxyToken: s.proxyToken,
+      ),
+    ));
+  }
+
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
@@ -247,6 +259,9 @@ class _ColabDialogBodyState extends State<_ColabDialogBody> {
                                 case 'python':
                                   _openPython(s);
                                   break;
+                                case 'tareas':
+                                  _openTasks(s);
+                                  break;
                                 case 'keepalive':
                                   ColabService().startKeepAlive(s.endpoint);
                                   StatusNotifier.instance.refresh();
@@ -273,6 +288,13 @@ class _ColabDialogBodyState extends State<_ColabDialogBody> {
                                     Icon(Icons.terminal, size: 18),
                                     SizedBox(width: 8),
                                     Text('Python'),
+                                  ])),
+                              PopupMenuItem(
+                                  value: 'tareas',
+                                  child: Row(children: [
+                                    Icon(Icons.playlist_add, size: 18),
+                                    SizedBox(width: 8),
+                                    Text('Tareas'),
                                   ])),
                               PopupMenuItem(
                                   value: 'keepalive',
