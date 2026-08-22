@@ -1,8 +1,5 @@
 part of 'lua_controller.dart';
 
-import 'package:lua_dardo_plus/lua.dart';
-import 'package:pr_app/src/rust/api/simple.dart';
-
 /// Globals de Rust (flutter_rust_bridge): greet / sum / fibonacci.
 /// Registrados solo si el script los invoca; no dependen de estado del
 /// controller salvo el VM subyacente.

@@ -86,7 +86,6 @@ class NotificationService {
           AndroidNotificationAction(
             'exit',
             'Salir',
-            icon: 'ic_bg_service_small',
             showsUserInterface: false,
           ),
         ],

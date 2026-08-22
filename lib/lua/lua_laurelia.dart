@@ -1,9 +1,5 @@
 part of 'lua_controller.dart';
 
-import 'package:lua_dardo_plus/lua.dart';
-import '../ai/laurelia_chat.dart';
-import 'state_store.dart';
-
 /// Globals de Laurelia (chat LLM en Rust/Candle). Solo se registran si hay
 /// un [LaureliaChat] conectado. El progreso de descarga escribe directo en
 /// [StateStore] (el nodo enlazado se repinta solo), sin setState global.

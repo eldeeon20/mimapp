@@ -1,8 +1,5 @@
 part of 'lua_controller.dart';
 
-import 'package:lua_dardo_plus/lua.dart';
-import '../media/media_player.dart';
-
 /// Globals del reproductor (media_kit / libmpv). Solo se registran si hay
 /// un [MediaPlayer] conectado. Cada handler delega en el reproductor
 /// compartido; el estado (status/posición) se consulta bajo demanda.

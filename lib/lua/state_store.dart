@@ -1,3 +1,5 @@
+import 'package:flutter/material.dart';
+
 /// Almacén de estado de la GUI Lua. Reemplaza el antiguo `_values` +
 /// `onUpdate -> setState` que reconstruía TODO el árbol.
 ///
