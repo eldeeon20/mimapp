@@ -8,6 +8,7 @@ import 'package:pr_app/src/rust/frb_generated.dart';
 
 import '../services/colab_service.dart';
 import '../services/notification_service.dart';
+import '../services/settings.dart';
 import '../services/status_notifier.dart';
 import '../media/media_player.dart';
 
@@ -28,6 +29,7 @@ Future<void> initApp() async {
   await _initBackgroundService();
   await _initRust();
   await _initColab();
+  await Settings.instance.load();
   await StatusNotifier.instance.init();
 }
 
@@ -130,14 +132,27 @@ Future<void> _initColab() async {
 
 @pragma('vm:entry-point')
 Future<void> onServiceStart(ServiceInstance service) async {
+  service.on('stop').listen((_) => service.stopSelf());
+
   // Inicializar FLN en el isolate del servicio para poder sobreescribir la
   // notificación en primer plano con un botón "Salir".
   try {
     await NotificationService.init();
-    await NotificationService.showServiceNotification();
-  } catch (_) {}
+  } catch (e) {
+    debugPrint('FLN init en servicio: $e');
+  }
 
-  service.on('stop').listen((_) {
-    service.stopSelf();
-  });
+  // El plugin puede reescribir su notificación (sin acción) después de
+  // onStart; por eso la repostimos una vez para asegurar el botón "Salir".
+  Future<void> post() async {
+    try {
+      await NotificationService.showServiceNotification();
+    } catch (e) {
+      debugPrint('showServiceNotification: $e');
+    }
+  }
+
+  await post();
+  await Future.delayed(const Duration(milliseconds: 1000));
+  await post();
 }

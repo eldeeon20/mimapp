@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 
 import '../ai/laurelia_chat.dart';
 import '../colab_cli/colab_dialog.dart';
+import '../lua/lua_page.dart';
 import '../media/media_player.dart';
 import '../screens/ai_screen.dart';
 import '../screens/media_screen.dart';
+import '../screens/settings_screen.dart';
 import '../toolsec/toolsec_dialog.dart';
 import 'widgets/bottom_bar.dart';
 
@@ -64,6 +66,21 @@ class _HomePageState extends State<HomePage> {
         appBar: AppBar(title: const Text('Laurelia IA')),
         body: SafeArea(child: AiScreen(laurelia: _laurelia)),
       ),
+    ));
+  }
+
+  void _openWeb(BuildContext context) {
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => LuaPage(
+        mediaPlayer: _mediaPlayer,
+        laurelia: _laurelia,
+      ),
+    ));
+  }
+
+  void _openSettings(BuildContext context) {
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => const SettingsScreen(),
     ));
   }
 
@@ -255,12 +272,12 @@ class _HomePageState extends State<HomePage> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: [
-                  BottomButton(
-                    icon: Icons.code_rounded,
-                    title: 'Lua',
-                    color: Colors.greenAccent,
-                    onTap: () {},
-                  ),
+                        BottomButton(
+                          icon: Icons.chat_bubble_rounded,
+                          title: 'Chat',
+                          color: Colors.cyanAccent,
+                          onTap: () => _openLaurelia(context),
+                        ),
                   BottomButton(
                     icon: Icons.play_arrow_rounded,
                     title: 'Media',
@@ -277,14 +294,14 @@ class _HomePageState extends State<HomePage> {
                     icon: Icons.settings_rounded,
                     title: 'Config',
                     color: Colors.orangeAccent,
-                    onTap: () => showToolSecDialog(context),
+                    onTap: () => _openSettings(context),
                   ),
-                  BottomButton(
-                    icon: Icons.description_rounded,
-                    title: 'Páginas',
-                    color: Colors.lightBlueAccent,
-                    onTap: () => showColabDialog(context),
-                  ),
+                        BottomButton(
+                          icon: Icons.language,
+                          title: 'Web',
+                          color: Colors.lightBlueAccent,
+                          onTap: () => _openWeb(context),
+                        ),
                 ],
               ),
             ),

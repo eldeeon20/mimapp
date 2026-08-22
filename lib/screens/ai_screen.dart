@@ -247,13 +247,31 @@ class _AiScreenState extends State<AiScreen> {
                         margin: const EdgeInsets.only(bottom: 8),
                         padding: const EdgeInsets.symmetric(
                             horizontal: 12, vertical: 8),
-                        constraints:
-                            BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.8),
+                        constraints: BoxConstraints(
+                            maxWidth: MediaQuery.of(context).size.width * 0.78),
                         decoration: BoxDecoration(
-                          color: m.user ? Colors.indigo[700] : Colors.grey[800],
-                          borderRadius: BorderRadius.circular(12),
+                          color: m.user
+                              ? const Color(0xFF2B7CD3)
+                              : const Color(0xFF2A2A2E),
+                          borderRadius: BorderRadius.only(
+                            topLeft: const Radius.circular(14),
+                            topRight: const Radius.circular(14),
+                            bottomLeft: Radius.circular(m.user ? 14 : 4),
+                            bottomRight: Radius.circular(m.user ? 4 : 14),
+                          ),
+                          boxShadow: const [
+                            BoxShadow(
+                              color: Colors.black45,
+                              blurRadius: 4,
+                              offset: Offset(0, 1),
+                            ),
+                          ],
                         ),
-                        child: Text(m.text, style: const TextStyle(fontSize: 13)),
+                        child: Text(
+                          m.text,
+                          style: const TextStyle(
+                              fontSize: 14, color: Colors.white),
+                        ),
                       ),
                     );
                   },

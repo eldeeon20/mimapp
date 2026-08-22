@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:audio_service/audio_service.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:media_kit/media_kit.dart';
+
+import '../services/settings.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
 /// Reproductor de audio/video con playlist y notificación del sistema
@@ -223,12 +225,14 @@ class MediaPlayer extends BaseAudioHandler with SeekHandler {
     return MediaItem(
       id: path,
       title: _titleOf(path),
-      artist: 'pr_app',
+      artist: 'Secure App',
     );
   }
 
-  String _titleOf(String path) =>
-      path.split('/').last.split('\\').last.split('?').first;
+  String _titleOf(String path) {
+    if (Settings.instance.mediaShowUri) return path;
+    return path.split('/').last.split('\\').last.split('?').first;
+  }
 
   // ===========================================================================
   // Utilidades internas

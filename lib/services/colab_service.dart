@@ -21,6 +21,22 @@ class ColabService {
   /// Cantidad de sesiones de Colab activas (para el panel de estado).
   int activeSessionCount = 0;
 
+  /// Endpoint del keep-alive actualmente activo (null = inactivo).
+  String? activeEndpoint;
+
+  /// Mantiene Colab vivo en SEGUNDO PLANO aunque se cierre el menú.
+  /// No se detiene al salir del diálogo: vive con el singleton.
+  void startKeepAlive(String endpoint) {
+    activeEndpoint = endpoint;
+    keepAlive.start(endpoint);
+  }
+
+  /// Detiene el keep-alive (solo por acción explícita del usuario).
+  void stopKeepAlive() {
+    keepAlive.stop();
+    activeEndpoint = null;
+  }
+
   /// Inicializar: carga tokens guardados al arrancar la app.
   Future<void> init() async {
     if (_initialized) return;

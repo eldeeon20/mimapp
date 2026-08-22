@@ -83,8 +83,12 @@ class NotificationService {
         ongoing: true,
         showWhen: false,
         actions: [
-          AndroidNotificationAction('exit', 'Salir',
-              showsUserInterface: false),
+          AndroidNotificationAction(
+            'exit',
+            'Salir',
+            icon: 'ic_bg_service_small',
+            showsUserInterface: false,
+          ),
         ],
       ),
     );

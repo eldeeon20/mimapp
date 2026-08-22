@@ -9,9 +9,10 @@ import '../services/colab_service.dart';
 import '../services/status_notifier.dart';
 
 /// Diálogo de gestión de Colab: autenticación (loopback), sesiones, keep-alive.
+/// El keep-alive vive en [ColabService] (singleton), por eso NO se detiene
+/// al cerrar este diálogo: sigue corriendo en segundo plano.
 Future<void> showColabDialog(BuildContext context) async {
   final auth = ColabAuth();
-  final keepAlive = ColabKeepAlive(auth);
   final sessions = ColabSessions(auth);
 
   await auth.loadTokens();
@@ -22,22 +23,17 @@ Future<void> showColabDialog(BuildContext context) async {
     context: context,
     builder: (ctx) => _ColabDialogBody(
       auth: auth,
-      keepAlive: keepAlive,
       sessions: sessions,
     ),
   );
-
-  keepAlive.stop();
 }
 
 class _ColabDialogBody extends StatefulWidget {
   final ColabAuth auth;
-  final ColabKeepAlive keepAlive;
   final ColabSessions sessions;
 
   const _ColabDialogBody({
     required this.auth,
-    required this.keepAlive,
     required this.sessions,
   });
 
@@ -241,8 +237,8 @@ class _ColabDialogBodyState extends State<_ColabDialogBody> {
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          if (widget.keepAlive.isRunning &&
-                              widget.keepAlive.currentEndpoint == s.endpoint)
+                          if (ColabService().keepAlive.isRunning &&
+                              ColabService().keepAlive.currentEndpoint == s.endpoint)
                             const Icon(Icons.timer,
                                 size: 16, color: Colors.blue),
                           PopupMenuButton<String>(
@@ -252,7 +248,8 @@ class _ColabDialogBodyState extends State<_ColabDialogBody> {
                                   _openPython(s);
                                   break;
                                 case 'keepalive':
-                                  widget.keepAlive.start(s.endpoint);
+                                  ColabService().startKeepAlive(s.endpoint);
+                                  StatusNotifier.instance.refresh();
                                   setState(() {});
                                   break;
                                 case 'unassign':
@@ -298,7 +295,7 @@ class _ColabDialogBodyState extends State<_ColabDialogBody> {
                       ),
                     ),
                   )),
-              if (widget.keepAlive.isRunning)
+              if (ColabService().keepAlive.isRunning)
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
                   child: Row(
@@ -307,11 +304,12 @@ class _ColabDialogBodyState extends State<_ColabDialogBody> {
                       const SizedBox(width: 6),
                       Expanded(
                           child: Text(
-                              'Keep-alive: ${widget.keepAlive.currentEndpoint} '
-                              '(${widget.keepAlive.elapsed.inMinutes} min)')),
+                              'Keep-alive: ${ColabService().keepAlive.currentEndpoint} '
+                              '(${ColabService().keepAlive.elapsed.inMinutes} min)')),
                       TextButton(
                         onPressed: () {
-                          widget.keepAlive.stop();
+                          ColabService().stopKeepAlive();
+                          StatusNotifier.instance.refresh();
                           setState(() {});
                         },
                         child: const Text('Detener'),

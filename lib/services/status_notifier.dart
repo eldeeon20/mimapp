@@ -66,15 +66,18 @@ class StatusNotifier {
 
   /// Refresca con estado real (Colab, Laurelia) y re-pinta la notificación.
   void refresh() {
-    // Colab: cantidad de sesiones activas.
-    final count = ColabService().activeSessionCount;
+    final cs = ColabService();
     // Laurelia: tokens generados (contador estático).
     final tokens = LaureliaChat.generatedTokens;
 
-    extra = count > 0
-        ? 'Colab: $count sesión(es) · Laurelia: $tokens tokens'
-        : 'Laurelia: $tokens tokens generados';
-    connection = count > 0 ? 'Online (Colab)' : 'WiFi';
+    final active = cs.keepAlive.isRunning;
+    final count = cs.activeSessionCount;
+    final colabLine = active
+        ? 'Colab: ACTIVO (${cs.activeEndpoint ?? ''})'
+        : (count > 0 ? 'Colab: $count sesión(es)' : 'Colab: inactivo');
+
+    extra = '$colabLine · Laurelia: $tokens tokens';
+    connection = active ? 'Online (Colab)' : 'WiFi';
 
     show();
   }

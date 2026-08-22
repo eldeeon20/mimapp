@@ -114,8 +114,11 @@ class ColabRuntime {
       if (raw is String) {
         final decoded = jsonDecode(raw);
         if (decoded is List && decoded.length >= 4) {
-          msg = Map<String, dynamic>.from(decoded[3] as Map);
-          msg['_parent'] = decoded[1];
+          msg = <String, dynamic>{
+            'header': decoded[0],
+            'content': Map<String, dynamic>.from(decoded[3] as Map),
+            '_parent': decoded[1],
+          };
         } else {
           return;
         }
@@ -132,29 +135,29 @@ class ColabRuntime {
     }
   }
 
-  /// Parsea frame binario (v1) devolviendo {content, _parent, ...}.
+  /// Parsea frame binario (v1) devolviendo {content, header, _parent, ...}.
   Map<String, dynamic>? _parseBinary(List<int> b) {
     try {
       if (b.length >= 16) {
         final n = _le64(b, 0);
-        if (n >= 2 && 8 * (n + 1) <= b.length) {
+        if (n >= 4 && 8 * (n + 1) <= b.length) {
           final offs = [for (var i = 0; i < n; i++) _le64(b, 8 * (i + 1))];
           if (offs.last <= b.length) {
-            final parts = <List<int>>[];
-            for (var i = 1; i < n - 1; i++) {
-              if (offs[i] < offs[i + 1] && offs[i + 1] <= b.length) {
-                parts.add(b.sublist(offs[i], offs[i + 1]));
-              }
-            }
-            if (parts.length >= 4) {
-              final content =
-                  jsonDecode(utf8.decode(parts[3])) as Map<String, dynamic>;
-              final parent = parts.length > 1
-                  ? jsonDecode(utf8.decode(parts[1]))
-                  : <String, dynamic>{};
-              content['_parent'] = parent;
-              return content;
-            }
+            List<int> seg(int i) =>
+                (offs[i] < offs[i + 1] && offs[i + 1] <= b.length)
+                    ? b.sublist(offs[i], offs[i + 1])
+                    : const <int>[];
+            final header =
+                jsonDecode(utf8.decode(seg(0))) as Map<String, dynamic>;
+            final parent =
+                jsonDecode(utf8.decode(seg(1))) as Map<String, dynamic>;
+            final content =
+                jsonDecode(utf8.decode(seg(3))) as Map<String, dynamic>;
+            return <String, dynamic>{
+              'header': header,
+              'content': content,
+              '_parent': parent,
+            };
           }
         }
       }
