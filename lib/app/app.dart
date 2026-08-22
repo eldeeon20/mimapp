@@ -251,7 +251,7 @@ class _HomePageState extends State<HomePage> {
             // ==========================================================
 
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10),
+              padding: const EdgeInsets.fromLTRB(10, 0, 10, 28),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: [
@@ -288,24 +288,6 @@ class _HomePageState extends State<HomePage> {
                 ],
               ),
             ),
-
-            const SizedBox(height: 22),
-
-            // ==========================================================
-            // HOME INDICATOR
-            // ==========================================================
-
-            Container(
-              width: 110,
-              height: 5,
-              margin: const EdgeInsets.only(bottom: 10),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(10),
-              ),
-            ),
-
-            const SizedBox(height: 10),
           ],
         ),
       ),

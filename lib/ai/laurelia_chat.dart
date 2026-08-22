@@ -223,6 +223,10 @@ class LaureliaChat {
     return await laureliaCountTokens(text: text);
   }
 
+  /// Tokens generados en total por esta app (contador global, persiste
+  /// entre instancias de pantalla). Se usa en el panel de estado.
+  static int generatedTokens = 0;
+
   /// Genera texto. Los parámetros tienen defaults iguales al ejemplo Godot.
   Future<String> generate(
     String prompt, {
@@ -232,7 +236,7 @@ class LaureliaChat {
     double topP = 0.9,
     double repetitionPenalty = 1.2,
   }) async {
-    return laureliaGenerate(
+    final out = await laureliaGenerate(
       prompt: prompt,
       maxNewTokens: maxNewTokens,
       temperature: temperature,
@@ -240,6 +244,9 @@ class LaureliaChat {
       topP: topP,
       repetitionPenalty: repetitionPenalty,
     );
+    // Estimación de tokens generados (aprox. 1 token por 4 chars).
+    generatedTokens += (out.length / 4).round();
+    return out;
   }
 
   Future<bool> isLoaded() async => _loaded && await laureliaIsLoaded();

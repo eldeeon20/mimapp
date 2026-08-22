@@ -18,6 +18,9 @@ class ColabService {
 
   bool _initialized = false;
 
+  /// Cantidad de sesiones de Colab activas (para el panel de estado).
+  int activeSessionCount = 0;
+
   /// Inicializar: carga tokens guardados al arrancar la app.
   Future<void> init() async {
     if (_initialized) return;

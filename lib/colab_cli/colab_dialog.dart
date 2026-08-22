@@ -5,6 +5,8 @@ import 'colab_auth.dart';
 import 'colab_cells_screen.dart';
 import 'colab_keep_alive.dart';
 import 'colab_sessions.dart';
+import '../services/colab_service.dart';
+import '../services/status_notifier.dart';
 
 /// Diálogo de gestión de Colab: autenticación (loopback), sesiones, keep-alive.
 Future<void> showColabDialog(BuildContext context) async {
@@ -76,6 +78,8 @@ class _ColabDialogBodyState extends State<_ColabDialogBody> {
     setState(() => _loading = true);
     try {
       _sessions = await widget.sessions.list();
+      ColabService().activeSessionCount = _sessions.length;
+      StatusNotifier.instance.refresh();
     } catch (e) {
       setState(() => _error = 'Error cargando sesiones: $e');
     }

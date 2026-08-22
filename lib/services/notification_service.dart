@@ -1,3 +1,4 @@
+import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 class NotificationService {
@@ -6,6 +7,13 @@ class NotificationService {
 
   static const _channelId = 'default_channel';
   static const _channelName = 'Notificaciones';
+
+  /// Canal del servicio en primer plano (id = el de bootstrap._notifChannelId).
+  static const _serviceChannelId = 'pr_app_channel';
+
+  /// ID de la notificación de servicio en primer plano (debe coincidir con
+  /// el foregroundServiceNotificationId de flutter_background_service).
+  static const serviceNotificationId = 888;
 
   static Future<void> init() async {
     const androidSettings = AndroidInitializationSettings('ic_bg_service_small');
@@ -24,7 +32,12 @@ class NotificationService {
     await _plugin.initialize(
       settings: initSettings,
       onDidReceiveNotificationResponse: (NotificationResponse response) {
-        // Cuando el usuario toca la notificación
+        if (response.actionId == 'exit') {
+          // Botón "Salir": detiene el servicio en primer plano y quita
+          // la notificación.
+          FlutterBackgroundService().invoke('stop');
+          _plugin.cancel(serviceNotificationId);
+        }
       },
     );
 
@@ -56,4 +69,30 @@ class NotificationService {
   static FlutterLocalNotificationsPlugin get plugin => _plugin;
   static String get channelId => _channelId;
   static String get channelName => _channelName;
+
+  /// Notificación de servicio en primer plano con botón "Salir".
+  /// Debe mostrarse con el mismo id que usa flutter_background_service.
+  static Future<void> showServiceNotification() async {
+    const details = NotificationDetails(
+      android: AndroidNotificationDetails(
+        _serviceChannelId,
+        'Servicio',
+        channelDescription: 'Servicio en primer plano de la app',
+        importance: Importance.low,
+        priority: Priority.low,
+        ongoing: true,
+        showWhen: false,
+        actions: [
+          AndroidNotificationAction('exit', 'Salir',
+              showsUserInterface: false),
+        ],
+      ),
+    );
+    await _plugin.show(
+      serviceNotificationId,
+      'Secure App',
+      'Servicio activo · toca Salir para detener',
+      details,
+    );
+  }
 }

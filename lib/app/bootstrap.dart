@@ -8,6 +8,7 @@ import 'package:pr_app/src/rust/frb_generated.dart';
 
 import '../services/colab_service.dart';
 import '../services/notification_service.dart';
+import '../services/status_notifier.dart';
 import '../media/media_player.dart';
 
 const _notifChannelId = 'pr_app_channel';
@@ -27,6 +28,7 @@ Future<void> initApp() async {
   await _initBackgroundService();
   await _initRust();
   await _initColab();
+  await StatusNotifier.instance.init();
 }
 
 /// Pantalla completa inmersiva: sin barra de estado (sin hora/batería)
@@ -96,7 +98,7 @@ Future<void> _initBackgroundService() async {
         autoStart: true,
         isForegroundMode: true,
         notificationChannelId: _notifChannelId,
-        initialNotificationTitle: 'pr_app',
+        initialNotificationTitle: 'Secure App',
         initialNotificationContent: 'Servicio activo',
         foregroundServiceNotificationId: 888,
       ),
@@ -128,6 +130,13 @@ Future<void> _initColab() async {
 
 @pragma('vm:entry-point')
 Future<void> onServiceStart(ServiceInstance service) async {
+  // Inicializar FLN en el isolate del servicio para poder sobreescribir la
+  // notificación en primer plano con un botón "Salir".
+  try {
+    await NotificationService.init();
+    await NotificationService.showServiceNotification();
+  } catch (_) {}
+
   service.on('stop').listen((_) {
     service.stopSelf();
   });
