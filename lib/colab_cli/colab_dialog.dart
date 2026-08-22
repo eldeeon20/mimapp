@@ -82,12 +82,52 @@ class _ColabDialogBodyState extends State<_ColabDialogBody> {
   }
 
   Future<void> _createSession() async {
+    // Elegir acelerador antes de asignar.
+    if (!mounted) return;
+    final choice = await showModalBottomSheet<ColabAccelerator>(
+      context: context,
+      builder: (sheetCtx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(12),
+              child: Text('Elegí el runtime',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+            ...ColabAccelerator.values.map((a) => ListTile(
+                  leading: Icon(
+                    a == ColabAccelerator.cpu
+                        ? Icons.memory
+                        : a == ColabAccelerator.tpu
+                            ? Icons.grid_view
+                            : Icons.bolt,
+                    color: a == ColabAccelerator.cpu
+                        ? Colors.grey
+                        : Colors.amber,
+                  ),
+                  title: Text(a.label),
+                  subtitle: a == ColabAccelerator.cpu
+                      ? const Text('Gratis, siempre disponible',
+                          style: TextStyle(fontSize: 11))
+                      : a == ColabAccelerator.a100
+                          ? const Text('Requiere Pro+',
+                              style: TextStyle(fontSize: 11))
+                          : null,
+                  onTap: () => Navigator.pop(sheetCtx, a),
+                )),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (choice == null || !mounted) return;
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
-      await widget.sessions.assign();
+      await widget.sessions.assign(accel: choice);
       await _loadSessions();
     } catch (e) {
       if (mounted) {

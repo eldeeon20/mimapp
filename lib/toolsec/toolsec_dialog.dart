@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:saf_stream/saf_stream.dart';
 import 'package:saf_util/saf_util.dart';
+import 'package:saf_util_platform_interface/saf_util_platform_interface.dart';
 
 import 'toolsec.dart';
 
@@ -236,7 +237,7 @@ Future<bool?> _askForCopy(BuildContext context, String reason) {
 Future<String> _saveInternalCopy(String originalPath, Uint8List data) async {
   final dir = await getApplicationSupportDirectorySafe();
   final safeName = originalPath.split(Platform.pathSeparator).last;
-  final outFile = File('${dir.path}/$safeName.sec');
+  final outFile = File('$dir/$safeName.sec');
   await outFile.writeAsBytes(data);
   return outFile.path;
 }

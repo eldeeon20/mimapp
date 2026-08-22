@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:path_provider/path_provider.dart';
 import 'package:saf_stream/saf_stream.dart';
 import 'package:saf_util/saf_util.dart';
+import 'package:saf_util_platform_interface/saf_util_platform_interface.dart';
 
 /// Excepción cuando no se puede escribir sobre el archivo original.
 /// Lleva los bytes ya cifrados para ofrecer guardar una copia.
@@ -94,7 +95,7 @@ class ToolSec {
     // Verificación post-escritura (tamaño).
     try {
       final stat = await SafUtil().stat(doc.uri, false);
-      final size = stat?.size ?? -1;
+      final size = stat?.length ?? -1;
       if (size >= 0 && size != data.length) {
         throw ToolSecCantWriteException(
             data,
@@ -122,7 +123,7 @@ class ToolSec {
       encrypted,
       overwrite: true,
     );
-    return res.name;
+    return res.fileName ?? fileName;
   }
 
   /// Cifra/descifra un archivo chico (todo en RAM).

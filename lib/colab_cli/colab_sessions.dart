@@ -9,6 +9,19 @@ import 'colab_config.dart';
 /// Prefijo XSSI que Google antepone a las respuestas JSON.
 const _xssiPrefix = ")]}'\n";
 
+/// Acelerador elegible al crear una sesión.
+enum ColabAccelerator {
+  cpu('CPU', {}),
+  t4('GPU T4', {'variant': 'GPU', 'accelerator': 'T4'}),
+  l4('GPU L4', {'variant': 'GPU', 'accelerator': 'L4'}),
+  a100('GPU A100', {'variant': 'GPU', 'accelerator': 'A100'}),
+  tpu('TPU', {'variant': 'TPU'});
+
+  const ColabAccelerator(this.label, this.params);
+  final String label;
+  final Map<String, String> params;
+}
+
 /// Sesión (assignment) activa de Colab.
 class ColabSession {
   final String endpoint;
@@ -137,9 +150,11 @@ class ColabSessions {
   // ===========================================================================
 
   /// Crea/asigna un runtime nuevo. Retorna la sesión creada.
-  Future<ColabSession> assign() async {
+  /// Asigna una sesión nueva. [accel] define CPU/GPU/TPU.
+  Future<ColabSession> assign(
+      {ColabAccelerator accel = ColabAccelerator.cpu}) async {
     final nbh = _webSafeUuid();
-    final url = _colabUri('/tun/m/assign', {'nbh': nbh});
+    final url = _colabUri('/tun/m/assign', {'nbh': nbh, ...accel.params});
 
     // 1er GET: el backend responde con el XSRF token (o sesión existente).
     final getResp = await http.get(url, headers: await _headers());
@@ -152,7 +167,8 @@ class ColabSessions {
     if (getData is Map &&
         getData.containsKey('endpoint') &&
         !getData.containsKey('nbh')) {
-      return ColabSession.fromJson(getData);
+      return ColabSession.fromJson(
+          Map<String, dynamic>.from(getData));
     }
 
     // Respuesta esperada: {acc, nbh, token, variant} → POST con XSRF.

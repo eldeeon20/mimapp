@@ -24,6 +24,68 @@ class _AiScreenState extends State<AiScreen> {
     widget.laurelia.onProgress = (msg) {
       if (mounted) setState(() => _status = msg);
     };
+    _loadHistory();
+  }
+
+  Future<void> _loadHistory() async {
+    await widget.laurelia.loadHistory();
+    if (!mounted) return;
+    setState(() {
+      _messages
+        ..clear()
+        ..addAll(widget.laurelia.history
+            .map((h) => _Msg(h['content']!, h['role'] == 'user')));
+    });
+  }
+
+  Future<void> _clearChat() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Borrar historial'),
+        content: const Text(
+            'Se borran todos los mensajes del chat. ¿Continuar?'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Borrar')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await widget.laurelia.clearHistory();
+    if (mounted) setState(() => _messages.clear());
+  }
+
+  Future<void> _deleteModel() async {
+    final name = widget.laurelia.model;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Eliminar modelo $name'),
+        content: const Text(
+            'Se borra el checkpoint descargado del dispositivo. '
+            'Podrás descargarlo de nuevo.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Eliminar')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    setState(() => _busy = true);
+    try {
+      await widget.laurelia.deleteModel(name);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   @override
@@ -41,18 +103,27 @@ class _AiScreenState extends State<AiScreen> {
       _messages.add(_Msg(text, true));
       _busy = true;
     });
+    widget.laurelia.addHistory('user', text);
 
     try {
       final reply = await widget.laurelia.generate(text, maxNewTokens: 200);
-      setState(() {
-        _messages.add(_Msg(reply.isEmpty ? '(vacío)' : reply, false));
-      });
+      final clean = reply.isEmpty ? '(vacío)' : reply;
+      widget.laurelia.addHistory('assistant', clean);
+      if (mounted) {
+        setState(() {
+          _messages.add(_Msg(clean, false));
+        });
+      }
     } catch (e) {
-      setState(() {
-        _messages.add(_Msg('Error: $e', false));
-      });
+      widget.laurelia
+          .addHistory('assistant', 'Error: $e');
+      if (mounted) {
+        setState(() {
+          _messages.add(_Msg('Error: $e', false));
+        });
+      }
     } finally {
-      setState(() => _busy = false);
+      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -64,6 +135,14 @@ class _AiScreenState extends State<AiScreen> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<void> _switchModel(String name) async {
+    if (name == widget.laurelia.model) return;
+    await widget.laurelia.setModel(name);
+    if (mounted) setState(() {});
+    // Recargar historial del chat (es único, se mantiene).
+    if (mounted) setState(() => _status = widget.laurelia.status);
   }
 
   @override
@@ -83,7 +162,7 @@ class _AiScreenState extends State<AiScreen> {
         // Model info
         Container(
           width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
           color: Colors.grey[800],
           child: Row(
             children: [
@@ -93,26 +172,59 @@ class _AiScreenState extends State<AiScreen> {
                 color: loaded ? Colors.green : Colors.orange,
               ),
               const SizedBox(width: 6),
+              // Selector de modelo: base / fine
+              DropdownButton<String>(
+                value: widget.laurelia.model,
+                underline: const SizedBox.shrink(),
+                isDense: true,
+                style: const TextStyle(fontSize: 12, color: Colors.white),
+                dropdownColor: Colors.grey[850],
+                items: widget.laurelia.models
+                    .map((m) => DropdownMenuItem(
+                          value: m,
+                          child: Text(m == 'fine' ? 'Laurelia Fine' : 'Laurelia Base'),
+                        ))
+                    .toList(),
+                onChanged: _busy ? null : (v) => _switchModel(v!),
+              ),
               Text(
-                loaded
-                    ? 'Modelo: ${widget.laurelia.modelName} (cargado)'
-                    : 'Modelo: ${widget.laurelia.modelName} (no cargado)',
-                style: const TextStyle(fontSize: 12),
+                loaded ? ' · cargado' : ' · no cargado',
+                style: TextStyle(
+                    fontSize: 11,
+                    color: loaded ? Colors.green : Colors.orange),
               ),
               const Spacer(),
               FilledButton.tonal(
                 onPressed: _busy ? null : _downloadAndLoad,
-                child: Text(loaded ? 'Recargar' : 'Descargar + Cargar'),
+                child: Text(loaded ? 'Recargar' : 'Descargar',
+                    style: const TextStyle(fontSize: 11)),
               ),
-              const SizedBox(width: 8),
               IconButton(
                 icon: const Icon(Icons.refresh, size: 18),
-                onPressed: () async {
-                  await widget.laurelia.unload();
-                  await widget.laurelia.load();
-                  setState(() {});
-                },
+                onPressed: _busy
+                    ? null
+                    : () async {
+                        setState(() => _busy = true);
+                        try {
+                          await widget.laurelia.unload();
+                          await widget.laurelia.load();
+                        } finally {
+                          if (mounted) setState(() => _busy = false);
+                        }
+                      },
                 tooltip: 'Recargar modelo',
+              ),
+              IconButton(
+                icon: const Icon(Icons.delete_forever,
+                    size: 18, color: Colors.redAccent),
+                onPressed: _busy ? null : _deleteModel,
+                tooltip: 'Eliminar modelo del dispositivo',
+              ),
+              IconButton(
+                icon:
+                    const Icon(Icons.delete_sweep, size: 18, color: Colors.amber),
+                onPressed: _clearChat,
+                tooltip: 'Borrar historial del chat',
               ),
             ],
           ),

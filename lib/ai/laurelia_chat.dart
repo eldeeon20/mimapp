@@ -33,6 +33,10 @@ class LaureliaChat {
   String? _status;
   String? _dirPath;
 
+  /// Historial del chat: [{'role': 'user'|'assistant', 'content': '...'}].
+  /// Se persiste en appSupport/laurelia/history.json.
+  final List<Map<String, String>> history = [];
+
   String get status => _status ?? '';
   bool get loaded => _loaded;
   int get downloadedBytes => _downloadedBytes;
@@ -252,6 +256,59 @@ class LaureliaChat {
 
   /// Callback de progreso (para actualizar la UI desde Lua).
   void Function(String msg)? onProgress;
+
+  // ---------- Historial persistente ----------
+
+  Future<File> _historyFile() async {
+    final root = await getApplicationSupportDirectory();
+    final dir = Directory('${root.path}/laurelia');
+    if (!dir.existsSync()) dir.createSync(recursive: true);
+    return File('${dir.path}/history.json');
+  }
+
+  /// Carga el historial guardado en disco (llamar al iniciar la pantalla).
+  Future<void> loadHistory() async {
+    history.clear();
+    try {
+      final f = await _historyFile();
+      if (!f.existsSync()) return;
+      final data = jsonDecode(f.readAsStringSync());
+      if (data is List) {
+        for (final e in data) {
+          if (e is Map &&
+              e['role'] is String &&
+              e['content'] is String) {
+            history.add({
+              'role': e['role'] as String,
+              'content': e['content'] as String,
+            });
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
+  void addHistory(String role, String content) {
+    history.add({'role': role, 'content': content});
+    _saveHistory();
+  }
+
+  Future<void> _saveHistory() async {
+    try {
+      final f = await _historyFile();
+      f.writeAsStringSync(jsonEncode(history));
+    } catch (_) {}
+  }
+
+  /// Borra el historial (disco + memoria).
+  Future<void> clearHistory() async {
+    history.clear();
+    try {
+      final f = await _historyFile();
+      if (f.existsSync()) await f.delete();
+    } catch (_) {}
+    _progress('Historial borrado.');
+  }
 
   /// Serializa los datos de estado para mostrarlos en Lua.
   String stateJson() {
