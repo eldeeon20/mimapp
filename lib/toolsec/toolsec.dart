@@ -1,6 +1,19 @@
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:path_provider/path_provider.dart';
+import 'package:saf_stream/saf_stream.dart';
+import 'package:saf_util/saf_util.dart';
+
+/// Excepción cuando no se puede escribir sobre el archivo original.
+/// Lleva los bytes ya cifrados para ofrecer guardar una copia.
+class ToolSecCantWriteException implements Exception {
+  final Uint8List encrypted;
+  final String reason;
+  ToolSecCantWriteException(this.encrypted, this.reason);
+
+  @override
+  String toString() => reason;
+}
 
 /// Cifrado/descifrado XOR por semilla — algoritmo idéntico a ToolSec (Godot/Rust).
 ///
@@ -48,6 +61,68 @@ class ToolSec {
       state = next;
     }
     return result;
+  }
+
+  // =========================================================================
+  // Android SAF: cifrado sobre el archivo REAL (Descargas, Documents, etc.)
+  // =========================================================================
+
+  /// Elige un archivo real con el picker del sistema (SAF).
+  static Future<SafDocumentFile?> pickSafFile() =>
+      SafUtil().pickFile(mimeTypes: ['*/*']);
+
+  /// Elige una carpeta destino con permiso de escritura (SAF).
+  static Future<SafDocumentFile?> pickSafDirectory() =>
+      SafUtil().pickDirectory(writePermission: true);
+
+  /// Cifra/descifra in-place sobre el archivo SAF elegido (como Godot:
+  /// sobrescribe el original). Si no puede escribir, lanza
+  /// [ToolSecCantWriteException] con los bytes ya cifrados incluidos.
+  Future<String> encodeSafInPlace(SafDocumentFile doc) async {
+    final saf = SafStream();
+    final bytes = await saf.readFileBytes(doc.uri);
+    if (bytes.isEmpty) {
+      throw Exception('El archivo está vacío');
+    }
+    final data = processBytes(bytes);
+    try {
+      await saf.writeFileUriBytes(doc.uri, data);
+    } catch (e) {
+      throw ToolSecCantWriteException(data, '$e');
+    }
+
+    // Verificación post-escritura (tamaño).
+    try {
+      final stat = await SafUtil().stat(doc.uri, false);
+      final size = stat?.size ?? -1;
+      if (size >= 0 && size != data.length) {
+        throw ToolSecCantWriteException(
+            data,
+            'Escritura incompleta: esperaba ${data.length} bytes, '
+            'quedaron $size');
+      }
+    } on ToolSecCantWriteException {
+      rethrow;
+    } catch (_) {
+      // stat falló (algunos proveedores no lo soportan): no es fatal.
+    }
+    return doc.name;
+  }
+
+  /// Guarda una copia cifrada en la carpeta que elija el usuario.
+  /// Retorna el nombre real del archivo creado (SAF puede cambiarlo).
+  static Future<String> saveSafCopy(
+      Uint8List encrypted, String fileName) async {
+    final dir = await pickSafDirectory();
+    if (dir == null) throw Exception('Carpeta destino cancelada');
+    final res = await SafStream().writeFileBytes(
+      dir.uri,
+      fileName,
+      'application/octet-stream',
+      encrypted,
+      overwrite: true,
+    );
+    return res.name;
   }
 
   /// Cifra/descifra un archivo chico (todo en RAM).

@@ -1,0 +1,229 @@
+import 'package:flutter/material.dart';
+
+import 'colab_runtime.dart';
+
+class _Cell {
+  final TextEditingController code;
+  String output = '';
+  bool running = false;
+  String status = ''; // '', 'ok', 'error', 'running'
+
+  _Cell([String initial = '']) : code = TextEditingController(text: initial);
+}
+
+/// Notebook simple: celdas Python ejecutadas en el kernel de Colab.
+class ColabCellsScreen extends StatefulWidget {
+  final String serverUrl;
+  final String proxyToken;
+
+  const ColabCellsScreen({
+    super.key,
+    required this.serverUrl,
+    required this.proxyToken,
+  });
+
+  @override
+  State<ColabCellsScreen> createState() => _ColabCellsScreenState();
+}
+
+class _ColabCellsScreenState extends State<ColabCellsScreen> {
+  late final ColabRuntime _runtime;
+  final List<_Cell> _cells = [];
+  String _connStatus = 'Conectando...';
+  bool _connected = false;
+
+  static const _helloWorld = '''# Ejemplo de prueba
+print("Hola Mundo desde Colab 🚀")
+import sys
+print("Python:", sys.version.split()[0])''';
+
+  @override
+  void initState() {
+    super.initState();
+    _runtime =
+        ColabRuntime(serverUrl: widget.serverUrl, proxyToken: widget.proxyToken);
+    // Celda de ejemplo precargada para probar al instante.
+    _cells.add(_Cell(_helloWorld));
+    _connect();
+  }
+
+  Future<void> _connect() async {
+    try {
+      await _runtime.start();
+      setState(() {
+        _connected = true;
+        _connStatus = 'Kernel conectado';
+      });
+    } catch (e) {
+      setState(() => _connStatus = 'Error: $e');
+    }
+  }
+
+  Future<void> _runCell(int i) async {
+    final cell = _cells[i];
+    if (!_connected || cell.running) return;
+    setState(() {
+      cell.running = true;
+      cell.status = 'running';
+      cell.output = '';
+    });
+    try {
+      final res = await _runtime.execute(cell.code.text);
+      setState(() {
+        cell.output = res.output.isEmpty ? '(sin salida)' : res.output;
+        cell.status = res.isError ? 'error' : 'ok';
+      });
+    } catch (e) {
+      setState(() {
+        cell.output = 'Error: $e';
+        cell.status = 'error';
+      });
+    } finally {
+      if (mounted) setState(() => cell.running = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Colab Python ${_connected ? "●" : "○"}'),
+        actions: [
+          IconButton(
+            tooltip: 'Nueva celda',
+            onPressed: () => setState(() => _cells.add(_Cell())),
+            icon: const Icon(Icons.add),
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            child: Row(
+              children: [
+                Icon(_connected ? Icons.check_circle : Icons.error,
+                    size: 14,
+                    color: _connected ? Colors.greenAccent : Colors.redAccent),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(_connStatus,
+                      style: const TextStyle(fontSize: 12),
+                      overflow: TextOverflow.ellipsis),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.all(12),
+              itemCount: _cells.length,
+              itemBuilder: (context, i) {
+                final cell = _cells[i];
+                return Card(
+                  color: const Color(0xFF0B1220),
+                  margin: const EdgeInsets.only(bottom: 12),
+                  child: Padding(
+                    padding: const EdgeInsets.all(10),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Row(
+                          children: [
+                            Text('[${i + 1}]',
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.grey[500],
+                                    fontFamily: 'monospace')),
+                            const Spacer(),
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              onPressed: cell.running || !_connected
+                                  ? null
+                                  : () => _runCell(i),
+                              icon: cell.running
+                                  ? const SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2))
+                                  : const Icon(Icons.play_arrow,
+                                      color: Colors.greenAccent),
+                            ),
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              onPressed: _cells.length <= 1
+                                  ? null
+                                  : () =>
+                                      setState(() => _cells.removeAt(i)),
+                              icon: const Icon(Icons.delete_outline,
+                                  size: 20, color: Colors.redAccent),
+                            ),
+                          ],
+                        ),
+                        TextField(
+                          controller: cell.code,
+                          maxLines: null,
+                          minLines: 3,
+                          style: const TextStyle(
+                              fontSize: 13, fontFamily: 'monospace'),
+                          decoration: InputDecoration(
+                            isDense: true,
+                            filled: true,
+                            fillColor: const Color(0xFF111827),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            hintText: 'Código Python...',
+                          ),
+                        ),
+                        if (cell.output.isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          Container(
+                            width: double.infinity,
+                            constraints:
+                                const BoxConstraints(minHeight: 40),
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: Colors.black,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: cell.status == 'error'
+                                    ? Colors.redAccent.withValues(alpha: .4)
+                                    : Colors.greenAccent
+                                        .withValues(alpha: .25),
+                              ),
+                            ),
+                            child: Text(
+                              cell.output,
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontFamily: 'monospace',
+                                color: cell.status == 'error'
+                                    ? Colors.redAccent[100]
+                                    : Colors.greenAccent[100],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _runtime.close();
+    for (final c in _cells) {
+      c.code.dispose();
+    }
+    super.dispose();
+  }
+}

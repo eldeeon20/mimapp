@@ -39,7 +39,7 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
-    _mediaPlayer = MediaPlayer();
+    _mediaPlayer = MediaPlayer.instance;
     _laurelia = LaureliaChat();
   }
 

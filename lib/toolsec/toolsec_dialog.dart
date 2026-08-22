@@ -3,32 +3,91 @@ import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:permission_handler/permission_handler.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:saf_stream/saf_stream.dart';
+import 'package:saf_util/saf_util.dart';
 
 import 'toolsec.dart';
 
-/// Pide permisos de almacenamiento necesarios.
-Future<bool> _requestStoragePermission() async {
-  if (Platform.isAndroid) {
-    if (await Permission.manageExternalStorage.isGranted) return true;
-    if (await Permission.manageExternalStorage.request().isGranted) return true;
-    if (await Permission.storage.isGranted) return true;
-    if (await Permission.storage.request().isGranted) return true;
-    final audio = await Permission.audio.request();
-    if (audio.isGranted) return true;
-    return false;
-  }
-  return true;
-}
-
 /// Diálogo ToolSec: cifra/descifra archivos con XOR por semilla.
+///
+/// Android (SAF): cifra SOBRE el archivo real elegido (Descargas, etc).
+/// Si no puede escribir, pregunta si querés guardar una copia cifrada.
 Future<void> showToolSecDialog(BuildContext context) async {
   final seedCtrl = TextEditingController();
+  SafDocumentFile? safDoc;
   String? filePath;
   String? fileName;
   bool processing = false;
   String? resultMsg;
   String? hexPreview;
+
+  Future<void> doEncrypt(void Function(void Function()) setDlgState) async {
+    setDlgState(() {
+      processing = true;
+      resultMsg = null;
+      hexPreview = null;
+    });
+    try {
+      final ts = ToolSec(seedCtrl.text);
+
+      if (Platform.isAndroid && safDoc != null) {
+        // ---- Android SAF: in-place sobre el archivo real ----
+        try {
+          final outName = await ts.encodeSafInPlace(safDoc!);
+          final head =
+              await SafStream().readFileBytes(safDoc!.uri, start: 0, count: 50);
+          setDlgState(() {
+            resultMsg = 'Cifrado sobre el archivo original:\n$outName';
+            hexPreview = _toHex(head);
+          });
+        } on ToolSecCantWriteException catch (e) {
+          // No se pudo escribir sobre el original → ofrecer copia
+          if (!context.mounted) return;
+          final wantsCopy = await _askForCopy(context, e.reason);
+          if (wantsCopy != true) {
+            setDlgState(() =>
+                resultMsg = 'Cancelado: no se modificó ningún archivo');
+            return;
+          }
+          try {
+            final saved =
+                await ToolSec.saveSafCopy(e.encrypted, '${safDoc!.name}.sec');
+            setDlgState(() {
+              resultMsg = 'Copia cifrada guardada como:\n$saved';
+              hexPreview = _toHex(e.encrypted.take(50));
+            });
+          } catch (err) {
+            setDlgState(() => resultMsg = 'Error guardando copia: $err');
+          }
+        }
+      } else if (filePath != null) {
+        // ---- Desktop / rutas directas: in-place primero ----
+        final file = File(filePath!);
+        final data = ts.processBytes(file.readAsBytesSync());
+        try {
+          file.writeAsBytesSync(data);
+          setDlgState(() {
+            resultMsg = 'Cifrado sobre el archivo original:\n$filePath';
+            hexPreview = _toHex(data.take(50));
+          });
+        } catch (e) {
+          // Fallback: copia en carpeta interna
+          final copyPath = await _saveInternalCopy(filePath!, data);
+          setDlgState(() {
+            resultMsg =
+                'No se pudo escribir sobre el original.\n'
+                'Copia cifrada guardada en:\n$copyPath\n($e)';
+            hexPreview = _toHex(data.take(50));
+          });
+        }
+      }
+    } catch (e) {
+      setDlgState(() => resultMsg = 'Error: $e');
+    } finally {
+      setDlgState(() => processing = false);
+    }
+  }
 
   await showDialog(
     context: context,
@@ -53,19 +112,26 @@ Future<void> showToolSecDialog(BuildContext context) async {
                 onPressed: processing
                     ? null
                     : () async {
-                        final perm = await _requestStoragePermission();
-                        if (!perm) {
-                          setDlgState(() =>
-                              resultMsg = 'Permiso de almacenamiento denegado');
-                          return;
-                        }
-                        final result =
-                            await FilePicker.platform.pickFiles();
-                        if (result != null &&
-                            result.files.single.path != null) {
+                        if (Platform.isAndroid) {
+                          final doc = await ToolSec.pickSafFile();
+                          if (doc == null) return;
+                          setDlgState(() {
+                            safDoc = doc;
+                            fileName = doc.name;
+                            filePath = null;
+                            resultMsg = null;
+                            hexPreview = null;
+                          });
+                        } else {
+                          final result =
+                              await FilePicker.platform.pickFiles();
+                          if (result == null ||
+                              result.files.single.path == null) return;
                           setDlgState(() {
                             filePath = result.files.single.path;
                             fileName = result.files.single.name;
+                            safDoc = null;
+                            resultMsg = null;
                             hexPreview = null;
                           });
                         }
@@ -73,11 +139,16 @@ Future<void> showToolSecDialog(BuildContext context) async {
                 icon: const Icon(Icons.folder_open),
                 label: Text(fileName ?? 'Seleccionar archivo'),
               ),
-              if (filePath != null) ...[
+              if (fileName != null) ...[
                 const SizedBox(height: 8),
-                Text('Archivo: $fileName',
-                    style: const TextStyle(
-                        fontSize: 12, color: Colors.grey)),
+                Text(
+                  Platform.isAndroid
+                      ? 'Archivo: $fileName (se cifra sobre el original)'
+                      : 'Archivo: $fileName',
+                  style:
+                      const TextStyle(fontSize: 12, color: Colors.grey),
+                  textAlign: TextAlign.center,
+                ),
               ],
               if (processing) ...[
                 const SizedBox(height: 12),
@@ -89,7 +160,7 @@ Future<void> showToolSecDialog(BuildContext context) async {
                     style: TextStyle(
                         fontSize: 12,
                         color: resultMsg!.startsWith('Error') ||
-                                resultMsg!.startsWith('Permiso')
+                                resultMsg!.startsWith('Cancel')
                             ? Colors.red
                             : Colors.green)),
               ],
@@ -97,7 +168,7 @@ Future<void> showToolSecDialog(BuildContext context) async {
                 const SizedBox(height: 8),
                 const Align(
                   alignment: Alignment.centerLeft,
-                  child: Text('Preview (hex):',
+                  child: Text('Primeros bytes (hex):',
                       style: TextStyle(
                           fontSize: 11, fontWeight: FontWeight.bold)),
                 ),
@@ -125,38 +196,11 @@ Future<void> showToolSecDialog(BuildContext context) async {
             child: const Text('Cerrar'),
           ),
           FilledButton(
-            onPressed: (processing ||
-                    filePath == null ||
+            onPressed: ((safDoc == null && filePath == null) ||
+                    processing ||
                     seedCtrl.text.isEmpty)
                 ? null
-                : () async {
-                    setDlgState(() {
-                      processing = true;
-                      resultMsg = null;
-                      hexPreview = null;
-                    });
-                    try {
-                      final ts = ToolSec(seedCtrl.text);
-                      final outPath =
-                          await ts.encodeFileSecure(filePath!);
-                      final bytes =
-                          await File(outPath).readAsBytes();
-                      final preview = bytes
-                          .take(50)
-                          .map((b) =>
-                              b.toRadixString(16).padLeft(2, '0'))
-                          .join(' ');
-                      setDlgState(() {
-                        resultMsg = 'Cifrado guardado en:\n$outPath';
-                        hexPreview = preview;
-                      });
-                    } catch (e) {
-                      setDlgState(
-                          () => resultMsg = 'Error: $e');
-                    } finally {
-                      setDlgState(() => processing = false);
-                    }
-                  },
+                : () => doEncrypt(setDlgState),
             child: const Text('Cifrar / Descifrar'),
           ),
         ],
@@ -164,4 +208,42 @@ Future<void> showToolSecDialog(BuildContext context) async {
     ),
   );
   seedCtrl.dispose();
+}
+
+String _toHex(Iterable<int> bytes) =>
+    bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ');
+
+Future<bool?> _askForCopy(BuildContext context, String reason) {
+  return showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('No se pudo cifrar sobre el original'),
+      content: Text('$reason\n\n¿Querés guardar una copia cifrada?'),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, false),
+          child: const Text('No'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(ctx, true),
+          child: const Text('Guardar copia'),
+        ),
+      ],
+    ),
+  );
+}
+
+Future<String> _saveInternalCopy(String originalPath, Uint8List data) async {
+  final dir = await getApplicationSupportDirectorySafe();
+  final safeName = originalPath.split(Platform.pathSeparator).last;
+  final outFile = File('${dir.path}/$safeName.sec');
+  await outFile.writeAsBytes(data);
+  return outFile.path;
+}
+
+Future<String> getApplicationSupportDirectorySafe() async {
+  final d = await getApplicationSupportDirectory();
+  final toolsecDir = Directory('${d.path}/toolsec');
+  if (!toolsecDir.existsSync()) toolsecDir.createSync(recursive: true);
+  return toolsecDir.path;
 }

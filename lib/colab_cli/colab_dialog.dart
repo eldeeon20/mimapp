@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'colab_auth.dart';
+import 'colab_cells_screen.dart';
 import 'colab_keep_alive.dart';
 import 'colab_sessions.dart';
 
@@ -80,6 +81,35 @@ class _ColabDialogBodyState extends State<_ColabDialogBody> {
     if (mounted) setState(() => _loading = false);
   }
 
+  Future<void> _createSession() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      await widget.sessions.assign();
+      await _loadSessions();
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = 'Error creando sesión: $e';
+          _loading = false;
+        });
+      }
+    }
+  }
+
+  void _openPython(ColabSession s) {
+    final nav = Navigator.of(context, rootNavigator: true);
+    Navigator.pop(context);
+    nav.push(MaterialPageRoute(
+      builder: (_) => ColabCellsScreen(
+        serverUrl: s.proxyUrl,
+        proxyToken: s.proxyToken,
+      ),
+    ));
+  }
+
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
@@ -126,14 +156,103 @@ class _ColabDialogBodyState extends State<_ColabDialogBody> {
                     onPressed: _loading ? null : _loadSessions,
                     tooltip: 'Recargar',
                   ),
+                  FilledButton.icon(
+                    onPressed: _loading ? null : _createSession,
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('Crear',
+                        style: TextStyle(fontSize: 13)),
+                  ),
                 ],
               ),
               if (_sessions.isEmpty && !_loading)
                 const Padding(
                   padding: EdgeInsets.all(12),
-                  child: Text('No hay sesiones activas',
-                      style: TextStyle(color: Colors.grey, fontSize: 13)),
+                  child: Text('No hay sesiones activas.\n'
+                      'Tocá "Crear" para iniciar un runtime.',
+                      style: TextStyle(color: Colors.grey, fontSize: 13),
+                      textAlign: TextAlign.center),
                 ),
+              ..._sessions.map((s) => Card(
+                    color: const Color(0xFF0B1220),
+                    margin: const EdgeInsets.symmetric(vertical: 4),
+                    child: ListTile(
+                      dense: true,
+                      leading: Icon(
+                        s.accelerator == 'NONE'
+                            ? Icons.memory
+                            : Icons.bolt,
+                        color: s.accelerator == 'NONE'
+                            ? Colors.grey
+                            : Colors.amber,
+                        size: 22,
+                      ),
+                      title: Text(s.endpoint,
+                          style: const TextStyle(fontSize: 12),
+                          overflow: TextOverflow.ellipsis),
+                      subtitle: Text(
+                          '${s.variant} · ${s.machineShape == 1 ? "High-RAM" : "Std"}',
+                          style:
+                              const TextStyle(fontSize: 11, color: Colors.grey)),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (widget.keepAlive.isRunning &&
+                              widget.keepAlive.currentEndpoint == s.endpoint)
+                            const Icon(Icons.timer,
+                                size: 16, color: Colors.blue),
+                          PopupMenuButton<String>(
+                            onSelected: (v) async {
+                              switch (v) {
+                                case 'python':
+                                  _openPython(s);
+                                  break;
+                                case 'keepalive':
+                                  widget.keepAlive.start(s.endpoint);
+                                  setState(() {});
+                                  break;
+                                case 'unassign':
+                                  setState(() => _loading = true);
+                                  try {
+                                    await widget.sessions.unassign(s.endpoint);
+                                    await _loadSessions();
+                                  } catch (e) {
+                                    setState(() {
+                                      _error = 'Error soltando: $e';
+                                      _loading = false;
+                                    });
+                                  }
+                                  break;
+                              }
+                            },
+                            itemBuilder: (_) => const [
+                              PopupMenuItem(
+                                  value: 'python',
+                                  child: Row(children: [
+                                    Icon(Icons.terminal, size: 18),
+                                    SizedBox(width: 8),
+                                    Text('Python'),
+                                  ])),
+                              PopupMenuItem(
+                                  value: 'keepalive',
+                                  child: Row(children: [
+                                    Icon(Icons.timer, size: 18),
+                                    SizedBox(width: 8),
+                                    Text('Keep-alive'),
+                                  ])),
+                              PopupMenuItem(
+                                  value: 'unassign',
+                                  child: Row(children: [
+                                    Icon(Icons.link_off,
+                                        size: 18, color: Colors.redAccent),
+                                    SizedBox(width: 8),
+                                    Text('Soltar'),
+                                  ])),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  )),
               if (widget.keepAlive.isRunning)
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
