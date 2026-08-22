@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'colab_auth.dart';
 import 'colab_cells_screen.dart';
@@ -322,8 +323,28 @@ class _ColabDialogBodyState extends State<_ColabDialogBody> {
             if (_error != null)
               Padding(
                 padding: const EdgeInsets.only(top: 8),
-                child: Text(_error!,
-                    style: const TextStyle(color: Colors.red, fontSize: 12)),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(_error!,
+                          style: const TextStyle(
+                              color: Colors.red, fontSize: 12)),
+                    ),
+                    IconButton(
+                      visualDensity: VisualDensity.compact,
+                      tooltip: 'Copiar error',
+                      icon: const Icon(Icons.copy, size: 16),
+                      onPressed: () {
+                        Clipboard.setData(ClipboardData(text: _error!));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                              content: Text('Copiado'),
+                              duration: Duration(seconds: 1)),
+                        );
+                      },
+                    ),
+                  ],
+                ),
               ),
           ],
         ),

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:http/http.dart' as http;
+import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 /// Resultado de ejecutar código Python en el kernel.
@@ -53,18 +54,20 @@ class ColabRuntime {
       };
 
   /// Crea el kernel y abre el WebSocket.
+  ///
+  /// Igual que jupyter_kernel_client (Google):
+  ///   1. POST /api/kernels {'name': 'python3'}  → {id}
+  ///   2. WS   /api/kernels/{id}/channels?session_id=..&token=..
+  ///      con headers extra del proxy.
   Future<void> start() async {
     if (_started) return;
 
-    // 1. Crear sesión/kernel vía REST.
     final resp = await http.post(
-      Uri.parse('$serverUrl/api/sessions'),
-      headers: _headers,
+      Uri.parse('$serverUrl/api/kernels'),
+      headers: {..._headers, 'Authorization': 'Bearer $proxyToken'},
       body: jsonEncode({
-        'name': 'pr_app',
-        'path': 'pr_app.ipynb',
-        'type': 'notebook',
-        'kernel': {'name': 'python3'},
+        'name': 'python3',
+        'path': '',
       }),
     );
     if (resp.statusCode != 200 && resp.statusCode != 201) {
@@ -75,18 +78,28 @@ class ColabRuntime {
           '${body.length > 150 ? '${body.substring(0, 150)}…' : body}');
     }
     final data = jsonDecode(resp.body);
-    _kernelId =
-        data['kernel'] is Map ? data['kernel']['id'] : data['kernel_id'];
-    _started = true;
+    _kernelId = data['id'] as String?;
+    if (_kernelId == null || _kernelId!.isEmpty) {
+      throw Exception('Respuesta sin kernel id: ${resp.body.substring(0, 120)}');
+    }
 
-    // 2. Abrir WebSocket al canal único.
-    final base = serverUrl.replaceFirst('https://', 'wss://').replaceFirst('http://', 'ws://');
-    final wsUri = Uri.parse('$base/api/channels').replace(queryParameters: {
+    // Canal único multiplexado POR KERNEL (no /api/channels).
+    final base = serverUrl
+        .replaceFirst('https://', 'wss://')
+        .replaceFirst('http://', 'ws://');
+    final wsUri = Uri.parse(
+      '$base/api/kernels/$_kernelId/channels',
+    ).replace(queryParameters: {
       'session_id': _sessionId,
-      'colab-runtime-proxy-token': proxyToken,
+      'token': proxyToken,
     });
-    _channel = WebSocketChannel.connect(wsUri);
+    _channel = IOWebSocketChannel.connect(
+      wsUri,
+      headers: {..._headers, 'Authorization': 'Bearer $proxyToken'},
+      pingInterval: const Duration(seconds: 30),
+    );
     await _channel!.ready;
+    _started = true;
   }
 
   /// Ejecuta código y espera la salida completa.
@@ -205,8 +218,8 @@ class ColabRuntime {
     try {
       if (_kernelId != null && _started) {
         await http.delete(
-          Uri.parse('$serverUrl/api/sessions/$_sessionId'),
-          headers: _headers,
+          Uri.parse('$serverUrl/api/kernels/$_kernelId'),
+          headers: {..._headers, 'Authorization': 'Bearer $proxyToken'},
         ).timeout(const Duration(seconds: 5));
       }
     } catch (_) {}
@@ -214,6 +227,7 @@ class ColabRuntime {
       await _channel?.sink.close();
     } catch (_) {}
     _channel = null;
+    _kernelId = null;
     _started = false;
   }
 

@@ -1,6 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'colab_runtime.dart';
+
+void _copyText(BuildContext context, String text) {
+  Clipboard.setData(ClipboardData(text: text));
+  ScaffoldMessenger.of(context).showSnackBar(
+    const SnackBar(content: Text('Copiado al portapapeles'),
+        duration: Duration(seconds: 1)),
+  );
+}
 
 class _Cell {
   final TextEditingController code;
@@ -31,6 +40,8 @@ class _ColabCellsScreenState extends State<ColabCellsScreen> {
   final List<_Cell> _cells = [];
   String _connStatus = 'Conectando...';
   bool _connected = false;
+  bool _connecting = false;
+  String? _lastConnError;
 
   static const _helloWorld = '''# Ejemplo de prueba
 print("Hola Mundo desde Colab 🚀")
@@ -52,10 +63,15 @@ print("Python:", sys.version.split()[0])''';
       await _runtime.start();
       setState(() {
         _connected = true;
+        _connecting = false;
         _connStatus = 'Kernel conectado';
       });
     } catch (e) {
-      setState(() => _connStatus = 'Error: $e');
+      setState(() {
+        _connStatus = 'Error: $e';
+        _connecting = false;
+      });
+      _lastConnError = e.toString();
     }
   }
 
@@ -111,6 +127,27 @@ print("Python:", sys.version.split()[0])''';
                       style: const TextStyle(fontSize: 12),
                       overflow: TextOverflow.ellipsis),
                 ),
+                if (_lastConnError != null)
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    tooltip: 'Copiar error',
+                    icon: const Icon(Icons.copy, size: 16),
+                    onPressed: () => _copyText(context, _lastConnError!),
+                  ),
+                if (!_connected && !_connecting)
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    tooltip: 'Reintentar conexión',
+                    icon: const Icon(Icons.refresh, size: 18),
+                    onPressed: () {
+                      setState(() {
+                        _connStatus = 'Conectando...';
+                        _lastConnError = null;
+                        _connecting = true;
+                      });
+                      _connect();
+                    },
+                  ),
               ],
             ),
           ),
@@ -183,7 +220,8 @@ print("Python:", sys.version.split()[0])''';
                             width: double.infinity,
                             constraints:
                                 const BoxConstraints(minHeight: 40),
-                            padding: const EdgeInsets.all(8),
+                            padding:
+                                const EdgeInsets.fromLTRB(8, 4, 4, 8),
                             decoration: BoxDecoration(
                               color: Colors.black,
                               borderRadius: BorderRadius.circular(8),
@@ -194,15 +232,30 @@ print("Python:", sys.version.split()[0])''';
                                         .withValues(alpha: .25),
                               ),
                             ),
-                            child: Text(
-                              cell.output,
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontFamily: 'monospace',
-                                color: cell.status == 'error'
-                                    ? Colors.redAccent[100]
-                                    : Colors.greenAccent[100],
-                              ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  cell.output,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontFamily: 'monospace',
+                                    color: cell.status == 'error'
+                                        ? Colors.redAccent[100]
+                                        : Colors.greenAccent[100],
+                                  ),
+                                ),
+                                Align(
+                                  alignment: Alignment.bottomRight,
+                                  child: IconButton(
+                                    visualDensity: VisualDensity.compact,
+                                    tooltip: 'Copiar salida',
+                                    icon: const Icon(Icons.copy, size: 14),
+                                    onPressed: () =>
+                                        _copyText(context, cell.output),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ],
