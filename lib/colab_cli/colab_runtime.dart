@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/io.dart';
@@ -26,21 +27,26 @@ class ColabExecResult {
 
 /// Cliente mínimo del kernel Jupyter de Colab sobre el proxy del runtime.
 ///
-/// Flujo (igual que google-colab-cli / jupyter_kernel_client):
-///   1. POST {serverUrl}/api/sessions          → crea kernel python3
-///   2. WS   {serverUrl}/api/channels           → canal único multiplexado
-///   3. execute_request → recolecta iopub hasta idle/reply
+/// Réplica de google-colab-cli (runtime.py + jupyter_kernel_client,
+/// subprotocolo DEFAULT):
+///   1. POST {serverUrl}/api/kernels        → crea kernel python3
+///   2. WS   {serverUrl}/api/kernels/{id}/channels
+///          ?session_id=..&colab-runtime-proxy-token=..
+///          headers: X-Colab-Runtime-Proxy-Token + X-Colab-Client-Agent
+///   3. mensajes: frames JSON texto [header, parent, metadata, content, []]
 class ColabRuntime {
-  /// URL del proxy del runtime (runtimeProxyInfo.url del assignment).
   final String serverUrl;
-
-  /// Token del proxy (runtimeProxyInfo.token).
   final String proxyToken;
 
   WebSocketChannel? _channel;
   String? _kernelId;
   final String _sessionId = _uuid();
   bool _started = false;
+  bool _closedByUs = false;
+
+  /// Router de mensajes (1 sola suscripción al stream del canal).
+  final StreamController<Map<String, dynamic>> _msgs =
+      StreamController<Map<String, dynamic>>.broadcast();
 
   ColabRuntime({required this.serverUrl, required this.proxyToken});
 
@@ -53,28 +59,19 @@ class ColabRuntime {
         'X-Colab-Runtime-Proxy-Token': proxyToken,
       };
 
-  /// Crea el kernel y abre el WebSocket.
-  ///
-  /// Igual que jupyter_kernel_client (Google):
-  ///   1. POST /api/kernels {'name': 'python3'}  → {id}
-  ///   2. WS   /api/kernels/{id}/channels?session_id=..&token=..
-  ///      con headers extra del proxy.
+  /// Crea el kernel y abre el WebSocket (un listener persistente).
   Future<void> start() async {
     if (_started) return;
 
     final resp = await http.post(
       Uri.parse('$serverUrl/api/kernels'),
-      headers: {..._headers, 'Authorization': 'Bearer $proxyToken'},
-      body: jsonEncode({
-        'name': 'python3',
-        'path': '',
-      }),
+      headers: _headers,
+      body: jsonEncode({'name': 'python3', 'path': ''}),
     );
     if (resp.statusCode != 200 && resp.statusCode != 201) {
       var body = resp.body.replaceAll(RegExp(r'<[^>]*>'), ' ');
       body = body.replaceAll(RegExp(r'\s+'), ' ').trim();
-      throw Exception(
-          'Error creando kernel (${resp.statusCode}): '
+      throw Exception('Error creando kernel (${resp.statusCode}): '
           '${body.length > 150 ? '${body.substring(0, 150)}…' : body}');
     }
     final data = jsonDecode(resp.body);
@@ -87,32 +84,105 @@ class ColabRuntime {
     final base = serverUrl
         .replaceFirst('https://', 'wss://')
         .replaceFirst('http://', 'ws://');
-    final wsUri = Uri.parse(
-      '$base/api/kernels/$_kernelId/channels',
-    ).replace(queryParameters: {
-      'session_id': _sessionId,
-      'token': proxyToken,
-    });
+    final wsUri = Uri.parse('$base/api/kernels/$_kernelId/channels').replace(
+      queryParameters: {
+        'session_id': _sessionId,
+        'colab-runtime-proxy-token': proxyToken,
+      },
+    );
     _channel = IOWebSocketChannel.connect(
       wsUri,
-      headers: {..._headers, 'Authorization': 'Bearer $proxyToken'},
+      headers: _headers,
       pingInterval: const Duration(seconds: 30),
+    );
+    _closedByUs = false;
+    // Listener ÚNICO: enruta todos los frames al router _msgs.
+    _channel!.stream.listen(
+      _onFrame,
+      onError: (e) => _msgs.add({'__error': true, 'text': e.toString()}),
+      onDone: () {
+        if (!_closedByUs) _msgs.add({'__closed': true});
+      },
     );
     await _channel!.ready;
     _started = true;
   }
 
-  /// Ejecuta código y espera la salida completa.
+  void _onFrame(dynamic raw) {
+    try {
+      Map<String, dynamic> msg;
+      if (raw is String) {
+        final decoded = jsonDecode(raw);
+        if (decoded is List && decoded.length >= 4) {
+          msg = Map<String, dynamic>.from(decoded[3] as Map);
+          msg['_parent'] = decoded[1];
+        } else {
+          return;
+        }
+      } else if (raw is List<int>) {
+        final parsed = _parseBinary(raw);
+        if (parsed == null) return;
+        msg = parsed;
+      } else {
+        return;
+      }
+      _msgs.add(msg);
+    } catch (_) {
+      // Frame no parseable: ignorar.
+    }
+  }
+
+  /// Parsea frame binario (v1) devolviendo {content, _parent, ...}.
+  Map<String, dynamic>? _parseBinary(List<int> b) {
+    try {
+      if (b.length >= 16) {
+        final n = _le64(b, 0);
+        if (n >= 2 && 8 * (n + 1) <= b.length) {
+          final offs = [for (var i = 0; i < n; i++) _le64(b, 8 * (i + 1))];
+          if (offs.last <= b.length) {
+            final parts = <List<int>>[];
+            for (var i = 1; i < n - 1; i++) {
+              if (offs[i] < offs[i + 1] && offs[i + 1] <= b.length) {
+                parts.add(b.sublist(offs[i], offs[i + 1]));
+              }
+            }
+            if (parts.length >= 4) {
+              final content =
+                  jsonDecode(utf8.decode(parts[3])) as Map<String, dynamic>;
+              final parent = parts.length > 1
+                  ? jsonDecode(utf8.decode(parts[1]))
+                  : <String, dynamic>{};
+              content['_parent'] = parent;
+              return content;
+            }
+          }
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  static int _le64(List<int> b, int off) {
+    var v = 0;
+    for (var i = 0; i < 8; i++) {
+      v |= b[off + i] << (8 * i);
+    }
+    return v;
+  }
+
   Future<ColabExecResult> execute(
     String code, {
     Duration timeout = const Duration(minutes: 10),
   }) async {
-    if (!_started || _channel == null) {
-      await start();
-    }
+    if (!_started || _channel == null) await start();
+    return _executeWithRetry(code, timeout, 1);
+  }
+
+  Future<ColabExecResult> _executeWithRetry(
+      String code, Duration timeout, int retries) async {
     final result = ColabExecResult();
     final msgId = _uuid();
-    _send('execute_request', {
+    _send('shell', 'execute_request', {
       'code': code,
       'silent': false,
       'store_history': true,
@@ -123,63 +193,55 @@ class ColabRuntime {
 
     final completer = Completer<void>();
     late final StreamSubscription sub;
-    sub = _channel!.stream.listen((raw) {
-      try {
-        final msg = (jsonDecode(raw as String) as List).toList();
-        final header = (msg[0] as Map).cast<String, dynamic>();
-        final content =
-            msg.length > 3 && msg[3] is Map ? (msg[3] as Map).cast<String, dynamic>() : <String, dynamic>{};
-        final type = header['msg_type'];
+    sub = _msgs.stream.listen((msg) {
+      if (msg['__closed'] == true) {
+        if (!completer.isCompleted) completer.complete();
+        return;
+      }
+      if (msg['__error'] == true) {
+        result.errorBuf.writeln('WS error: ${msg['text']}');
+        result.status = 'error';
+        if (!completer.isCompleted) completer.complete();
+        return;
+      }
+      final header = (msg['header'] ?? msg) as Map<String, dynamic>? ?? {};
+      final content = msg['content'] as Map<String, dynamic>? ?? {};
+      final type = header['msg_type'] ?? msg['msg_type'];
+      final parent = msg['_parent'];
+      final ours = parent is Map && parent['msg_id'] == msgId;
 
-        // Solo mensajes hijos de NUESTRA ejecución (o globales).
-        final parent = header['parent_header'];
-        final ours = parent is Map &&
-            (parent as Map)['msg_id'] == msgId;
-
-        switch (type) {
-          case 'stream':
-            result.stdoutBuf.write('${content['text']}');
-            break;
-          case 'execute_result':
-          case 'display_data':
-            final dataMap = (content['data'] ?? {}).cast<String, dynamic>();
-            final text = dataMap['text/plain'];
-            if (text is String && ours) result.results.add(text);
-            break;
-          case 'error':
-            final tb = content['traceback'];
-            if (tb is List) result.errorBuf.writeln(tb.join('\n'));
-            result.status = 'error';
-            break;
-          case 'status':
-            if (content['execution_state'] == 'idle') {
-              if (!ours) break;
-              if (!completer.isCompleted) completer.complete();
-              unawaited(sub.cancel());
-            }
-            break;
-          case 'execute_reply':
-            if (!ours) break;
+      switch (type) {
+        case 'stream':
+          result.stdoutBuf.write('${content['text']}');
+          break;
+        case 'execute_result':
+        case 'display_data':
+          final dataMap = content['data'] ?? {};
+          final text = dataMap['text/plain'];
+          if (text is String && ours) result.results.add(text);
+          break;
+        case 'error':
+          final tb = content['traceback'];
+          if (tb is List) result.errorBuf.writeln(tb.join('\n'));
+          result.status = 'error';
+          break;
+        case 'status':
+          if (content['execution_state'] == 'idle' && ours) {
+            if (!completer.isCompleted) completer.complete();
+            unawaited(sub.cancel());
+          }
+          break;
+        case 'execute_reply':
+          if (ours) {
             final st = content['status'];
             if (st == 'error' || st == 'abort') result.status = 'error';
             if (!completer.isCompleted) completer.complete();
             unawaited(sub.cancel());
-            break;
-          case 'error_output':
-            result.stderrBuf.write('${content['text']}');
-            break;
-        }
-      } catch (_) {
-        // Mensaje no parseable: ignorar.
-      }
-    }, onError: (Object e) {
-      result.errorBuf.writeln('WS error: $e');
-      result.status = 'error';
-      if (!completer.isCompleted) completer.complete();
-    }, onDone: () {
-      if (!completer.isCompleted) {
-        result.errorBuf.writeln('Conexión cerrada por el servidor');
-        completer.complete();
+          }
+          break;
+        case 'error_output':
+          result.stderrBuf.write('${content['text']}');
+          break;
       }
     });
 
@@ -190,13 +252,28 @@ class ColabRuntime {
       result.errorBuf.writeln('Timeout: la celda siguió ejecutando');
       await sub.cancel();
     }
+
+    // Si el canal se cerró y no hubo salida, reconectamos 1 vez.
+    if (retries > 0 && !completer.isCompleted && result.output.isEmpty) {
+      await _reconnect();
+      return _executeWithRetry(code, timeout, retries - 1);
+    }
     return result;
   }
 
-  void _send(String type, Map<String, dynamic> content, {String? msgId}) {
+  Future<void> _reconnect() async {
+    try {
+      await _channel?.sink.close();
+    } catch (_) {}
+    _channel = null;
+    _started = false;
+    await start();
+  }
+
+  void _send(String channel, String type, Map<String, dynamic> content,
+      {String? msgId}) {
     final id = msgId ?? _uuid();
-    final now =
-        DateTime.now().toUtc().toIso8601String().replaceAll('000Z', 'Z');
+    final now = DateTime.now().toUtc().toIso8601String().replaceAll('000Z', 'Z');
     final frame = [
       {
         'msg_id': id,
@@ -217,12 +294,15 @@ class ColabRuntime {
   Future<void> close() async {
     try {
       if (_kernelId != null && _started) {
-        await http.delete(
-          Uri.parse('$serverUrl/api/kernels/$_kernelId'),
-          headers: {..._headers, 'Authorization': 'Bearer $proxyToken'},
-        ).timeout(const Duration(seconds: 5));
+        await http
+            .delete(
+              Uri.parse('$serverUrl/api/kernels/$_kernelId'),
+              headers: _headers,
+            )
+            .timeout(const Duration(seconds: 5));
       }
     } catch (_) {}
+    _closedByUs = true;
     try {
       await _channel?.sink.close();
     } catch (_) {}

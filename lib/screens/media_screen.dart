@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
@@ -22,6 +24,7 @@ class _MediaScreenState extends State<MediaScreen> {
   bool _hasVideo = false;
   bool _playing = false;
   double? _dragValue;
+  final _subs = <StreamSubscription>[];
 
   @override
   void initState() {
@@ -29,12 +32,23 @@ class _MediaScreenState extends State<MediaScreen> {
     widget.mediaPlayer.onChanged = () {
       if (mounted) setState(() {});
     };
-    widget.mediaPlayer.widthStream.listen((w) {
+    // Estado inicial REAL del player (el audio/video sigue en segundo plano).
+    _hasVideo = widget.mediaPlayer.hasVideo;
+    _playing = widget.mediaPlayer.isPlaying;
+    _subs.add(widget.mediaPlayer.widthStream.listen((w) {
       if (mounted) setState(() => _hasVideo = (w ?? 0) > 0);
-    });
-    widget.mediaPlayer.playingStream.listen((p) {
+    }));
+    _subs.add(widget.mediaPlayer.playingStream.listen((p) {
       if (mounted) setState(() => _playing = p);
-    });
+    }));
+  }
+
+  @override
+  void dispose() {
+    for (final s in _subs) {
+      s.cancel();
+    }
+    super.dispose();
   }
 
   @override
@@ -70,10 +84,12 @@ class _MediaScreenState extends State<MediaScreen> {
                 overflow: TextOverflow.ellipsis),
           StreamBuilder<Duration>(
             stream: mp.durationStream,
+            initialData: mp.duration,
             builder: (context, durSnap) {
               final dur = durSnap.data ?? Duration.zero;
               return StreamBuilder<Duration>(
                 stream: mp.positionStream,
+                initialData: mp.position,
                 builder: (context, posSnap) {
                   final posMs = _dragValue ??
                       (posSnap.data ?? Duration.zero).inMilliseconds

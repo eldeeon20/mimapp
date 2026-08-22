@@ -47,6 +47,18 @@ class MediaPlayer extends BaseAudioHandler with SeekHandler {
   Stream<Duration> get durationStream => _player.stream.duration;
   Stream<bool> get playingStream => _player.stream.playing;
   Stream<int?> get widthStream => _player.stream.width;
+
+  /// Estado actual sincrónico (para restaurar la UI al volver a la pantalla).
+  Duration get position => _player.state.position;
+  Duration get duration => _player.state.duration;
+  bool get isPlaying => _player.state.playing;
+  bool get hasVideo => (_player.state.width ?? 0) > 0;
+
+  /// Estado actual sincrónico (para restaurar la UI al volver a la pantalla).
+  Duration get position => _player.state.position;
+  Duration get duration => _player.state.duration;
+  bool get isPlaying => _player.state.playing;
+  bool get hasVideo => (_player.state.width ?? 0) > 0;
   Stream<int?> get heightStream => _player.stream.height;
 
   // ===========================================================================
