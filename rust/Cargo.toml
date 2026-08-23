@@ -12,6 +12,15 @@ candle-core = "0.8"
 candle-nn = "0.8"
 tokenizers = "0.20"
 rand = "0.9"
+# --- Gtool port (pinned igual que Gtool, probado en Android) ---
+anyhow = "1"
+sha2 = "0.10"
+tokio = { version = "1.44.1", features = ["full"] }
+pkarr = { version = "5.0.0", features = ["full"] }
+nostr-sdk = { version = "=0.43.0", features = ["nip44", "nip59"] }
+nostr = "=0.43.1"
+shamirsecretsharing = "0.1"
+rustls = { version = "0.23", features = ["ring"] }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(frb_expand)'] }

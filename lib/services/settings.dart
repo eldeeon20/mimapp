@@ -28,6 +28,11 @@ class Settings {
   List<Map<String, dynamic>> tasks = [];
   List<Map<String, dynamic>> pockets = [];
 
+  /// Claves guardadas de Pkarr y Nostr (secretos en hex, cifrados junto
+  /// con el resto de config.pr).
+  List<Map<String, dynamic>> pkarrKeys = [];
+  List<Map<String, dynamic>> nostrKeys = [];
+
   bool _loaded = false;
 
   Future<void> load() async {
@@ -55,6 +60,18 @@ class Settings {
               .map((e) => Map<String, dynamic>.from(e))
               .toList();
         }
+        if (map['pkarrKeys'] is List) {
+          pkarrKeys = map['pkarrKeys']
+              .whereType<Map>()
+              .map((e) => Map<String, dynamic>.from(e))
+              .toList();
+        }
+        if (map['nostrKeys'] is List) {
+          nostrKeys = map['nostrKeys']
+              .whereType<Map>()
+              .map((e) => Map<String, dynamic>.from(e))
+              .toList();
+        }
       }
     } catch (e) {
       // Archivo corrupto/ilegible: se quedan los defaults.
@@ -71,6 +88,8 @@ class Settings {
         'accounts': accounts,
         'tasks': tasks,
         'pockets': pockets,
+        'pkarrKeys': pkarrKeys,
+        'nostrKeys': nostrKeys,
       };
       final plain = utf8.encode(jsonEncode(map));
       final enc = ToolSec(masterKey).processBytes(Uint8List.fromList(plain));

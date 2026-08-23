@@ -2,6 +2,12 @@
 pub fn init_app() {
     // Default utilities - feel free to customize
     flutter_rust_bridge::setup_default_user_utils();
+
+    // Igual que el gdextension de Gtool: en rustls 0.23, si en el árbol de
+    // deps conviven aws-lc-rs y ring (pkarr + nostr-sdk), hay que instalar
+    // el proveedor criptográfico explícitamente o TLS paniquea al primer uso.
+    // Corre una sola vez, cuando Dart llama RustLib.init() (bootstrap).
+    let _ = rustls::crypto::ring::default_provider().install_default();
 }
 
 /// Saluda a un nombre. Expuesto a Dart y llamable desde las páginas Lua.
