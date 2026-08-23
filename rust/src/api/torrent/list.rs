@@ -1,38 +1,55 @@
 use librqbit::api::ApiTorrentListOpts;
 
-use super::TorrentItem;
-
 /// Lista completa con stats (equivalente a torrents_list?withStats=true).
-pub fn torrent_list() -> Result<Vec<TorrentItem>, String> {
+/// Retorna JSON para evitar quirks del mapeo de tipos de FRB.
+pub fn torrent_list() -> Result<String, String> {
     let a = super::api()?;
     let list = a.api_torrent_list_ext(ApiTorrentListOpts { with_stats: true });
-    Ok(list
+    let items: Vec<serde_json::Value> = list
         .torrents
         .into_iter()
         .map(|t| {
             let s = t.stats.as_ref();
-            let state = s.map(|st| st.state.to_string()).unwrap_or_default();
-            let down = s
-                .and_then(|st| st.live.as_ref())
-                .map(|l| l.download_speed.as_bytes())
-                .unwrap_or(0);
-            let up = s
-                .and_then(|st| st.live.as_ref())
-                .map(|l| l.upload_speed.as_bytes())
-                .unwrap_or(0);
-            TorrentItem {
-                id: t.id.map(|i| i as u32),
-                info_hash: t.info_hash.clone(),
-                name: t.name.unwrap_or_else(|| t.info_hash.clone()),
-                state,
-                progress_bytes: s.map(|st| st.progress_bytes).unwrap_or(0),
-                total_bytes: s.map(|st| st.total_bytes).unwrap_or(0),
-                uploaded_bytes: s.map(|st| st.uploaded_bytes).unwrap_or(0),
-                finished: s.map(|st| st.finished).unwrap_or(false),
-                error: s.and_then(|st| st.error.clone()),
-                down_bps: down,
-                up_bps: up,
-            }
+            json_item(
+                t.id.map(|i| i as u32),
+                &t.info_hash,
+                t.name.as_deref().unwrap_or(&t.info_hash),
+                s.map(|st| st.state.to_string()).unwrap_or_default(),
+                s.map(|st| st.progress_bytes).unwrap_or(0),
+                s.map(|st| st.total_bytes).unwrap_or(0),
+                s.map(|st| st.uploaded_bytes).unwrap_or(0),
+                s.and_then(|st| st.error.clone()),
+                s.map(|st| st.finished).unwrap_or(false),
+                s.and_then(|st| st.live.as_ref())
+                    .map(|l| l.download_speed.as_bytes())
+                    .unwrap_or(0),
+                s.and_then(|st| st.live.as_ref())
+                    .map(|l| l.upload_speed.as_bytes())
+                    .unwrap_or(0),
+            )
         })
-        .collect())
+        .collect();
+    serde_json::to_string(&items).map_err(|e| e.to_string())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn json_item(
+    id: Option<u32>,
+    info_hash: &str,
+    name: &str,
+    state: String,
+    progress_bytes: u64,
+    total_bytes: u64,
+    uploaded_bytes: u64,
+    error: Option<String>,
+    finished: bool,
+    down_bps: u64,
+    up_bps: u64,
+) -> serde_json::Value {
+    serde_json::json!({
+        "id": id, "info_hash": info_hash, "name": name, "state": state,
+        "progress_bytes": progress_bytes, "total_bytes": total_bytes,
+        "uploaded_bytes": uploaded_bytes, "error": error,
+        "finished": finished, "down_bps": down_bps, "up_bps": up_bps,
+    })
 }

@@ -6,12 +6,6 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../services/rqbit.dart';
-import '../src/rust/api/torrent/actions.dart' as actions;
-import '../src/rust/api/torrent/detail.dart' as detail;
-import '../src/rust/api/torrent/list.dart' as rust;
-
-typedef TorrentFile = detail.TorrentFile;
-typedef TorrentPeer = detail.TorrentPeer;
 
 /// Configuración de sesión en memoria (se aplica al primer arranque).
 class _SessionCfg {
@@ -37,7 +31,7 @@ class _TorrentScreenState extends State<TorrentScreen> {
   bool _booting = true;
   String? _error;
   String? _bootInfo;
-  List<rust.TorrentItem> _items = [];
+  List<TorrentItem> _items = [];
   Timer? _timer;
 
   @override
@@ -261,7 +255,7 @@ class _TorrentScreenState extends State<TorrentScreen> {
 
   // -------------------------------------------------------------- acción
 
-  Future<void> _doAction(rust.TorrentItem t, String action) async {
+  Future<void> _doAction(TorrentItem t, String action) async {
     if (t.id == null) return;
     try {
       await RqbitBridge.action(t.id!, action);
@@ -274,7 +268,7 @@ class _TorrentScreenState extends State<TorrentScreen> {
     }
   }
 
-  void _openDetail(rust.TorrentItem t) {
+  void _openDetail(TorrentItem t) {
     if (t.id == null) return;
     showModalBottomSheet(
       context: context,
@@ -357,7 +351,7 @@ class _TorrentScreenState extends State<TorrentScreen> {
     );
   }
 
-  Widget _tile(BuildContext ctx, rust.TorrentItem t) {
+  Widget _tile(BuildContext ctx, TorrentItem t) {
     final total = t.totalBytes;
     final pct = total > 0 ? (t.progressBytes / total).clamp(0.0, 1.0) : null;
     final color = switch (t.state) {
@@ -428,7 +422,7 @@ class _TorrentScreenState extends State<TorrentScreen> {
 
 /// Detalle: info, archivos seleccionables (múltiple) y peers vivos.
 class _DetailSheet extends StatefulWidget {
-  final rust.TorrentItem item;
+  final TorrentItem item;
   const _DetailSheet({required this.item});
 
   @override

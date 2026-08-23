@@ -6,8 +6,8 @@ mod session;
 
 pub use actions::{torrent_action, torrent_set_only_files};
 pub use add::{torrent_add_bytes, torrent_add_url};
-pub use detail::{torrent_files, torrent_peers, TorrentFile, TorrentPeer};
-pub use list::{torrent_list, TorrentItem};
+pub use detail::{torrent_files, torrent_peers};
+pub use list::torrent_list;
 pub use session::{torrent_session_running, torrent_session_start};
 
 use std::num::NonZeroU32;

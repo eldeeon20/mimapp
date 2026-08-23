@@ -26,6 +26,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
 /// Corre GELU sobre [input]; retorna (datos, ms). `use_f16` = kernel f16 real.
 pub fn run(input: &[f32], use_f16: bool) -> Result<(Vec<f32>, f64), String> {
+    // BANDERA AUTOMÁTICA: f16 solo si el device lo soporta realmente.
+    let use_f16 = use_f16 && super::has_f16();
     let (device, queue) = super::ctx()?;
     let bytes = if use_f16 {
         super::u16_bytes(&super::to_u16_bits(input))

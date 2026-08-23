@@ -31,6 +31,12 @@ pub fn run(
     py: f32,
     pz: f32,
 ) -> Result<(Vec<f32>, f64), String> {
+    // Si el shader pide f16 y el device no lo soporta, fallar CLARO
+    // (no un validation error críptico de wgpu).
+    if code.contains("shader-f16") && !super::has_f16() {
+        return Err("tu GPU no soporta f16: quitá 'enable shader-f16;' y usá f32"
+            .to_string());
+    }
     let (device, queue) = super::ctx()?;
 
     let bytes = super::f32_bytes(input);
