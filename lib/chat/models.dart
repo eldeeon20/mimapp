@@ -142,7 +142,7 @@ class Chat {
     this.fijado = false,
     this.silenciado = false,
     this.noLeidos = 0,
-  }) : color = color ?? ColorSeed.values[nombre.hashCode.abs() % ColorSeed.length];
+  }) : color = color ?? ColorSeed.values[nombre.hashCode.abs() % ColorSeed.values.length];
 
   String get inicial => nombre.isEmpty ? '?' : nombre[0].toUpperCase();
   bool get esCanal => tipo == ChatType.canal;

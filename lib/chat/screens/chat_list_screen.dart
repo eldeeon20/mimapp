@@ -276,7 +276,7 @@ class _ChatListScreenState extends State<ChatListScreen>
     return ListTile(
       onLongPress: () => setState(() => c.fijado = !c.fijado),
       contentPadding: const EdgeInsets.symmetric(horizontal: 12),
-      leading: Avatar(chat: c, size: 52),
+      leading: Avatar.chat(c, size: 52),
       title: Row(children: [
         Expanded(
           child: Text(c.nombre,

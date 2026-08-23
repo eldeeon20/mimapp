@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../account.dart';
 import '../mock_server.dart';
 import '../models.dart';
+import 'chat_list_screen.dart';
 
 /// Tienda de gifts: grid de regalos que se compran con coins simuladas.
 class GiftsScreen extends StatelessWidget {

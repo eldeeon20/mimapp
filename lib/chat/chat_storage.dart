@@ -21,11 +21,11 @@ class Almacenamiento extends ChangeNotifier {
     return '${mb.toStringAsFixed(0)} MB';
   }
 
-  String fotosTxt => _fmt(fotosMb);
-  String videosTxt => _fmt(videosMb);
-  String docsTxt => _fmt(docsMb);
-  String otrosTxt => _fmt(otrosMb);
-  String libreTxt => _fmt(libreMb);
+  String get fotosTxt => _fmt(fotosMb);
+  String get videosTxt => _fmt(videosMb);
+  String get docsTxt => _fmt(docsMb);
+  String get otrosTxt => _fmt(otrosMb);
+  String get libreTxt => _fmt(libreMb);
 
   /// Registra media enviada/recibida (para que el gráfico se mueva).
   void registrar(String categoria, int bytes) {

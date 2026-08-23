@@ -303,6 +303,6 @@ class MockServer extends ChangeNotifier {
         if (!m.mia && m.status == MsgStatus.enviado) m.status = MsgStatus.leido;
       }
       notifyListeners();
-    });
+    }
   }
 }
