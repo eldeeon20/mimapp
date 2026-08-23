@@ -57,7 +57,7 @@ pub fn run(
             (0, buffer.as_entire_binding()),
             (1, ubo.as_entire_binding()),
         ],
-        workgroups,
+        (workgroups[0], workgroups[1], workgroups[2]),
     );
     let raw = super::read_back(&device, &queue, &buffer, bytes.len() as u64)?;
     let ms = start.elapsed().as_secs_f64() * 1000.0;

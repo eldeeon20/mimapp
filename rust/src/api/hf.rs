@@ -94,6 +94,7 @@ impl HfClient {
         let (namespace, name) = split_repo(&repo_id);
         let dir = PathBuf::from(local_dir);
 
+        let err_ctx = format!("{repo_id}/{filename}");
         let path = match repo_type.to_lowercase().as_str() {
             "dataset" => client
                 .dataset(&namespace, &name)
@@ -114,7 +115,7 @@ impl HfClient {
                 .local_dir(dir)
                 .send(),
         }
-        .map_err(|e| format!("download falló ({repo_id}/{filename}): {e:?}"))?;
+        .map_err(|e| format!("download falló ({err_ctx}): {e:?}"))?;
 
         Ok(path.to_string_lossy().to_string())
     }
