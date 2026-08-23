@@ -4,7 +4,7 @@ import '../account.dart';
 import '../chat_storage.dart';
 import '../mock_server.dart';
 import '../models.dart';
-import 'chat_list_screen.dart';
+import "chat_list_screen.dart";
 
 /// Perfil de usuario propio o de un chat (usuario/grupo/canal).
 class ProfileScreen extends StatefulWidget {

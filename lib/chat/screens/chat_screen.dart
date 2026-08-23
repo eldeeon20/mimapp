@@ -72,7 +72,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _ctrl.clear();
     _server.enviar(widget.chat.id, texto: t, respuestaA: _respondiendo);
     _respondiendo = null;
-    Almacenamiento.instance.registrar('texto', t.length * 2);
+    ChatStorage.instance.registrar('texto', t.length * 2);
     _bajarAlFinal();
   }
 
@@ -93,7 +93,7 @@ class _ChatScreenState extends State<ChatScreen> {
       nombre: f.name,
       sizeBytes: f.size,
     );
-    Almacenamiento.instance.registrar(mtipo.name, f.size);
+    ChatStorage.instance.registrar(mtipo.name, f.size);
     _server.enviar(widget.chat.id, media: media, respuestaA: _respondiendo);
     _respondiendo = null;
     _bajarAlFinal();
@@ -117,7 +117,7 @@ class _ChatScreenState extends State<ChatScreen> {
       sizeBytes: 16000 * _segGrabados,
       duracion: Duration(seconds: _segGrabados),
     );
-    Almacenamiento.instance.registrar('audio', media.sizeBytes);
+    ChatStorage.instance.registrar('audio', media.sizeBytes);
     _server.enviar(widget.chat.id, media: media);
     _bajarAlFinal();
   }

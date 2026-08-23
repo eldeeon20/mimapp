@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
 
-/// Uso de almacenamiento simulado por categoría (Telegram > Datos y almacenamiento).
-class Almacenamiento extends ChangeNotifier {
+/// (antes llamada Almacenamiento) Uso de almacenamiento simulado por categoría (Telegram > Datos y almacenamiento).
+class ChatStorage extends ChangeNotifier {
   Almacenamiento._();
   static final Almacenamiento instance = Almacenamiento._();
 
