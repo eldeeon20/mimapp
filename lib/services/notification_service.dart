@@ -54,7 +54,7 @@ class NotificationService {
 
     // 3) cerrar la app de verdad: quitar tarea + kill del proceso
     try {
-      await SystemNavigator.pop(explicit: true);
+      await SystemNavigator.pop();
     } catch (_) {}
     await Future.delayed(const Duration(milliseconds: 200));
     exit(0);

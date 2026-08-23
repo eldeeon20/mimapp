@@ -1,11 +1,11 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import '../src/rust/api/torrent/actions.dart' as actions;
-import '../src/rust/api/torrent/add.dart' as add;
-import '../src/rust/api/torrent/detail.dart' as detail;
-import '../src/rust/api/torrent/list.dart' as list;
-import '../src/rust/api/torrent/session.dart' as session;
+import '../src/rust/api/torrent/actions.dart' as t_act;
+import '../src/rust/api/torrent/add.dart' as t_add;
+import '../src/rust/api/torrent/detail.dart' as t_det;
+import '../src/rust/api/torrent/list.dart' as t_list;
+import '../src/rust/api/torrent/session.dart' as t_sess;
 
 /// Modelos manuales (parseados de JSON del puente): inmunes a los quirks
 /// de mapeo de tipos de FRB (usize→BigInt, nombres sin camelCase).
@@ -90,35 +90,50 @@ class RqbitBridge {
     int? downBps,
     int? upBps,
   }) =>
-      session.torrentSessionStart(
-        dataDir: dataDir,
-        enableDht: dht,
-        enableUpnp: upnp,
-        downBps: downBps,
-        upBps: upBps,
-      );
+      sessionStartInner(dataDir, dht, upnp, downBps, upBps);
 
-  static bool get running => session.torrentSessionRunning();
+  static Future<String> sessionStartInner(String dataDir, bool dht,
+          bool upnp, int? downBps, int? upBps) async {
+    final r = await t_sess.torrentSessionStart(
+      dataDir: dataDir,
+      enableDht: dht,
+      enableUpnp: upnp,
+      downBps: downBps,
+      upBps: upBps,
+    );
+    _running = true;
+    return r;
+  }
+
+  /// Flag síncrono en memoria: la sesión vive solo mientras el proceso
+  /// vive, así que este valor siempre es exacto.
+  static bool _running = false;
+  static bool get running => _running;
+
+  /// Consulta real al lado Rust.
+  static Future<bool> runningRust() => t_sess.torrentSessionRunning();
 
   static Future<List<TorrentItem>> list() async =>
-      _parse(await list.torrentList(), TorrentItem.fromJson);
+      _parse(await t_list.torrentList(), TorrentItem.fromJson);
 
   static Future<int?> addUrl(String url, {int? downBps, int? upBps}) =>
-      add.torrentAddUrl(url: url, downBps: downBps, upBps: upBps);
+      t_add.torrentAddUrl(url: url, downBps: downBps, upBps: upBps);
 
   static Future<int?> addTorrentFile(Uint8List bytes,
           {int? downBps, int? upBps}) =>
-      add.torrentAddBytes(bytes: bytes, downBps: downBps, upBps: upBps);
+      t_add.torrentAddBytes(bytes: bytes, downBps: downBps, upBps: upBps);
 
   static Future<List<TorrentFile>> files(int id) async =>
-      _parse(await detail.torrentFiles(id: id), TorrentFile.fromJson);
+      _parse(await t_det.torrentFiles(id: id), TorrentFile.fromJson);
 
   static Future<List<TorrentPeer>> peers(int id) async =>
-      _parse(await detail.torrentPeers(id: id), TorrentPeer.fromJson);
+      _parse(await t_det.torrentPeers(id: id), TorrentPeer.fromJson);
 
   static Future<void> action(int id, String action) =>
-      actions.torrentAction(id: id, action: action);
+      t_act.torrentAction(id: id, action: action);
 
+  // Vec<usize> del lado Rust llega como Uint64List.
   static Future<void> setOnlyFiles(int id, List<int> files) =>
-      actions.torrentSetOnlyFiles(id: id, files: files);
+      t_act.torrentSetOnlyFiles(
+          id: id, files: Uint64List.fromList(files));
 }
