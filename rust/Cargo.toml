@@ -30,7 +30,9 @@ wgpu = "25"
 half = "2"
 # --- BitTorrent (rqbit embebido, TLS rustls para Android) ---
 serde_json = "1"
-librqbit = { version = "9", default-features = false, features = ["rust-tls"] }
+# http-api-client: igual que los defaults del desktop; habilita el módulo
+# http_api_types (PeerStatsFilter) sin arrastrar axum.
+librqbit = { version = "9", default-features = false, features = ["rust-tls", "http-api-client"] }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(frb_expand)'] }
