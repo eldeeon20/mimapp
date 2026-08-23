@@ -141,12 +141,15 @@ class _ChatScreenState extends State<ChatScreen> {
           backgroundColor: Tg.bg,
           appBar: AppBar(
             backgroundColor: Tg.panel,
-            leadingWidth: 64,
-            leading: Row(children: [
+            leadingWidth: 80,
+            leading: Row(mainAxisSize: MainAxisSize.min, children: [
               const BackButton(color: Colors.white70),
               GestureDetector(
                 onTap: _abrirPerfil,
-                child: Avatar.chat(widget.chat, size: 36),
+                child: Padding(
+                  padding: const EdgeInsets.only(right: 4),
+                  child: Avatar.chat(widget.chat, size: 34),
+                ),
               ),
             ]),
             titleSpacing: 4,
