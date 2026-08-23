@@ -26,7 +26,8 @@ Future<void> initApp() async {
   await _initMediaService();
   await _initServiceChannel();
   await _initNotifications();
-  await _initBackgroundService();
+  // SERVICIO EN SEGUNDO PLANO DESACTIVADO (el botón Salir no funcionaba).
+  // await _initBackgroundService();
   await _initRust();
   await _initColab();
   await Settings.instance.load();
