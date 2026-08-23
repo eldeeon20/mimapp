@@ -86,9 +86,11 @@ class _ParticipantPaneState extends State<_ParticipantPane>
     super.dispose();
   }
 
-  void _generateKeys() {
+  Future<void> _generateKeys() async {
+    final secret = await _keys.generate();
+    final nsec = await _keys.toNsec(secret);
     setState(() {
-      _secretCtrl.text = _keys.toNsec(_keys.generate());
+      _secretCtrl.text = nsec;
       _error = '';
     });
   }

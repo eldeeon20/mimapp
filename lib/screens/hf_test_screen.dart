@@ -267,7 +267,8 @@ class _HfTestScreenState extends State<HfTestScreen> {
         border: const OutlineInputBorder(),
       );
 
-  Widget _action(String label, IconData icon, Color color, VoidCallback fn) {
+  Widget _action(
+      String label, IconData icon, Color color, Future<void> Function() fn) {
     return ActionChip(
       avatar: _busy
           ? const SizedBox(
@@ -303,7 +304,7 @@ class _HfTestScreenState extends State<HfTestScreen> {
   Future<void> _repoExists() async {
     await _requireReady();
     final exists =
-        _hf.repoExists(repoId: _repoCtrl.text.trim(), repoType: _repoType);
+        await _hf.repoExists(repoId: _repoCtrl.text.trim(), repoType: _repoType);
     _log('${_repoCtrl.text.trim()} existe? $exists');
   }
 

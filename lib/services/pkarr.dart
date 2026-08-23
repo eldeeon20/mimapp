@@ -14,14 +14,15 @@ class Pkarr {
   ];
 
   /// Secreto aleatorio (32 bytes).
-  Uint8List keyRand() => Uint8List.fromList(rust.pkarrKeyRand());
+  Future<Uint8List> keyRand() async =>
+      Uint8List.fromList(await rust.pkarrKeyRand());
 
   /// Secreto determinístico desde una semilla textual.
-  Uint8List seedToKey(String seed) =>
-      Uint8List.fromList(rust.pkarrSeedToKey(seed: seed));
+  Future<Uint8List> seedToKey(String seed) async =>
+      Uint8List.fromList(await rust.pkarrSeedToKey(seed: seed));
 
   /// Clave pública zbase32 desde el secreto (vacío si inválido).
-  String publicKey(Uint8List secret) {
+  Future<String> publicKey(Uint8List secret) async {
     _checkSecret(secret);
     return rust.pkarrPublicKey(secret: secret);
   }
@@ -64,7 +65,7 @@ class Pkarr {
 
   /// Guarda un secreto con un nombre; retorna su clave pública.
   Future<String> saveKey(String nombre, Uint8List secret) async {
-    final pub = publicKey(secret);
+    final pub = await publicKey(secret);
     final s = Settings.instance;
     s.pkarrKeys.removeWhere((k) => k['nombre'] == nombre);
     s.pkarrKeys.add({

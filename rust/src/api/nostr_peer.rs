@@ -107,3 +107,9 @@ impl NostrPeerChat {
         self.inner.disconnect();
     }
 }
+
+/// Constructor libre (el codegen expone las clases opacas como abstractas).
+#[flutter_rust_bridge::frb]
+pub fn nostr_peer_new() -> Result<NostrPeerChat> {
+    NostrPeerChat::new()
+}

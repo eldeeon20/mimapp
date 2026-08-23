@@ -69,11 +69,13 @@ class _DmPaneState extends State<_DmPane> {
     super.dispose();
   }
 
-  void _generateKeys() {
-    final secret = _keys.generate();
+  Future<void> _generateKeys() async {
+    final secret = await _keys.generate();
+    final nsec = await _keys.toNsec(secret);
+    final npub = await _keys.toNpub(secret);
     setState(() {
-      _nsecCtrl.text = _keys.toNsec(secret);
-      _generatedNpub = _keys.toNpub(secret);
+      _nsecCtrl.text = nsec;
+      _generatedNpub = npub;
       _error = '';
     });
   }

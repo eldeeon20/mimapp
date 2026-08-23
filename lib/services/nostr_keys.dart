@@ -4,42 +4,47 @@ import '../src/rust/api/nostr_keys.dart' as rust;
 import 'settings.dart';
 
 /// Generador/convertidor de claves Nostr — porte del `Keyl` de Gtool.
-/// Compartido por el chat NIP-17, el chat con observador y Pkarr.
+///
+/// Todas las llamadas al codegen FRB son async.
 class NostrKeys {
   /// Clave privada aleatoria (32 bytes).
-  Uint8List generate() => Uint8List.fromList(rust.nostrGenerateKey());
+  Future<Uint8List> generate() async =>
+      Uint8List.fromList(await rust.nostrGenerateKey());
 
   /// Clave determinística desde semilla textual (SHA256 → 32 bytes).
-  Uint8List fromSeed(String seed) =>
-      Uint8List.fromList(rust.nostrSeedToKey(seed: seed));
+  Future<Uint8List> fromSeed(String seed) async =>
+      Uint8List.fromList(await rust.nostrSeedToKey(seed: seed));
 
   /// Bytes del secreto → nsec bech32 ('' si inválido).
-  String toNsec(Uint8List secret) => rust.nostrToNsec(secret: secret);
+  Future<String> toNsec(Uint8List secret) => rust.nostrToNsec(secret: secret);
 
   /// Bytes del secreto → npub bech32 ('' si inválido).
-  String toNpub(Uint8List secret) => rust.nostrToNpub(secret: secret);
+  Future<String> toNpub(Uint8List secret) => rust.nostrToNpub(secret: secret);
 
   /// npub (bech32 o hex) → hex.
-  String hexNpub(String npub) => rust.nostrHexNpub(npub: npub);
+  Future<String> hexNpub(String npub) => rust.nostrHexNpub(npub: npub);
 
   /// nsec (bech32 o hex) → hex.
-  String hexNsec(String nsec) => rust.nostrHexNsec(nsec: nsec);
+  Future<String> hexNsec(String nsec) => rust.nostrHexNsec(nsec: nsec);
 
   /// Valida y normaliza a bech32. '' = inválido.
-  String validateNpub(String input) => rust.nostrValidateNpub(input: input);
-  String validateNsec(String input) => rust.nostrValidateNsec(input: input);
+  Future<String> validateNpub(String input) =>
+      rust.nostrValidateNpub(input: input);
+
+  Future<String> validateNsec(String input) =>
+      rust.nostrValidateNsec(input: input);
 
   /// Hex de la pública desde bytes del secreto.
-  String pubkeyHexFromSecret(Uint8List secret) =>
+  Future<String> pubkeyHexFromSecret(Uint8List secret) =>
       rust.nostrPubkeyHexFromSecret(secret: secret);
 
   // ---------------- Identidades guardadas (cifrado en config.pr) --------
 
   /// Genera identidad nueva con nombre; retorna {npub, nsec}.
   Future<Map<String, String>> createIdentity(String nombre, {String? seed}) async {
-    final secret = seed == null ? generate() : fromSeed(seed);
-    final npub = toNpub(secret);
-    final nsec = toNsec(secret);
+    final secret = seed == null ? await generate() : await fromSeed(seed);
+    final npub = await toNpub(secret);
+    final nsec = await toNsec(secret);
     await saveIdentity(nombre, secret);
     return {'npub': npub, 'nsec': nsec};
   }
@@ -50,7 +55,7 @@ class NostrKeys {
     s.nostrKeys.add({
       'nombre': nombre,
       'secretHex': _toHex(secret),
-      'npub': toNpub(secret),
+      'npub': await toNpub(secret),
       'createdAt': DateTime.now().millisecondsSinceEpoch,
     });
     await s.save();

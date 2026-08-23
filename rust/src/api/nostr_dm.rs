@@ -82,3 +82,9 @@ impl NostrDm {
         self.client.disconnect().map_err(|e| anyhow!("{e:#}"))
     }
 }
+
+/// Constructor libre (el codegen expone las clases opacas como abstractas).
+#[flutter_rust_bridge::frb]
+pub fn nostr_dm_new(nsec: Option<String>, peer_npub: String) -> Result<NostrDm> {
+    NostrDm::new(nsec, peer_npub)
+}

@@ -22,6 +22,12 @@ fn split_repo(repo_id: &str) -> (String, String) {
     }
 }
 
+/// Constructor libre (el codegen expone las clases opacas como abstractas).
+#[flutter_rust_bridge::frb]
+pub fn hf_client_new(token: String) -> Result<HfClient, String> {
+    HfClient::new(token)
+}
+
 impl HfClient {
     /// Token de acceso HF (vacío = anónimo, solo lectura pública).
     pub fn new(token: String) -> Result<HfClient, String> {

@@ -45,31 +45,40 @@ class _ShamirTestScreenState extends State<ShamirTestScreen> {
     return latin1.decode(bytes.where((b) => b != 0).toList());
   }
 
-  void _split() {
+  Future<void> _split() async {
     setState(() {
       _resultText = '';
       _resultIcon = null;
       _resultColor = Colors.transparent;
-      try {
-        final data = _encode(_secretCtrl.text);
-        final shares = _shamir.split(data, _count, _threshold);
+    });
+    try {
+      final data = _encode(_secretCtrl.text);
+      final shares = await _shamir.split(data, _count, _threshold);
+      if (!mounted) return;
+      setState(() {
         _cards = [
           for (var i = 0; i < shares.length; i++)
             _ShareCard(index: i + 1, bytes: shares[i], lost: false),
         ];
-      } catch (e) {
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
         _cards = [];
         _showResult('Error al dividir: $e', Colors.redAccent, Icons.error);
-      }
-    });
+      });
+    }
   }
 
-  void _combine() {
+  Future<void> _combine() async {
     if (_cards.isEmpty) return;
     final alive =
         _cards.where((c) => !c.lost).map((c) => c.bytes).toList();
+    String? resultText;
+    Color resultColor = Colors.transparent;
+    IconData? resultIcon;
     try {
-      final restoredRaw = _shamir.combine(alive);
+      final restoredRaw = await _shamir.combine(alive);
       final same = () {
         if (restoredRaw == null) return false;
         final original = _encode(_secretCtrl.text);
@@ -81,22 +90,29 @@ class _ShamirTestScreenState extends State<ShamirTestScreen> {
         return true;
       }();
       if (same) {
-        _showResult(
+        resultText =
             'Restaurado OK con ${alive.length}/$_count partes '
-            '(umbral $_threshold): "${_decode(restoredRaw)}"',
-            Colors.greenAccent,
-            Icons.check_circle_rounded);
+            '(umbral $_threshold): "${_decode(restoredRaw)}"';
+        resultColor = Colors.greenAccent;
+        resultIcon = Icons.check_circle_rounded;
       } else {
-        _showResult(
+        resultText =
             'Falló con ${alive.length} partes '
-            '(necesitás >= $_threshold). Secreto irrecuperable.',
-            Colors.redAccent,
-            Icons.cancel_rounded);
+            '(necesitás >= $_threshold). Secreto irrecuperable.';
+        resultColor = Colors.redAccent;
+        resultIcon = Icons.cancel_rounded;
       }
     } catch (e) {
-      _showResult('Error: $e', Colors.redAccent, Icons.cancel_rounded);
+      resultText = 'Error: $e';
+      resultColor = Colors.redAccent;
+      resultIcon = Icons.cancel_rounded;
     }
-    setState(() {});
+    if (!mounted) return;
+    setState(() {
+      _resultText = resultText ?? '';
+      _resultColor = resultColor;
+      _resultIcon = resultIcon;
+    });
   }
 
   void _showResult(String text, Color color, IconData icon) {

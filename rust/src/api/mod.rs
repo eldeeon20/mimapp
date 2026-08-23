@@ -1,3 +1,4 @@
+pub mod gpu;
 pub mod hf;
 pub mod kem;
 pub mod laurelia;

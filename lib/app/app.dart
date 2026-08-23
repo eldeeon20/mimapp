@@ -5,6 +5,7 @@ import '../colab_cli/colab_dialog.dart';
 import '../lua/lua_page.dart';
 import '../media/media_player.dart';
 import '../screens/ai_screen.dart';
+import '../screens/gpu_test_screen.dart';
 import '../screens/hf_test_screen.dart';
 import '../screens/kem_test_screen.dart';
 import '../screens/media_screen.dart';
@@ -112,6 +113,8 @@ class _HomePageState extends State<HomePage> {
               _openTest(context, 'KEM post-cuántico', const KemTestScreen());
             case 'hf':
               _openTest(context, 'HuggingFace', const HfTestScreen());
+            case 'gpu':
+              _openTest(context, 'GPU Compute (WGSL)', const GpuTestScreen());
           }
         }),
       ),
@@ -299,7 +302,6 @@ class _HomePageState extends State<HomePage> {
                               size: 58,
                               color: Color(0xFFB57CFF),
                             ),
-                          ),
                           ),
                         ],
                       ),

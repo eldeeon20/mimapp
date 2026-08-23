@@ -47,51 +47,65 @@ class _KemTestScreenState extends State<KemTestScreen> {
   @override
   void initState() {
     super.initState();
+    _loadAlgos();
+  }
+
+  Future<void> _loadAlgos() async {
     try {
-      _algos = _kem.listAlgorithms();
-      if (_algos.isNotEmpty) {
-        _algo =
-            _algos.firstWhere((a) => a == 'XWingKemDraft06', orElse: () => _algos.first);
-      }
-    } catch (_) {
-      _algos = [];
-    }
+      final algos = await _kem.listAlgorithms();
+      if (!mounted) return;
+      setState(() {
+        _algos = algos;
+        if (algos.isNotEmpty) {
+          _algo = algos.firstWhere((a) => a == 'XWingKemDraft06',
+              orElse: () => algos.first);
+        }
+      });
+    } catch (_) {}
   }
 
   Future<void> _runTest(String algo) async {
     setState(() => _busy = true);
-    final sw = Stopwatch()..start();
+    try {
+      final sw = Stopwatch()..start();
 
-    final kpA = _kem.keyGen(algo);
-    final keygenMs = sw.elapsedMicroseconds / 1000;
+      final kpA = await _kem.keyGen(algo);
+      final keygenMs = sw.elapsedMicroseconds / 1000;
 
-    sw.reset();
-    final enc = _kem.encapsulate(algorithm: algo, publicKey: kpA.publicKey);
-    final encapMs = sw.elapsedMicroseconds / 1000;
+      sw.reset();
+      final enc =
+          await _kem.encapsulate(algorithm: algo, publicKey: kpA.publicKey);
+      final encapMs = sw.elapsedMicroseconds / 1000;
 
-    sw.reset();
-    final ssB = _kem.decapsulate(
-        algorithm: algo, ciphertext: enc.ciphertext, privateKey: kpA.privateKey);
-    final decapMs = sw.elapsedMicroseconds / 1000;
+      sw.reset();
+      final ssB = await _kem.decapsulate(
+          algorithm: algo,
+          ciphertext: enc.ciphertext,
+          privateKey: kpA.privateKey);
+      final decapMs = sw.elapsedMicroseconds / 1000;
 
-    final match = _bytesEqual(Uint8List.fromList(enc.sharedSecret), ssB);
+      final match = _bytesEqual(Uint8List.fromList(enc.sharedSecret), ssB);
 
-    setState(() {
-      _results.insert(
-          0,
-          _KemResult(
-            algo: algo,
-            match: match,
-            keygenMs: keygenMs,
-            encapMs: encapMs,
-            decapMs: decapMs,
-            skSize: kpA.privateKey.length,
-            pkSize: kpA.publicKey.length,
-            ctSize: enc.ciphertext.length,
-            ssPreview: _hexPreview(enc.sharedSecret),
-          ));
-      _busy = false;
-    });
+      if (!mounted) return;
+      setState(() {
+        _results.insert(
+            0,
+            _KemResult(
+              algo: algo,
+              match: match,
+              keygenMs: keygenMs,
+              encapMs: encapMs,
+              decapMs: decapMs,
+              skSize: kpA.privateKey.length,
+              pkSize: kpA.publicKey.length,
+              ctSize: enc.ciphertext.length,
+              ssPreview: _hexPreview(enc.sharedSecret),
+            ));
+      });
+    } catch (_) {
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<void> _runAll() async {

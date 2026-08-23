@@ -1,17 +1,16 @@
-import '../src/rust/api/nostr_dm.dart';
+import '../src/rust/api/nostr_dm.dart' as rust;
 
 /// Chat Nostr NIP-17 (DM privado 1-a-1, SIN observador).
 ///
 /// Variante A de Gtool (`nostr_demo1.gd`): claves reales tuyas + npub del
 /// peer, relays DM y de lectura, suscripción y polling.
 class NostrChat {
-  NostrDm? _client;
+  rust.NostrDm? _client;
 
   bool get connected => _client != null;
 
   /// nsec vacío = genera identidad nueva. Los relays se agregan ANTES de
-  /// suscribirse (requisito del cliente). [nSeconds]/[nLimit] definen la
-  /// ventana de búsqueda al suscribirse.
+  /// suscribirse (requisito del cliente).
   Future<void> init({
     String? nsec,
     required String peerNpub,
@@ -20,20 +19,22 @@ class NostrChat {
     int nLimit = 10,
   }) async {
     await close();
-    final c = await NostrDm(nsec: nsec, peerNpub: peerNpub);
+    final c = await rust.nostrDmNew(nsec: nsec, peerNpub: peerNpub);
     if (dmRelays.isNotEmpty) {
-      await c.addRelays(dmRelays: dmRelays);
+      await c.addRelays(dmRelays: dmRelays, readRelays: const []);
     }
     await c.subscribe(nSeconds: nSeconds, nLimit: nLimit);
     _client = c;
   }
 
-  Future<void> addRelays(List<String> dmRelays, {List<String> readRelays = const []}) async {
-    _require().addRelays(dmRelays: dmRelays, readRelays: readRelays);
+  Future<void> addRelays(List<String> dmRelays,
+      {List<String> readRelays = const []}) async {
+    await _require()
+        .addRelays(dmRelays: dmRelays, readRelays: readRelays);
   }
 
   Future<void> send(String content) async {
-    _require().send(content: content);
+    await _require().send(content: content);
   }
 
   /// Poll bloqueante (~[timeoutSecs]); retorna mensajes nuevos del peer.
@@ -53,7 +54,7 @@ class NostrChat {
     }
   }
 
-  NostrDm _require() {
+  rust.NostrDm _require() {
     final c = _client;
     if (c == null) throw StateError('NostrChat sin inicializar (llamá init)');
     return c;

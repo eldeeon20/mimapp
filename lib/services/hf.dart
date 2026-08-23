@@ -1,23 +1,24 @@
 import 'dart:typed_data';
 
-import '../src/rust/api/hf.dart';
+import '../src/rust/api/hf.dart' as rust;
 
 /// Cliente HuggingFace — porte del `hf_godot` de Gtool.
 ///
 /// Buscar modelos, subir/bajar archivos (con token write para upload),
 /// crear/borrar repos y leer RANGOS de archivos grandes sin bajar todo.
 class HuggingFace {
-  HfClient? _client;
+  rust.HfClient? _client;
 
   bool get ready => _client != null;
 
   /// Inicializa con token (vacío = anónimo, solo lectura pública).
   Future<void> init(String token) async {
-    _client = await HfClient(token: token);
+    _client = await rust.hfClientNew(token: token);
   }
 
   /// Busca modelos de un autor → ids "autor/modelo".
-  Future<List<String>> searchModels({required String author, int limit = 10}) async {
+  Future<List<String>> searchModels(
+      {required String author, int limit = 10}) async {
     return _require().searchModels(author: author, limit: limit);
   }
 
@@ -81,14 +82,13 @@ class HuggingFace {
     required String repoId,
     String repoType = 'model',
   }) async {
-    await _require()
-        .deleteRepository(repoId: repoId, repoType: repoType);
+    await _require().deleteRepository(repoId: repoId, repoType: repoType);
   }
 
-  bool repoExists({required String repoId, String repoType = 'model'}) =>
+  Future<bool> repoExists({required String repoId, String repoType = 'model'}) =>
       _require().repoExists(repoId: repoId, repoType: repoType);
 
-  bool fileExists({
+  Future<bool> fileExists({
     required String repoId,
     required String filename,
     String repoType = 'model',
@@ -122,7 +122,7 @@ class HuggingFace {
     String token = '',
     String repoType = 'model',
   }) async {
-    final bytes = await hfDownloadFileRange(
+    final bytes = await rust.hfDownloadFileRange(
       repoId: repoId,
       filename: filename,
       start: start,
@@ -135,7 +135,7 @@ class HuggingFace {
 
   void dispose() => _client = null;
 
-  HfClient _require() {
+  rust.HfClient _require() {
     final c = _client;
     if (c == null) throw StateError('HuggingFace sin inicializar (llamá init)');
     return c;

@@ -1,24 +1,23 @@
-import '../src/rust/api/nostr_peer.dart';
+import '../src/rust/api/nostr_peer.dart' as rust;
 
 /// Chat Nostr CON observador (clave compartida ECDH, patrón Mostro).
 ///
 /// Variante B de Gtool (`nostrpeer.rs`): los dos participantes derivan la
 /// misma shared key por ECDH; cualquier tercero con esa key puede LEER
-/// (init_observer) pero no escribir.
+/// (initObserver) pero no escribir.
 class NostrPeerChat {
   NostrPeerChat._(this._inner);
 
   final rust.NostrPeerChat _inner;
   int _nSeconds = 600;
 
-  static Future<NostrPeerChat> create() async => NostrPeerChat._(
-        await rust.NostrPeerChat(),
-      );
+  static Future<NostrPeerChat> create() async =>
+      NostrPeerChat._(await rust.nostrPeerNew());
 
   /// Ventana de frescura: mensajes más viejos que [secs] se descartan.
-  void setWindow(int secs) {
+  Future<void> setWindow(int secs) async {
     _nSeconds = secs;
-    _inner.setWindow(nSeconds: secs);
+    await _inner.setWindow(nSeconds: secs);
   }
 
   /// Participante: retorna la shared key en hex → pasásela al observador
@@ -66,7 +65,7 @@ class NostrPeerChat {
 
   Future<void> close() async {
     try {
-      _inner.disconnect();
+      await _inner.disconnect();
     } catch (_) {}
   }
 }

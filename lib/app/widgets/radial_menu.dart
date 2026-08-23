@@ -28,6 +28,8 @@ class _RadialMenuState extends State<RadialMenu>
         color: Colors.greenAccent),
     (key: 'hf', label: 'HuggingFace', icon: Icons.hub_rounded,
         color: Colors.lightBlueAccent),
+    (key: 'gpu', label: 'GPU', icon: Icons.memory_rounded,
+        color: Colors.pinkAccent),
   ];
 
   @override
