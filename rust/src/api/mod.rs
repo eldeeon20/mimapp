@@ -1,7 +1,10 @@
+pub mod hf;
+pub mod kem;
 pub mod laurelia;
 pub mod nostr_dm;
 pub mod nostr_keys;
 pub mod nostr_peer;
+pub mod nostringer;
 pub mod pkarr;
 pub mod shamir;
 pub mod simple;

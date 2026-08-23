@@ -4,6 +4,7 @@
 /// (copiado tal cual de Gtool). Misma mecánica que el demo
 /// `nostr_demo1.gd`: init → add_relays → subscribe → send/poll.
 use anyhow::{anyhow, Result};
+use nostr_sdk::ToBech32;
 
 use crate::gt::nostrn::NostrClient;
 

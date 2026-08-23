@@ -90,6 +90,6 @@ pub fn nostr_pubkey_hex_from_secret(secret: Vec<u8>) -> String {
 }
 
 fn secret_from_bytes(secret: &[u8]) -> Option<SecretKey> {
-    let bytes: [u8; 32] = secret.as_slice().try_into().ok()?;
+    let bytes: [u8; 32] = secret.try_into().ok()?;
     SecretKey::from_slice(&bytes).ok()
 }
