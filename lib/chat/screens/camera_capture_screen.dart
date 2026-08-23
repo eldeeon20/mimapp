@@ -133,7 +133,8 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
       } else {
         final dir = await getTemporaryDirectory();
         await ctrl.startVideoRecording(
-          '${dir.path}/VID_${DateTime.now().millisecondsSinceEpoch}.mp4',
+          filePath:
+              '${dir.path}/VID_${DateTime.now().millisecondsSinceEpoch}.mp4',
         );
         setState(() {
           _grabando = true;
