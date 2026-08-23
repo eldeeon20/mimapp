@@ -9,13 +9,13 @@ Base lista: Rust `api/nostringer.rs` ✅ · service `services/nostringer.dart` �
 
 | # | Tarea | Archivo | Origen |
 |---|---|---|---|
-| 1.1 | Pantalla firmas ring: keypairs xonly/compressed, ring N pubkeys, sign SAG/BLSAG, verify | `lib/screens/ring_signatures_test_screen.dart` | `test_nostringer.gd` |
-| 1.2 | Centro del radial menu → botón real que abre esa pantalla (icono fingerprint, mismo estilo del candado) | `lib/app/widgets/radial_menu.dart:74-97` | — |
-| 1.3 | Pantalla voto anónimo BLSAG: N votantes generados, firma blsag por voto, keyImagesMatch anti doble-voto, conteo | `lib/screens/ring_vote_test_screen.dart` | `test_nostringer_group.gd` |
-| 1.4 | Botón `'rv'` al círculo `_items` (how_to_vote, verde) + case en `app.dart` | `radial_menu.dart:20-39`, `app.dart` | — |
+| 1.1 ✅ | Pantalla firmas ring: keypairs xonly/compressed, ring N pubkeys, sign SAG/BLSAG, verify | `lib/screens/ring_signatures_test_screen.dart` | `test_nostringer.gd` |
+| 1.2 ✅ | Centro del radial menu → botón real que abre esa pantalla (icono fingerprint) | `lib/app/widgets/radial_menu.dart` | — |
+| 1.3 ✅ | Pantalla voto anónimo BLSAG: N votantes generados, firma blsag por voto, keyImagesMatch anti doble-voto, conteo | `lib/screens/ring_vote_test_screen.dart` | `test_nostringer_group.gd` |
+| 1.4 ✅ | Botón `'rv'` al círculo `_items` + case en `app.dart` | `radial_menu.dart`, `app.dart` | — |
 
 Criterio de hecho: ambas pantallas abren desde el menú, firman/verifican contra
-`api/nostringer.rs`, voto rechaza repetidos.
+`api/nostringer.rs`, voto rechaza repetidos. **AGENT 1 COMPLETADO** (`4280613`).
 
 ## AGENT 2 (responsable: humano/otro agente) — Fixes pendientes
 
