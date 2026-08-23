@@ -30,6 +30,8 @@ class _RadialMenuState extends State<RadialMenu>
         color: Colors.lightBlueAccent),
     (key: 'gpu', label: 'GPU', icon: Icons.memory_rounded,
         color: Colors.pinkAccent),
+    (key: 'dl', label: 'Descargas', icon: Icons.download_rounded,
+        color: Colors.tealAccent),
   ];
 
   @override

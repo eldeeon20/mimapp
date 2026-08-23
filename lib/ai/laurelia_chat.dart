@@ -6,6 +6,8 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:pr_app/src/rust/api/laurelia.dart';
 
+import '../services/notification_service.dart';
+
 /// Chat LLM Laurelia: descarga el modelo desde HuggingFace por HTTP
 /// (mismo flujo que `laurelia_example.gd` de Godot) y delega la inferencia
 /// en Rust (Candle) vía flutter_rust_bridge.
@@ -103,8 +105,12 @@ class LaureliaChat {
     return !dir.existsSync();
   }
 
+  /// Id fijo de la notificación de descarga del modelo.
+  static const _dlNotifId = 9001;
+
   /// Descarga por HTTP (streaming a disco) los archivos que falten.
-  /// Muestra progreso en vivo (% de cada archivo). Reusa lo ya descargado.
+  /// Muestra progreso en vivo (% + MB reales) en pantalla Y en la
+  /// notificación del sistema. Reusa lo ya descargado.
   Future<bool> download() async {
     _progress('Descargando…');
     final client = http.Client();
@@ -123,22 +129,43 @@ class LaureliaChat {
         final total = res.contentLength ?? 0;
         var written = 0;
         final sink = target.openWrite();
+
+        Future<void> notify({bool finished = false}) {
+          return NotificationService.showDownloadProgress(
+            id: _dlNotifId,
+            title: 'Laurelia · $remoteName',
+            body: total > 0
+                ? '${_fmt(written)} / ${_fmt(total)}'
+                : '${_fmt(written)}…',
+            progress: total > 0 ? written / total : null,
+            finished: finished,
+          );
+        }
+
+        await notify();
         try {
           await for (final chunk in res.stream) {
             sink.add(chunk);
             written += chunk.length;
             _downloadedBytes += chunk.length;
+            String msg;
             if (total > 0) {
               final pct = (written * 100 / total).toStringAsFixed(0);
-              _progress('$remoteName: ${_fmt(written)} / ${_fmt(total)} ($pct%)');
+              msg = '$remoteName: ${_fmt(written)} / ${_fmt(total)} ($pct%)';
             } else {
-              _progress('$remoteName: ${_fmt(written)}…');
+              msg = '$remoteName: ${_fmt(written)}…';
+            }
+            _progress(msg);
+            // notificación throttled (~600ms)
+            if (written % (512 * 1024) < 64 * 1024) {
+              await notify();
             }
           }
           await sink.flush();
         } finally {
           await sink.close();
         }
+        await notify(finished: true);
         missing = await _missing();
       }
       _progress('Modelo descargado. Tocá Cargar.');

@@ -98,4 +98,52 @@ class NotificationService {
       notificationDetails: details,
     );
   }
+
+  // ------------------------------------------------------------- descargas
+
+  static int _downloadSeq = 0;
+
+  /// Id único para una notificación de descarga (9000+).
+  static int nextDownloadId() => 9000 + (++_downloadSeq);
+
+  /// Muestra/actualiza una notificación de progreso en el canal principal.
+  /// [progress] 0..1; null = indeterminada. Con [finished] la notificación
+  /// deja de ser ongoing (queda como resultado final).
+  static Future<void> showDownloadProgress({
+    required int id,
+    required String title,
+    required String body,
+    double? progress,
+    bool finished = false,
+  }) async {
+    final details = NotificationDetails(
+      android: AndroidNotificationDetails(
+        channelId,
+        channelName,
+        channelDescription: 'Progreso de descargas',
+        importance: Importance.low,
+        priority: Priority.low,
+        ongoing: !finished,
+        onlyAlertOnce: true,
+        showWhen: false,
+        autoCancel: finished,
+        showProgress: progress != null,
+        maxProgress: 100,
+        progress: progress == null ? 0 : (progress.clamp(0, 1) * 100).round(),
+        indeterminate: progress == null && !finished,
+      ),
+    );
+    try {
+      await _plugin.show(
+        id: id,
+        title: title,
+        body: body,
+        notificationDetails: details,
+      );
+    } catch (_) {}
+  }
+
+  /// Quita una notificación de descarga terminada/cancelada.
+  static Future<void> cancelDownload(int id) =>
+      _plugin.cancel(id: id);
 }

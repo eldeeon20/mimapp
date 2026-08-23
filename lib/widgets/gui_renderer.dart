@@ -1,15 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
+import '../lua/lua_theme.dart';
 import 'gui_button.dart';
 import 'gui_divider.dart';
+import 'gui_grid.dart';
 import 'gui_node.dart';
 import 'gui_rect.dart';
 import 'gui_rect_image.dart';
+import 'gui_scroll.dart';
 import 'gui_spacer.dart';
 import 'gui_text.dart';
 import 'gui_text_edit.dart';
 import 'gui_video.dart';
+import 'gui_zoom_image.dart';
 
 /// Convierte un [GuiNode] (descrito en Lua) en su widget Flutter.
 /// Flutter siempre dibuja; Lua decide estructura, estilo y layout.
@@ -26,11 +30,20 @@ class GuiRenderer {
       GuiText() => _text(context, node as GuiText, values),
       GuiTextEdit() => _textEdit(node as GuiTextEdit, values, onInput),
       GuiButton() => _button(context, node as GuiButton, onAction),
-      GuiRect() => _rect(context, node as GuiRect),
+      GuiRect() => _rect(context, node as GuiRect,
+          values: values,
+          onInput: onInput,
+          onAction: onAction,
+          videoController: videoController),
       GuiRectImage() => _rectImage(node as GuiRectImage),
       GuiDivider() => _divider(context, node as GuiDivider),
       GuiSpacer() => _spacer(node as GuiSpacer),
       GuiVideo() => _video(node as GuiVideo, videoController),
+      GuiScroll() => _scroll(context, node as GuiScroll, values, onInput,
+          onAction, videoController),
+      GuiGrid() => _grid(context, node as GuiGrid, values, onInput, onAction,
+          videoController),
+      GuiZoomImage() => _zoomImage(node as GuiZoomImage),
       _ => const SizedBox.shrink(),
     };
   }
@@ -49,7 +62,10 @@ class GuiRenderer {
       fontWeight: s.font?.bold == true ? FontWeight.bold : null,
       fontStyle: s.font?.italic == true ? FontStyle.italic : null,
       fontFamily: s.font?.family,
-      color: _color(s.font?.color ?? s.color, base?.color),
+      color: _color(
+        s.font?.color ?? s.color,
+        n.heading ? _hexToColor(LuaTheme.instance.accent) : base?.color,
+      ),
     );
     return _applyLayout(
       n,
@@ -85,23 +101,40 @@ class GuiRenderer {
 
   static Widget _button(BuildContext context, GuiButton n, void Function(String) onAction) {
     final s = n.style;
-    final child = FilledButton(
-      onPressed: s.onClick == null ? null : () => onAction(s.onClick!),
-      style: FilledButton.styleFrom(
-        backgroundColor:
-            s.color != null ? _color(s.color, Colors.transparent) : null,
-        foregroundColor: s.font?.color != null
-            ? _color(s.font!.color, Colors.white)
+    final t = LuaTheme.instance;
+    final customColor = s.color != null ? _color(s.color, Colors.transparent) : null;
+    final child = DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: customColor == null
+            ? LinearGradient(colors: [
+                _color(t.primary, Colors.deepPurple)!,
+                _color(t.accent, Colors.cyanAccent)!,
+              ])
             : null,
+        color: customColor,
+        borderRadius: BorderRadius.circular(t.radius),
       ),
-      child: Text(
-        s.text,
-        style: s.font?.size != null
-            ? TextStyle(
-                fontSize: s.font!.size,
-                fontWeight: s.font!.bold ? FontWeight.bold : null,
-              )
-            : null,
+      child: FilledButton(
+        onPressed: s.onClick == null ? null : () => onAction(s.onClick!),
+        style: FilledButton.styleFrom(
+          backgroundColor: Colors.transparent,
+          shadowColor: Colors.transparent,
+          foregroundColor: s.font?.color != null
+              ? _color(s.font!.color, Colors.white)
+              : Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(t.radius),
+          ),
+        ),
+        child: Text(
+          s.text,
+          style: s.font?.size != null
+              ? TextStyle(
+                  fontSize: s.font!.size,
+                  fontWeight: s.font!.bold ? FontWeight.bold : null,
+                )
+              : const TextStyle(fontWeight: FontWeight.bold),
+        ),
       ),
     );
     return _applyLayout(n, child);
@@ -109,7 +142,14 @@ class GuiRenderer {
 
   // ----------------------------------------------------------------- rect
 
-  static Widget _rect(BuildContext context, GuiRect n) {
+  static Widget _rect(
+    BuildContext context,
+    GuiRect n, {
+    required Map<String, String> values,
+    required void Function(String, String) onInput,
+    required void Function(String) onAction,
+    VideoController? videoController,
+  }) {
     final s = n.style;
     final textStyle = (s.font?.size != null ||
             s.font?.bold == true ||
@@ -128,18 +168,41 @@ class GuiRenderer {
       decoration: BoxDecoration(
         color:
             n.bgColor != null ? _color(n.bgColor, Colors.transparent) : null,
-        borderRadius: n.radius > 0 ? BorderRadius.circular(n.radius) : null,
+        borderRadius: BorderRadius.circular(n.radius > 0 ? n.radius : 0),
         border: n.borderWidth > 0
             ? Border.all(
                 color: _color(n.borderColor, Colors.grey),
                 width: n.borderWidth,
               )
             : null,
+        boxShadow: (n.children.isNotEmpty || s.text.isNotEmpty)
+            ? [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: .25),
+                  blurRadius: 10,
+                  offset: const Offset(0, 2),
+                ),
+              ]
+            : null,
       ),
-      child: s.text.isEmpty
-          ? null
-          : Text(s.text,
-              textAlign: _textAlign(s.align), style: textStyle),
+      padding: n.children.isNotEmpty
+          ? const EdgeInsets.all(10)
+          : null,
+      child: n.children.isNotEmpty
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (s.text.isNotEmpty)
+                  Text(s.text,
+                      textAlign: _textAlign(s.align), style: textStyle),
+                for (final c in n.children) build(context, c, values: values, onInput: onInput, onAction: onAction, videoController: videoController),
+              ],
+            )
+          : (s.text.isEmpty
+              ? null
+              : Text(s.text,
+                  textAlign: _textAlign(s.align), style: textStyle)),
     );
     return _applyLayout(n, child);
   }
@@ -203,6 +266,99 @@ class GuiRenderer {
           )
         : Video(controller: videoController);
     return _applyLayout(n, child);
+  }
+
+  // -------------------------------------------------------------- scroll
+
+  static Widget _scroll(
+    BuildContext context,
+    GuiScroll n,
+    Map<String, String> values,
+    void Function(String, String) onInput,
+    void Function(String) onAction,
+    VideoController? videoController,
+  ) {
+    final h = n.style.height ?? 320.0;
+    return _applyLayout(
+      n,
+      SizedBox(
+        height: h,
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final c in n.children)
+                build(context, c,
+                    values: values,
+                    onInput: onInput,
+                    onAction: onAction,
+                    videoController: videoController),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------- grid
+
+  static Widget _grid(
+    BuildContext context,
+    GuiGrid n,
+    Map<String, String> values,
+    void Function(String, String) onInput,
+    void Function(String) onAction,
+    VideoController? videoController,
+  ) {
+    return _applyLayout(
+      n,
+      GridView.count(
+        crossAxisCount: n.columns.clamp(1, 6),
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        mainAxisSpacing: 8,
+        crossAxisSpacing: 8,
+        childAspectRatio: (n.style.width ?? 2.4),
+        children: [
+          for (final c in n.children)
+            build(context, c,
+                values: values,
+                onInput: onInput,
+                onAction: onAction,
+                videoController: videoController),
+        ],
+      ),
+    );
+  }
+
+  // ----------------------------------------------------------- zoom image
+
+  static Widget _zoomImage(GuiZoomImage n) {
+    final s = n.style;
+    final fit = switch (n.fit?.toLowerCase()) {
+      'cover' => BoxFit.cover,
+      'fill' => BoxFit.fill,
+      _ => BoxFit.contain,
+    };
+    final image = (n.src == null || n.src!.isEmpty)
+        ? Container(color: Colors.black12, height: 160)
+        : Image.network(
+            n.src!,
+            fit: fit,
+            loadingBuilder: (context, widget, progress) => progress == null
+                ? widget
+                : const Center(child: CircularProgressIndicator()),
+            errorBuilder: (_, __, ___) =>
+                Container(color: Colors.black12, height: 160),
+          );
+    return _applyLayout(
+      n,
+      SizedBox(
+        height: s.height ?? 260,
+        child: InteractiveViewer(maxScale: 6, child: Center(child: image)),
+      ),
+    );
   }
 
   // ------------------------------------------------------------- helpers

@@ -1,12 +1,15 @@
 import 'gui_button.dart';
 import 'gui_divider.dart';
 import 'gui_font.dart';
+import 'gui_grid.dart';
 import 'gui_rect.dart';
 import 'gui_rect_image.dart';
+import 'gui_scroll.dart';
 import 'gui_spacer.dart';
 import 'gui_text.dart';
 import 'gui_text_edit.dart';
 import 'gui_video.dart';
+import 'gui_zoom_image.dart';
 
 /// Estilo/layout común a todo nodo de la GUI, leído desde Lua.
 typedef NodeStyle = ({
@@ -41,13 +44,26 @@ abstract class GuiNode {
       'button' => GuiButton.fromMap(m),
       'input' || 'text_edit' || 'textfield' => GuiTextEdit.fromMap(m),
       'heading' => GuiText.fromMap(m, heading: true),
-      'rect' => GuiRect.fromMap(m),
+      'rect' || 'card' => GuiRect.fromMap(m),
       'image' || 'rect_image' => GuiRectImage.fromMap(m),
       'divider' => GuiDivider.fromMap(m),
       'spacer' => GuiSpacer.fromMap(m),
       'video' => GuiVideo.fromMap(m),
+      'grid' => GuiGrid.fromMap(m),
+      'scroll' => GuiScroll.fromMap(m),
+      'zoom_image' => GuiZoomImage.fromMap(m),
       _ => GuiText.fromMap(m),
     };
+  }
+
+  /// Lee `children = { tabla, tabla, ... }` recursivamente.
+  static List<GuiNode> parseChildren(Map<String, Object?> m) {
+    final raw = m['children'];
+    if (raw is! List) return const [];
+    return [
+      for (final c in raw)
+        if (c is Map<String, Object?>) GuiNode.fromMap(c),
+    ];
   }
 
   /// Extrae los campos de estilo/layout comunes desde el mapa Lua.

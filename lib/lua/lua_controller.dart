@@ -1,4 +1,7 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
@@ -7,38 +10,49 @@ import 'package:pr_app/src/rust/api/simple.dart';
 
 import '../ai/laurelia_chat.dart';
 import '../media/media_player.dart';
+import '../services/hf.dart';
+import '../services/kem.dart';
+import '../services/nostr_chat.dart';
+import '../services/nostr_keys.dart';
+import '../services/nostr_peer_chat.dart';
+import '../services/shamir.dart';
 import '../widgets/gui_node.dart';
+import 'downloads/download_manager.dart';
+import 'lua_theme.dart';
 import 'page_model.dart';
+import 'page_router.dart';
 import 'state_store.dart';
 
 part 'lua_rust.dart';
 part 'lua_player.dart';
 part 'lua_laurelia.dart';
+part 'lua_shamir.dart';
+part 'lua_kem.dart';
+part 'lua_hf.dart';
+part 'lua_gpu.dart';
+part 'lua_nostr.dart';
+part 'lua_downloads.dart';
 
 /// Controlador Lua: lee la página desde Lua y controla los bucles (recorrido
 /// de `page.body`) y las llamadas (handlers Lua y funciones Rust).
 ///
 /// Lua puede llamar a:
-///   - engine_get(id)               -> leer el valor actual de un widget
-///   - engine_set(id, valor)        -> actualizar un widget (VALUE update)
-///   - navigate("página")           -> cambiar de página (STRUCTURAL update)
-///   - gui_* (guión inyectado)      -> construir la GUI llamando funciones
-///   - rust_greet / rust_sum / rust_fibonacci -> llamar a Rust
-///
-/// Solo Lua toca el motor: cualquier cambio de valor pasa por [engine_set]
-/// y cae en [StateStore]. NO hay setState global; el nodo enlazado se
-/// reconstruye solo (ver [GuiRuntime]).
-///
-/// El archivo está dividido en partes:
-///   - lua_rust.dart     (globals rust_*)
-///   - lua_player.dart   (globals player_*)
-///   - lua_laurelia.dart (globals laurelia_*)
+///   - engine_get(id) / engine_set(id, v)
+///   - navigate(uri)                 -> pasa por [PageRouter] (lua://, http, tcp, udp, nostrn…)
+///   - gui_* (guión inyectado)       -> construir la GUI
+///   - rust_* / player_* / laurelia_*
+///   - shamir_* / kem_* / hf_* / gpu_* / nostr_dm_* / nostr_obs_*
+///   - job_start(fn) genérico + job_poll(id); resultados también llegan a
+///     `handlers.on_event(job_id, result)` (drenaje cada 300ms).
 class LuaController {
   late LuaState _lua;
 
   /// Estado de la GUI. Es el ÚNICO lugar donde viven los valores; se
   /// actualiza vía engine_set (o funciones que llaman a engine_set).
   final StateStore store = StateStore();
+
+  /// Router de páginas compartido.
+  final PageRouter router = PageRouter.instance;
 
   /// Guión inyectado antes del script del usuario. Define la API `gui_*`
   /// (Godot-like): Lua construye la GUI llamando funciones en vez de
@@ -65,8 +79,33 @@ gui_divider = function(p) return gui_add("divider", p) end
 gui_spacer  = function(p) return gui_add("spacer", p) end
 gui_video   = function(p) return gui_add("video", p) end
 
+-- contenedores con children
+gui_card  = function(p) p.children = p.children or {}; return gui_add("card", p) end
+gui_grid  = function(p) p.children = p.children or {}; return gui_add("grid", p) end
+gui_scroll= function(p) p.children = p.children or {}; return gui_add("scroll", p) end
+
+-- hipervínculo: botón que navega por el router
+gui_link = function(p)
+  local href = p.href or ""
+  return gui_add("button", { text = p.text or href, on_click = "__nav__ " .. href })
+end
+
+-- imagen con pinch-zoom
+gui_zoom_image = function(p) return gui_add("zoom_image", p) end
+
+-- tema en caliente
+theme_apply = function(p) __theme_apply(p or {}) end
+
 function handler(nombre, fn)
   page.handlers[nombre] = fn
+end
+
+-- helper: espera un job sin bloquear (yield cooperativo no disponible;
+-- usar handlers.on_event para no busy-wait).
+function job_result_or_nil(id)
+  local done, res = job_poll(id)
+  if done then return res end
+  return nil
 end
 ''';
 
@@ -85,11 +124,82 @@ end
   int _lastTokenCount = -1;
   int _lastVocab = -1;
 
-  /// Actualiza un valor (vía engine_set o internamente). Solo parchea el
-  /// nodo enlazado; no reconstruye el árbol.
+  // ------------------------------------------------------------- jobs
+
+  final Map<int, _Job> _jobs = {};
+  int _jobSeq = 0;
+  Timer? _drainTimer;
+
+  /// Lanza [work] como job; retorna el id inmediatamente. Al completar,
+  /// el resultado viaja a `handlers.on_event(id, resumen)` (drenaje).
+  int jobStart(Future<Object?> work) {
+    final id = ++_jobSeq;
+    _jobs[id] = _Job();
+    work.then((r) {
+      final j = _jobs[id];
+      if (j != null) {
+        j.done = true;
+        j.result = r?.toString() ?? 'ok';
+      }
+    }).catchError((Object e) {
+      final j = _jobs[id];
+      if (j != null) {
+        j.done = true;
+        j.result = 'ERROR: $e';
+      }
+    });
+    return id;
+  }
+
+  void _ensureDrainTimer() {
+    _drainTimer ??=
+        Timer.periodic(const Duration(milliseconds: 300), (_) => _drainJobs());
+  }
+
+  /// Entrega jobs terminados a `handlers.on_event(id, result)` en orden.
+  void _drainJobs() {
+    if (_jobs.isEmpty || _luaStateDead) return;
+    for (final entry in _jobs.entries.toList()) {
+      final j = entry.value;
+      if (!j.done || j.delivered) continue;
+      invokeHandlerArgs('on_event', [entry.key.toString(), j.result]);
+      j.delivered = true;
+    }
+    _jobs.removeWhere((_, j) => j.delivered);
+  }
+
+  bool get _luaStateDead => !_jobsInitialized;
+
+  bool _jobsInitialized = false;
+
+  /// Poll manual desde Lua: done, result.
+  int _luaJobPoll(LuaState ls) {
+    final id = ls.checkInteger(1) ?? 0;
+    ls.pop(1);
+    final j = _jobs[id];
+    if (j == null) {
+      ls.pushBoolean(true);
+      ls.pushString('ERROR: job inexistente');
+      return 2;
+    }
+    ls.pushBoolean(j.done);
+    ls.pushString(j.done ? j.result : '');
+    return 2;
+  }
+
+  /// job_count() -> cantidad de jobs vivos.
+  int _luaJobCount(LuaState ls) {
+    ls.pushInteger(_jobs.values.where((j) => !j.delivered).length);
+    return 1;
+  }
+
+  // ------------------------------------------------------------- lifecycle
+
   void setInputValue(String id, String value) => store.set(id, value);
 
   void dispose() {
+    _drainTimer?.cancel();
+    _jobsInitialized = false;
     store.clear();
   }
 
@@ -99,62 +209,55 @@ end
     return load(code);
   }
 
-  /// Carga una página Lua desde una URL (script descargado de la web).
-  Future<PageModel> loadFromUrl(String url) async {
-    url = _normalizeUrl(url);
-    final res = await http.get(Uri.parse(url));
-    if (res.statusCode != 200) {
-      throw Exception('HTTP ${res.statusCode} al cargar $url');
-    }
-    final body = utf8.decode(res.bodyBytes);
-    if (body.trimLeft().startsWith('<')) {
-      throw Exception(
-        'La URL devolvió HTML, no código Lua. '
-        'Usa la URL "raw" del archivo, p. ej. '
-        'https://raw.githubusercontent.com/eduardo-bertey/fluweru/main/assets/pages/demo.lua',
-      );
-    }
-    return load(body);
-  }
+  /// Carga desde código ya obtenido (el router hace fetch).
+  PageModel loadFromSource(String code, {String uri = ''}) => load(code);
 
-  /// Convierte URLs de GitHub (blob o raw) a raw.githubusercontent.com.
-  String _normalizeUrl(String url) {
-    final match = RegExp(
-      r'^https?://github\.com/([^/]+/[^/]+)/(blob|raw)/(.+)$',
-    ).firstMatch(url);
-    if (match == null) return url;
-    return 'https://raw.githubusercontent.com/${match.group(1)}/${match.group(3)}';
+  /// Carga una página Lua desde una URL (compat vieja; usa el router).
+  Future<PageModel> loadFromUrl(String url) async {
+    final src = await router.resolve(url);
+    return load(src.code);
   }
 
   /// Ejecuta el script Lua, recorre `page.body` (bucle) y devuelve el modelo.
   PageModel load(String code) {
     store.clear();
+    _jobs.clear();
     _lua = LuaState.newState();
     _lua.openLibs();
     _registerGlobals();
+    _jobsInitialized = true;
     final status = _lua.loadString(_prelude + code);
     if (status != ThreadStatus.luaOk) {
       throw Exception('El script Lua no compiló (status: $status)');
     }
     _lua.call(0, 0);
+    _ensureDrainTimer();
     return _parsePage();
   }
 
   /// Invoca un handler (función Lua) definido en `page.handlers`.
-  void invokeHandler(String name) {
-    _lua.getGlobal('page');
-    _lua.getField(-1, 'handlers');
-    if (!_lua.isTable(-1)) {
-      _lua.pop(2); // handlers no definido + page
-      return;
-    }
-    _lua.getField(-1, name);
-    if (_lua.isFunction(-1)) {
-      _lua.pCall(0, 0, 0);
-      _lua.pop(2); // fn + handlers + page
-    } else {
-      _lua.pop(3); // fn no-función + handlers + page
-    }
+  void invokeHandler(String name) => invokeHandlerArgs(name, const []);
+
+  /// Invoca handler pasándole argumentos string simples.
+  void invokeHandlerArgs(String name, List<String> args) {
+    try {
+      _lua.getGlobal('page');
+      _lua.getField(-1, 'handlers');
+      if (!_lua.isTable(-1)) {
+        _lua.pop(2);
+        return;
+      }
+      _lua.getField(-1, name);
+      if (_lua.isFunction(-1)) {
+        for (final a in args) {
+          _lua.pushString(a);
+        }
+        _lua.pCall(args.length, 0, 0);
+        _lua.pop(2); // fn+args consumidos; queda handlers + page
+      } else {
+        _lua.pop(3);
+      }
+    } catch (_) {}
   }
 
   // ---------------------------------------------------------------- globals
@@ -163,9 +266,18 @@ end
     _registerSync('engine_get', _luaEngineGet);
     _registerSync('engine_set', _luaEngineSet);
     _registerSync('navigate', _luaNavigate);
+    _registerSync('job_poll', _luaJobPoll);
+    _registerSync('job_count', _luaJobCount);
+    _registerSync('__theme_apply', _luaThemeApply);
     _registerRustGlobals(this);
     _registerPlayerGlobals(this);
     _registerLaureliaGlobals(this);
+    registerShamirGlobals(this);
+    registerKemGlobals(this);
+    registerHfGlobals(this);
+    registerGpuGlobals(this);
+    registerNostrGlobals(this);
+    registerDownloadsGlobals(this);
   }
 
   void _registerSync(String name, int Function(LuaState) fn) {
@@ -188,14 +300,47 @@ end
     return 0;
   }
 
+  /// theme_apply{} desde el prelude.
+  int _luaThemeApply(LuaState ls) {
+    // lee tabla tope como mapa simple clave->valor escalar
+    final m = <String, Object?>{};
+    if (ls.isTable(-1)) {
+      ls.pushNil();
+      while (ls.next(-2) != 0) {
+        final k = ls.toStr(-2);
+        Object? v;
+        if (ls.isNumber(-1)) {
+          v = ls.toNumberX(-1);
+        } else if (ls.isString(-1)) {
+          v = ls.toStr(-1);
+        }
+        if (k != null && v != null) m[k] = v;
+        ls.pop(1);
+      }
+    }
+    ls.pop(1);
+    luaTheme.apply(m);
+    return 0;
+  }
+
+  final LuaTheme luaTheme = LuaTheme.instance;
+
   // ----------------------------------------------------------- navegación
 
-  /// `navigate("player")` cambia de página (llama a onNavigate).
+  /// `navigate(uri)` pasa SIEMPRE por el PageRouter (plug-and-play).
+  /// El fetch es async: al llegar el código llama onNavigate con uri;
+  /// quien implementa onNavigate usa `router.resolve`.
   int _luaNavigate(LuaState ls) {
     final page = ls.checkString(1) ?? '';
     ls.pop(1);
     if (page.isNotEmpty) onNavigate?.call(page);
     return 0;
+  }
+
+  /// Fetch real para onNavigate del host: resuelve por el router.
+  Future<String> fetchViaRouter(String uri) async {
+    final src = await router.resolve(uri);
+    return src.uri; // el host vuelve a llamar resolve o usa loadFromSource
   }
 
   // ---------------------------------------------------------------- parsing
@@ -229,12 +374,15 @@ end
     final m = <String, Object?>{};
     for (final k in [
       'type', 'id', 'bind', 'text', 'label', 'value', 'on_click', 'align',
-      'color', 'bg_color', 'border_color', 'src', 'fit',
+      'color', 'bg_color', 'border_color', 'src', 'fit', 'href',
     ]) {
       final v = _field(-1, k);
       if (v != null) m[k] = v;
     }
-    for (final k in ['width', 'height', 'padding', 'radius', 'border_width', 'space']) {
+    for (final k in [
+      'width', 'height', 'padding', 'radius', 'border_width', 'space',
+      'columns',
+    ]) {
       final v = _field(-1, k);
       if (v != null) m[k] = v;
     }
@@ -244,7 +392,42 @@ end
     }
     final font = _fieldTable(-1, 'font');
     if (font != null) m['font'] = font;
+
+    final children = _childrenTable(-1);
+    if (children != null) m['children'] = children;
     return m;
+  }
+
+  /// Lee `children = { nodo, nodo, ... }` recursivamente.
+  List<Map<String, Object?>>? _childrenTable(int idx) {
+    _lua.getField(idx, 'children');
+    if (!_lua.isTable(-1)) {
+      _lua.pop(1);
+      return null;
+    }
+    final lenObj = _field(-1, 'n') as num?;
+    final n = lenObj?.toInt() ?? _tableLength(-1);
+    final out = <Map<String, Object?>>[];
+    for (var i = 1; i <= n; i++) {
+      _lua.getI(-1, i);
+      if (_lua.isTable(-1)) {
+        out.add(_readNodeMap());
+      }
+      _lua.pop(1);
+    }
+    _lua.pop(1); // children
+    return out;
+  }
+
+  int _tableLength(int idx) {
+    // iteración con next() (lua_dardo no expone el operador #)
+    var n = 0;
+    _lua.pushNil();
+    while (_lua.next(idx) != 0) {
+      n++;
+      _lua.pop(1);
+    }
+    return n;
   }
 
   /// Lee un campo escalar (string/número/booleano) de la tabla en `idx`.
@@ -282,3 +465,13 @@ end
     return m;
   }
 }
+
+/// Job asíncrono visible para Lua.
+class _Job {
+  bool done = false;
+  bool delivered = false;
+  String result = '';
+}
+
+/// Helper para parts: convierte mapa a JSON compacto como resultado.
+String jobJson(Map<String, Object?> m) => jsonEncode(m);
