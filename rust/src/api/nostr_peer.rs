@@ -24,14 +24,6 @@ pub struct NostrPeerChat {
 }
 
 impl NostrPeerChat {
-    pub fn new() -> Result<NostrPeerChat> {
-        Ok(NostrPeerChat {
-            inner: SharedKeyChat::new()
-                .map_err(|e| anyhow!("Error creando chat: {e:#}"))?,
-            n_seconds: 600,
-        })
-    }
-
     /// Ventana de frescura para el poll: mensajes más viejos se descartan.
     pub fn set_window(&mut self, n_seconds: i64) {
         self.n_seconds = n_seconds.max(1);
@@ -111,5 +103,9 @@ impl NostrPeerChat {
 /// Constructor libre (el codegen expone las clases opacas como abstractas).
 #[flutter_rust_bridge::frb]
 pub fn nostr_peer_new() -> Result<NostrPeerChat> {
-    NostrPeerChat::new()
+    Ok(NostrPeerChat {
+        inner: SharedKeyChat::new()
+            .map_err(|e| anyhow!("Error creando chat: {e:#}"))?,
+        n_seconds: 600,
+    })
 }

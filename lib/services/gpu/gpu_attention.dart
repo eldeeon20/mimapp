@@ -3,7 +3,7 @@ import '../../src/rust/api/gpu.dart' as rust;
 /// Attention SDPA mono-head en GPU: softmax(Q·Kᵀ/√d)·V con Q,K,V:(s,d).
 /// f16 real en buffers.
 class GpuAttention {
-  Future<GpuOpResult> run({
+  Future<rust.GpuOpResult> run({
     required List<double> q,
     required List<double> k,
     required List<double> v,

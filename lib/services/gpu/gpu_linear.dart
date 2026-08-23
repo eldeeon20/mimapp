@@ -3,7 +3,7 @@ import '../../src/rust/api/gpu.dart' as rust;
 /// Linear Y = X·Wᵀ + b en GPU: X:(m,k), W:(n,k), bias:(n).
 /// f16 real en buffers (mitad de memoria), acumulación f32.
 class GpuLinear {
-  Future<GpuOpResult> run({
+  Future<rust.GpuOpResult> run({
     required List<double> input,
     required List<double> weights,
     required List<double> bias,

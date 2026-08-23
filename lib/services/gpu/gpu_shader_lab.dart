@@ -9,7 +9,7 @@ import '../../src/rust/api/gpu.dart' as rust;
 class GpuShaderLab {
   Future<String> template() => rust.gpuLabTemplate();
 
-  Future<ShaderRunResult> run({
+  Future<rust.ShaderRunResult> run({
     required String code,
     required List<double> input,
     required int dispatchX,

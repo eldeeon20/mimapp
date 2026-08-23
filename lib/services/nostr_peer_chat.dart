@@ -61,7 +61,7 @@ class NostrPeerChat {
   Future<void> send(String message) => _inner.send(message: message);
 
   /// Poll no bloqueante; mensajes ya desencriptados y verificados.
-  Future<List<PeerMessage>> poll() => _inner.poll();
+  Future<List<rust.PeerMessage>> poll() => _inner.poll();
 
   Future<void> close() async {
     try {

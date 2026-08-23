@@ -38,7 +38,7 @@ class NostrChat {
   }
 
   /// Poll bloqueante (~[timeoutSecs]); retorna mensajes nuevos del peer.
-  Future<List<DmMessage>> poll({int timeoutSecs = 2}) async {
+  Future<List<rust.DmMessage>> poll({int timeoutSecs = 2}) async {
     return _require().poll(pollTimeoutSecs: timeoutSecs);
   }
 

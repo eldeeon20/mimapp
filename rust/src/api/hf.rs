@@ -23,22 +23,18 @@ fn split_repo(repo_id: &str) -> (String, String) {
 }
 
 /// Constructor libre (el codegen expone las clases opacas como abstractas).
+/// Token de acceso HF vacío = anónimo, solo lectura pública.
 #[flutter_rust_bridge::frb]
 pub fn hf_client_new(token: String) -> Result<HfClient, String> {
-    HfClient::new(token)
+    let mut b = HFClientBuilder::new();
+    if !token.is_empty() {
+        b = b.token(token);
+    }
+    let client = b.build_sync().map_err(|e| format!("HF client error: {e:?}"))?;
+    Ok(HfClient { client: Some(client) })
 }
 
 impl HfClient {
-    /// Token de acceso HF (vacío = anónimo, solo lectura pública).
-    pub fn new(token: String) -> Result<HfClient, String> {
-        let mut b = HFClientBuilder::new();
-        if !token.is_empty() {
-            b = b.token(token);
-        }
-        let client = b.build_sync().map_err(|e| format!("HF client error: {e:?}"))?;
-        Ok(HfClient { client: Some(client) })
-    }
-
     fn require(&self) -> Result<HFClientSync, String> {
         self.client
             .clone()

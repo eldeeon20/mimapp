@@ -22,13 +22,6 @@ pub struct NostrDm {
 }
 
 impl NostrDm {
-    /// nsec vacío/None = genera identidad nueva.
-    pub fn new(nsec: Option<String>, peer_npub: String) -> Result<NostrDm> {
-        let client = NostrClient::new(nsec.as_deref(), &peer_npub)
-            .map_err(|e| anyhow!("Error inicializando cliente Nostr: {e:#}"))?;
-        Ok(NostrDm { client })
-    }
-
     /// Relays de DM y de lectura. Requiere al menos un DM relay.
     pub fn add_relays(&mut self, dm_relays: Vec<String>, read_relays: Vec<String>) -> Result<()> {
         let read = if read_relays.is_empty() { None } else { Some(read_relays) };
@@ -84,7 +77,10 @@ impl NostrDm {
 }
 
 /// Constructor libre (el codegen expone las clases opacas como abstractas).
+/// nsec vacío/None = genera identidad nueva.
 #[flutter_rust_bridge::frb]
 pub fn nostr_dm_new(nsec: Option<String>, peer_npub: String) -> Result<NostrDm> {
-    NostrDm::new(nsec, peer_npub)
+    let client = NostrClient::new(nsec.as_deref(), &peer_npub)
+        .map_err(|e| anyhow!("Error inicializando cliente Nostr: {e:#}"))?;
+    Ok(NostrDm { client })
 }
