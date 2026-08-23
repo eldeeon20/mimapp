@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../ai/laurelia_chat.dart';
+import '../chat/screens/chat_list_screen.dart';
 import '../colab_cli/colab_dialog.dart';
 import '../lua/lua_page.dart';
 import '../media/media_player.dart';
@@ -63,6 +64,15 @@ class _HomePageState extends State<HomePage> {
   void dispose() {
     _mediaPlayer.dispose();
     super.dispose();
+  }
+
+  void _openChatReplica(BuildContext context) {
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => Scaffold(
+        appBar: null,
+        body: SafeArea(child: const ChatListScreen()),
+      ),
+    ));
   }
 
   void _openMedia(BuildContext context) {
@@ -338,7 +348,7 @@ class _HomePageState extends State<HomePage> {
                           icon: Icons.chat_bubble_rounded,
                           title: 'Chat',
                           color: Colors.cyanAccent,
-                          onTap: () => _openLaurelia(context),
+                          onTap: () => _openChatReplica(context),
                         ),
                   BottomButton(
                     icon: Icons.play_arrow_rounded,
