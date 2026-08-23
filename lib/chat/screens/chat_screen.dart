@@ -10,6 +10,7 @@ import '../chat_settings.dart';
 import '../chat_storage.dart';
 import '../mock_server.dart';
 import '../models.dart';
+import 'camera_capture_screen.dart';
 import 'chat_list_screen.dart';
 import 'profile_screen.dart';
 
@@ -596,6 +597,8 @@ class _ChatScreenState extends State<ChatScreen> {
       showDragHandle: true,
       builder: (_) => SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
+          _itemAdjunto(Icons.photo_camera_rounded, 'Cámara', Colors.cyanAccent,
+              _abrirCamara),
           _itemAdjunto(Icons.photo_rounded, 'Imagen', Colors.purpleAccent,
               () => _enviarArchivo('imagen')),
           _itemAdjunto(Icons.movie_rounded, 'Video', Colors.orangeAccent,
@@ -605,6 +608,27 @@ class _ChatScreenState extends State<ChatScreen> {
         ]),
       ),
     );
+  }
+
+  /// Abre la cámara y envía lo capturado como imagen o video.
+  Future<void> _abrirCamara() async {
+    final cap = await Navigator.of(context).push<CapturedMedia>(
+      MaterialPageRoute(builder: (_) => const CameraCaptureScreen()),
+    );
+    if (cap == null) return;
+    final f = File(cap.filePath);
+    if (!f.existsSync()) return;
+    final media = MediaAttachment(
+      tipo: cap.tipo,
+      archivo: f,
+      nombre: cap.filePath.split('/').last,
+      sizeBytes: f.lengthSync(),
+      duracion: cap.duracion,
+    );
+    ChatStorage.instance.registrar(cap.tipo.name, media.sizeBytes);
+    _server.enviar(widget.chat.id, media: media, respuestaA: _respondiendo);
+    _respondiendo = null;
+    _bajarAlFinal();
   }
 
   ListTile _itemAdjunto(IconData i, String t, Color c, VoidCallback onTap) =>
