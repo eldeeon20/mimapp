@@ -37,7 +37,7 @@ int _luaKemKeygen(LuaState ls, LuaController c) {
         'alg': alg,
         'sk_len': kp.privateKey.length,
         'pk_len': kp.publicKey.length,
-        'pk_head': hex(kp.publicKey.take(16).toList()),
+        'pk_head': hex(Uint8List.fromList(kp.publicKey.take(16).toList())),
       });
     } catch (e) {
       return jobJson({'ok': false, 'error': '$e'});

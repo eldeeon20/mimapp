@@ -63,7 +63,7 @@ int _luaHfRange(LuaState ls, LuaController c) {
         'ok': true,
         'bytes': bytes.length,
         'preview': printable
-            ? latin1.decode(bytes.take(300).toList(), allowMalformed: true)
+            ? latin1.decode(bytes.take(300).toList())
             : bytes.take(24).map((b) => b.toRadixString(16).padLeft(2, '0')).join(' '),
       });
     } catch (e) {

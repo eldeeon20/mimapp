@@ -233,7 +233,7 @@ class _LuaToolState extends State<_LuaTool> {
   }
 
   Future<void> _loadPageByName(String name) async {
-    final asset = PageRegistry.assetFor(name);
+    final asset = PageRegistry.assetPath(name);
     if (asset == null) {
       setState(() => _error = 'Página: $name');
       return;

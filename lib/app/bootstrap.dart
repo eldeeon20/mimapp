@@ -95,11 +95,8 @@ Future<void> _initNotifications() async {
 /// detiene el FGS, espera a que muera y cancela TODAS las persistentes
 /// (servicio 888 + estado 777). La de medios queda si hay música.
 Future<void> _handleExitAction() async {
-  try {
-    await FlutterBackgroundService().invoke('stop');
-  } catch (e) {
-    debugPrint('invoke stop error: $e');
-  }
+  // invoke() es void síncrono en fb_service v5; la orden llega por canal.
+  FlutterBackgroundService().invoke('stop');
   await Future.delayed(const Duration(milliseconds: 400));
   try {
     await NotificationService.plugin

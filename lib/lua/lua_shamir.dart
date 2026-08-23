@@ -92,7 +92,7 @@ int _luaShamirCombine(LuaState ls, LuaController c) {
         return jobJson({'ok': false, 'error': 'secreto irrecuperable'});
       }
       final text = latin1
-          .decode(restored.where((b) => b != 0).toList(), allowMalformed: true);
+          .decode(restored.where((b) => b != 0).toList());
       return jobJson({'ok': true, 'texto': text});
     } catch (e) {
       return jobJson({'ok': false, 'error': '$e'});

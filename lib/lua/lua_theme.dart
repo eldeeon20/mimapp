@@ -24,10 +24,10 @@ class LuaTheme {
     final presetName = p['preset'] as String?;
     if (presetName != null && _presets.containsKey(presetName)) {
       final ps = _presets[presetName]!;
-      primary = ps['primary']!;
-      accent = ps['accent']!;
-      surface = ps['surface']!;
-      textMuted = ps['text_muted']!;
+      primary = ps['primary'] as String;
+      accent = ps['accent'] as String;
+      surface = ps['surface'] as String;
+      textMuted = ps['text_muted'] as String;
       radius = (ps['radius'] as num).toDouble();
       preset = presetName;
     }

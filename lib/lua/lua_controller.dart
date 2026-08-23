@@ -12,6 +12,11 @@ import '../ai/laurelia_chat.dart';
 import '../media/media_player.dart';
 import '../services/hf.dart';
 import '../services/kem.dart';
+import '../services/gpu/gpu_attention.dart';
+import '../services/gpu/gpu_context.dart';
+import '../services/gpu/gpu_gelu.dart';
+import '../services/gpu/gpu_linear.dart';
+import '../services/gpu/gpu_shader_lab.dart';
 import '../services/nostr_chat.dart';
 import '../services/nostr_keys.dart';
 import '../services/nostr_peer_chat.dart';
@@ -132,10 +137,10 @@ end
 
   /// Lanza [work] como job; retorna el id inmediatamente. Al completar,
   /// el resultado viaja a `handlers.on_event(id, resumen)` (drenaje).
-  int jobStart(Future<Object?> work) {
+  int jobStart(Future<Object?> Function() work) {
     final id = ++_jobSeq;
     _jobs[id] = _Job();
-    work.then((r) {
+    work().then((r) {
       final j = _jobs[id];
       if (j != null) {
         j.done = true;

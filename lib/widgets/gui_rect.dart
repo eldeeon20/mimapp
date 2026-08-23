@@ -1,17 +1,31 @@
 import 'gui_node.dart';
 
-/// Área scrolleable anidada. En Lua:
+/// Rectángulo/contenedor con fondo, borde y children opcionales. En Lua:
 /// ```lua
-/// gui_scroll{ height = 300, children = { gui_text{...}, ... } }
+/// gui_rect{ bg_color="#112", radius=12, children={ gui_text{...} } }
 /// ```
-class GuiScroll extends GuiNode {
+class GuiRect extends GuiNode {
   final List<GuiNode> children;
+  final String? bgColor;
+  final String? borderColor;
+  final double radius;
+  final double borderWidth;
 
-  GuiScroll({required super.style, this.children = const []})
-      : super(type: 'scroll');
+  GuiRect({
+    required super.style,
+    this.children = const [],
+    this.bgColor,
+    this.borderColor,
+    this.radius = 0,
+    this.borderWidth = 0,
+  }) : super(type: 'rect');
 
-  factory GuiScroll.fromMap(Map<String, Object?> m) => GuiScroll(
+  factory GuiRect.fromMap(Map<String, Object?> m) => GuiRect(
         style: GuiNode.parseStyle(m),
         children: GuiNode.parseChildren(m),
+        bgColor: m['bg_color'] as String?,
+        borderColor: m['border_color'] as String?,
+        radius: (m['radius'] as num?)?.toDouble() ?? 0,
+        borderWidth: (m['border_width'] as num?)?.toDouble() ?? 0,
       );
 }

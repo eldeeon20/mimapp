@@ -134,7 +134,7 @@ class PageRouter {
     final completer = CompleterCompat();
     Timer(const Duration(seconds: 5), () => completer.close());
     socket.listen((event) {
-      if (event == RawDatagramEvent.read) {
+      if (event == RawSocketEvent.read) {
         final dg = socket.receive();
         if (dg != null) completer.addData(dg.data);
       }
@@ -163,7 +163,7 @@ class PageRouter {
 
   String _stripLocal(String uri) {
     var u = uri;
-    for (const p in ['lua://', 'local:', '/']) {
+    for (final p in ['lua://', 'local:', '/']) {
       if (u.toLowerCase().startsWith(p)) u = u.substring(p.length);
     }
     return u.trim();
