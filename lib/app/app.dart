@@ -272,35 +272,17 @@ class _HomePageState extends State<HomePage> {
                       child: Stack(
                         alignment: Alignment.center,
                         children: [
-                          Positioned(
-                            top: 25,
-                            child: Container(
-                              width: size.width * .30,
-                              height: size.width * .25,
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF182747),
-                                borderRadius: BorderRadius.circular(10),
-                                border: Border.all(
-                                  color:
-                                      Colors.white.withValues(alpha: .15),
-                                ),
+                          // Nube detrás del candado
+                          Icon(
+                            Icons.cloud_rounded,
+                            size: size.width * .52,
+                            color: Colors.blueAccent.withValues(alpha: .30),
+                            shadows: [
+                              Shadow(
+                                color: Colors.blueAccent.withValues(alpha: .35),
+                                blurRadius: 40,
                               ),
-                              child: const Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(
-                                    Icons.description_rounded,
-                                    size: 48,
-                                    color: Colors.white54,
-                                  ),
-                                  SizedBox(height: 8),
-                                  Icon(
-                                    Icons.more_horiz,
-                                    color: Colors.white30,
-                                  ),
-                                ],
-                              ),
-                            ),
+                            ],
                           ),
                           Container(
                             width: 105,
