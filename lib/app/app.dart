@@ -7,6 +7,8 @@ import '../media/media_player.dart';
 import '../screens/ai_screen.dart';
 import '../screens/downloads_test_screen.dart';
 import '../screens/torrent_screen.dart';
+import '../screens/filosoia_screen.dart';
+import '../agents/agent_manager.dart';
 import '../screens/gpu_test_screen.dart';
 import '../screens/hf_test_screen.dart';
 import '../screens/kem_test_screen.dart';
@@ -52,6 +54,9 @@ class _HomePageState extends State<HomePage> {
     super.initState();
     _mediaPlayer = MediaPlayer.instance;
     _laurelia = LaureliaChat();
+    // Agentes IA: cargar persistencia cifrada al arrancar la app; viven
+    // a nivel app y sobreviven a los cambios de pantalla.
+    AgentManager.instance.ensureLoaded();
   }
 
   @override
@@ -121,6 +126,8 @@ class _HomePageState extends State<HomePage> {
               _openTest(context, 'Descargas', const DownloadsTestScreen());
             case 'bt':
               _openTest(context, 'Torrents (rqbit)', const TorrentScreen());
+            case 'ag':
+              _openTest(context, 'Agentes IA (FilosoIA)', const FilosoiaScreen());
           }
         }),
       ),

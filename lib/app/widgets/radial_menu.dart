@@ -34,6 +34,8 @@ class _RadialMenuState extends State<RadialMenu>
         color: Colors.tealAccent),
     (key: 'bt', label: 'Torrent', icon: Icons.bolt_rounded,
         color: Colors.amberAccent),
+    (key: 'ag', label: 'Agentes IA', icon: Icons.psychology_rounded,
+        color: Colors.lightGreenAccent),
   ];
 
   @override
