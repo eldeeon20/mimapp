@@ -1,8 +1,9 @@
-mod actions;
-mod add;
-mod detail;
-mod list;
-mod session;
+// pub: frb_generated referencia funciones cruzando módulos por ruta.
+pub mod actions;
+pub mod add;
+pub mod detail;
+pub mod list;
+pub mod session;
 
 pub use actions::{torrent_action, torrent_set_only_files};
 pub use add::{torrent_add_bytes, torrent_add_url};

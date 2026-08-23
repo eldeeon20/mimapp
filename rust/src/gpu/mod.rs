@@ -84,12 +84,6 @@ pub fn ctx() -> Result<(wgpu::Device, wgpu::Queue), String> {
     }
 }
 
-/// ¿El device actual soporta f16 en shaders? Los ops usan esto para
-/// caer automáticamente a f32 (bandera automática f16→f32).
-pub fn has_f16() -> bool {
-    STATE.lock().unwrap().has_f16
-}
-
 /// Valida WGSL con naga y retorna el diagnóstico completo si falla.
 pub fn check_wgsl(code: &str) -> Result<(), String> {
     wgpu::naga::front::wgsl::parse_str(code)

@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use librqbit::dht::DhtPersistenceConfig;
 use librqbit::listen::{ListenerMode, ListenerOptions};
 use librqbit::{
-    DhtSessionConfig, Session, SessionOptions, SessionPersistenceConfig,
+    Api, DhtSessionConfig, Session, SessionOptions, SessionPersistenceConfig,
 };
 
 use super::{api, limits};
@@ -20,7 +20,7 @@ pub async fn torrent_session_start(
     down_bps: Option<u32>,
     up_bps: Option<u32>,
 ) -> Result<String, String> {
-    if let Some(a) = crate::api::torrent::api() {
+    if let Ok(a) = crate::api::torrent::api() {
         return Ok(format!(
             "ya activa ({} torrents)",
             a.api_torrent_list().torrents.len()
