@@ -7,21 +7,23 @@ import '../src/rust/api/nostringer.dart' as rust;
 /// Firmás como miembro del ring sin revelar CUÁL clave es tuya.
 /// Ejemplo: 5 votantes, 1 firma válida → se sabe que votó ALGUIEN del
 /// ring, no quién; la key image impide que firme dos veces.
+///
+/// Todas las llamadas al codegen FRB son async.
 class Nostringer {
   /// Genera par de claves. [variant]: 'blsag' | 'sag'.
-  RingKeypair generateKeypair({String variant = 'blsag'}) {
-    final kp = rust.ringGenerateKeypair(variant: variant);
+  Future<RingKeypair> generateKeypair({String variant = 'blsag'}) async {
+    final kp = await rust.ringGenerateKeypair(variant: variant);
     return RingKeypair(publicKey: kp.publicKey, privateKey: kp.privateKey);
   }
 
   /// Firma [message] como miembro de [ring] (debe incluir tu pública).
-  RingSignature sign({
+  Future<RingSignature> sign({
     required Uint8List message,
     required String privateKey,
     required List<String> ring,
     String variant = 'blsag',
-  }) {
-    final s = rust.ringSign(
+  }) async {
+    final s = await rust.ringSign(
       message: message,
       privateKey: privateKey,
       ring: ring,
@@ -31,17 +33,18 @@ class Nostringer {
   }
 
   /// Verifica una firma (string compacta) contra el ring.
-  RingVerifyResult verify({
+  Future<RingVerifyResult> verify({
     required String signature,
     required Uint8List message,
     required List<String> ring,
-  }) {
-    final r = rust.ringVerify(signature: signature, message: message, ring: ring);
+  }) async {
+    final r = await rust.ringVerify(
+        signature: signature, message: message, ring: ring);
     return RingVerifyResult(valid: r.valid, keyImage: r.keyImage);
   }
 
   /// Verificación estricta BLSAG con key image explícita.
-  bool verifyBlsag({
+  Future<bool> verifyBlsag({
     required String signature,
     required String keyImage,
     required Uint8List message,
@@ -56,7 +59,7 @@ class Nostringer {
   }
 
   /// true si ambas key images son la misma identidad (doble firmante).
-  bool keyImagesMatch(String ki1, String ki2) =>
+  Future<bool> keyImagesMatch(String ki1, String ki2) =>
       rust.ringKeyImagesMatch(ki1: ki1, ki2: ki2);
 }
 

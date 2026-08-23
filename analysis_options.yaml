@@ -9,6 +9,13 @@
 # packages, and plugins designed to encourage good coding practices.
 include: package:flutter_lints/flutter.yaml
 
+analyzer:
+  exclude:
+    # Cargokit es un paquete Dart aparte con su propio pubspec (sus deps
+    # no están en el cache del app); analizarlo genera falsos errores.
+    - rust_builder/**
+    - build/**
+
 linter:
   # The lint rules applied to this project can be customized in the
   # section below to disable rules from the `package:flutter_lints/flutter.yaml`

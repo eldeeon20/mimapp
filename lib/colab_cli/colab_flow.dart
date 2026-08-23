@@ -10,6 +10,8 @@ class FlowStep {
 
 /// Resultado completo de un flujo.
 class FlowResult {
+  FlowResult({required this.totalSteps});
+
   final int totalSteps;
   int executed = 0;
   final List<(String, ColabExecResult)> outputs = [];
