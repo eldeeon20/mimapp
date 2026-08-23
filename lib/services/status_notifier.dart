@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math';
 
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
@@ -11,12 +10,10 @@ import 'notification_service.dart';
 /// un "dashboard" informativo persistente, aparte del servicio en primer
 /// plano y aparte de la notificación de reproducción de medios.
 ///
-/// Muestra: consumo de datos (↓/↑), estado de conexión, estado de Colab y
-/// un mensaje extra (tokens generados por Laurelia IA).
+/// Muestra: consumo de datos REAL si existe (↓/↑), estado de conexión,
+/// estado de Colab y un mensaje extra (tokens generados por Laurelia IA).
 ///
-/// Los datos de consumo son simulados (mock) salvo donde se conecte con
-/// estado real (Colab, Laurelia). La clase está preparada para alimentarse
-/// de fuentes reales vía [refresh].
+/// Sin números simulados: ↓/↑ se muestran solo si hay bytes reales cargados.
 class StatusNotifier {
   static final StatusNotifier instance = StatusNotifier._();
   StatusNotifier._();
@@ -28,10 +25,9 @@ class StatusNotifier {
   static const _channelId = 'pr_app_status';
   static const _channelName = 'Estado de la app';
 
-  final _rnd = Random();
   Timer? _timer;
 
-  // Campos editables (mock o reales).
+  // Contadores reales (los alimenta una fuente externa vía refresh()).
   int downloadedBytes = 0;
   int uploadedBytes = 0;
   String connection = 'WiFi';
@@ -59,10 +55,8 @@ class StatusNotifier {
 
     await show();
 
-    // Simula tráfico de red para que el panel se vea "vivo".
+    // Sin tráfico simulado: solo re-pinta por si cambió el estado real.
     _timer = Timer.periodic(const Duration(seconds: 3), (_) {
-      downloadedBytes += _rnd.nextInt(400) * 1024;
-      uploadedBytes += _rnd.nextInt(120) * 1024;
       _safeShow();
     });
   }
@@ -88,9 +82,11 @@ class StatusNotifier {
   Future<void> show() async => _safeShow();
 
   Future<void> _safeShow() async {
-    final body = '''↓ ${_fmt(downloadedBytes)}   ↑ ${_fmt(uploadedBytes)}
-Conexión: $connection
-$extra''';
+    // ↓/↑ solo si hay bytes reales; nada de números de mentira.
+    final net = (downloadedBytes > 0 || uploadedBytes > 0)
+        ? '↓ ${_fmt(downloadedBytes)}   ↑ ${_fmt(uploadedBytes)}\n'
+        : '';
+    final body = '$net Conexión: $connection\n$extra';
 
     final details = NotificationDetails(
       android: AndroidNotificationDetails(
