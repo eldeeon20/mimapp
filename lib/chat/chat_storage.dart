@@ -1,9 +1,9 @@
 import 'package:flutter/foundation.dart';
 
-/// (antes llamada Almacenamiento) Uso de almacenamiento simulado por categoría (Telegram > Datos y almacenamiento).
+/// (antes llamada ChatStorage) Uso de almacenamiento simulado por categoría (Telegram > Datos y almacenamiento).
 class ChatStorage extends ChangeNotifier {
-  Almacenamiento._();
-  static final Almacenamiento instance = Almacenamiento._();
+  ChatStorage._();
+  static final ChatStorage instance = ChatStorage._();
 
   /// Total simulado del dispositivo en MB.
   static const double totalMb = 65536; // 64 GB
