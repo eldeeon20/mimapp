@@ -2,9 +2,9 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use librqbit::dht::DhtPersistenceConfig;
-use librqbit::listen::{ListenerMode, ListenerOptions};
 use librqbit::{
-    Api, DhtSessionConfig, Session, SessionOptions, SessionPersistenceConfig,
+    Api, DhtSessionConfig, ListenerMode, ListenerOptions, Session, SessionOptions,
+    SessionPersistenceConfig,
 };
 
 use super::{api, limits};

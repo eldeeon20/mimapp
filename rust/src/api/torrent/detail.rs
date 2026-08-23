@@ -1,5 +1,5 @@
 /// Archivos y peers como JSON (evita quirks de tipos de FRB).
-use librqbit::torrent_state::live::peer::stats::snapshot::PeerStatsFilter;
+use librqbit::http_api_types::PeerStatsFilter;
 
 /// Archivos con su estado de inclusión actual (torrent_details).
 pub fn torrent_files(id: u32) -> Result<String, String> {
