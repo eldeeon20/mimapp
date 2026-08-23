@@ -65,8 +65,13 @@ class _RadialMenuState extends State<RadialMenu>
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
-    final radius = size.width * 0.34;
-    final centerY = size.height * 0.42;
+    // Adaptativo a orientación: en landscape el radio sale de la altura
+    // (si no, los botones se van fuera de pantalla).
+    final isLandscape = size.width > size.height;
+    final radius = isLandscape
+        ? math.max(90.0, size.height * 0.5 - 95)
+        : size.width * 0.34;
+    final centerY = size.height * (isLandscape ? 0.5 : 0.42);
 
     return Material(
       color: Colors.black.withValues(alpha: .82),

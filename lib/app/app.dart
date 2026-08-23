@@ -214,112 +214,125 @@ class _HomePageState extends State<HomePage> {
             ),
 
             // ==========================================================
-            // CENTRO
+            // CENTRO (FittedBox: escala en cualquier orientación sin deformar)
             // ==========================================================
 
             Expanded(
               child: Center(
                 child: GestureDetector(
                   onTap: () => _openRadialMenu(context),
-                  child: Stack(
-                    alignment: Alignment.center,
-                    children: [
-                    Container(
-                      width: size.width * .70,
-                      height: size.width * .70,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.blueAccent.withValues(alpha: .12),
-                            blurRadius: 100,
-                            spreadRadius: 30,
-                          ),
-                        ],
-                      ),
-                    ),
-                    Container(
-                      width: size.width * .72,
-                      height: 100,
-                      decoration: BoxDecoration(
-                        border: Border.all(
-                          color: Colors.blueAccent.withValues(alpha: .25),
-                        ),
-                        borderRadius: BorderRadius.circular(100),
-                      ),
-                    ),
-                    Container(
-                      width: size.width * .58,
-                      height: 70,
-                      decoration: BoxDecoration(
-                        border: Border.all(
-                          color:
-                              Colors.deepPurpleAccent.withValues(alpha: .25),
-                        ),
-                        borderRadius: BorderRadius.circular(100),
-                      ),
-                    ),
-                    Container(
-                      width: size.width * .62,
-                      height: size.width * .46,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF08132D),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                          color: Colors.blueAccent.withValues(alpha: .55),
-                          width: 1.5,
-                        ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.blueAccent.withValues(alpha: .18),
-                            blurRadius: 30,
-                          ),
-                        ],
-                      ),
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: SizedBox(
+                      width: 340,
+                      height: 330,
                       child: Stack(
                         alignment: Alignment.center,
                         children: [
-                          // Nube detrás del candado
-                          Icon(
-                            Icons.cloud_rounded,
-                            size: size.width * .52,
-                            color: Colors.blueAccent.withValues(alpha: .30),
-                            shadows: [
-                              Shadow(
-                                color: Colors.blueAccent.withValues(alpha: .35),
-                                blurRadius: 40,
-                              ),
-                            ],
-                          ),
                           Container(
-                            width: 105,
-                            height: 105,
+                            width: 320,
+                            height: 320,
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              color: const Color(0xFF111A46),
-                              border: Border.all(
-                                color: Colors.deepPurpleAccent,
-                                width: 2,
-                              ),
                               boxShadow: [
                                 BoxShadow(
-                                  color: Colors.deepPurpleAccent
-                                      .withValues(alpha: .45),
-                                  blurRadius: 35,
+                                  color: Colors.blueAccent
+                                      .withValues(alpha: .12),
+                                  blurRadius: 100,
+                                  spreadRadius: 30,
                                 ),
                               ],
                             ),
-                            child: const Icon(
-                              Icons.lock_rounded,
-                              size: 58,
-                              color: Color(0xFFB57CFF),
+                          ),
+                          Container(
+                            width: 330,
+                            height: 100,
+                            decoration: BoxDecoration(
+                              border: Border.all(
+                                color:
+                                    Colors.blueAccent.withValues(alpha: .25),
+                              ),
+                              borderRadius: BorderRadius.circular(100),
+                            ),
+                          ),
+                          Container(
+                            width: 265,
+                            height: 70,
+                            decoration: BoxDecoration(
+                              border: Border.all(
+                                color: Colors.deepPurpleAccent
+                                    .withValues(alpha: .25),
+                              ),
+                              borderRadius: BorderRadius.circular(100),
+                            ),
+                          ),
+                          Container(
+                            width: 300,
+                            height: 195,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF08132D),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color:
+                                    Colors.blueAccent.withValues(alpha: .55),
+                                width: 1.5,
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.blueAccent
+                                      .withValues(alpha: .18),
+                                  blurRadius: 30,
+                                ),
+                              ],
+                            ),
+                            child: Stack(
+                              alignment: Alignment.center,
+                              children: [
+                                // Nube detrás del candado
+                                Icon(
+                                  Icons.cloud_rounded,
+                                  size: 175,
+                                  color:
+                                      Colors.blueAccent.withValues(alpha: .30),
+                                  shadows: [
+                                    Shadow(
+                                      color: Colors.blueAccent
+                                          .withValues(alpha: .35),
+                                      blurRadius: 40,
+                                    ),
+                                  ],
+                                ),
+                                Container(
+                                  width: 105,
+                                  height: 105,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: const Color(0xFF111A46),
+                                    border: Border.all(
+                                      color: Colors.deepPurpleAccent,
+                                      width: 2,
+                                    ),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.deepPurpleAccent
+                                            .withValues(alpha: .45),
+                                        blurRadius: 35,
+                                      ),
+                                    ],
+                                  ),
+                                  child: const Icon(
+                                    Icons.lock_rounded,
+                                    size: 58,
+                                    color: Color(0xFFB57CFF),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ],
                       ),
                     ),
-                  ],
-                ),
+                  ),
                 ),
               ),
             ),
