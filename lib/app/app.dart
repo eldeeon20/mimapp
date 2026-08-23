@@ -16,6 +16,8 @@ import '../screens/kem_test_screen.dart';
 import '../screens/media_screen.dart';
 import '../screens/nostr_dm_test_screen.dart';
 import '../screens/nostr_peer_test_screen.dart';
+import '../screens/ring_signatures_test_screen.dart';
+import '../screens/ring_vote_test_screen.dart';
 import '../screens/settings_screen.dart';
 import '../screens/shamir_test_screen.dart';
 import '../toolsec/toolsec_dialog.dart';
@@ -138,6 +140,11 @@ class _HomePageState extends State<HomePage> {
               _openTest(context, 'Torrents (rqbit)', const TorrentScreen());
             case 'ag':
               _openTest(context, 'Agentes IA (FilosoIA)', const FilosoiaScreen());
+            case 'ring':
+              _openTest(
+                  context, 'Nostringer · Firmas Ring', const RingSignaturesTestScreen());
+            case 'rv':
+              _openTest(context, 'Voto anónimo BLSAG', const RingVoteTestScreen());
           }
         }),
       ),

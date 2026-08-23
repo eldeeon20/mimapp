@@ -36,7 +36,17 @@ class _RadialMenuState extends State<RadialMenu>
         color: Colors.amberAccent),
     (key: 'ag', label: 'Agentes IA', icon: Icons.psychology_rounded,
         color: Colors.lightGreenAccent),
+    (key: 'rv', label: 'Voto BLSAG', icon: Icons.how_to_vote_rounded,
+        color: Colors.green),
   ];
+
+  /// Botón central: abre las firmas ring de Nostringer.
+  static const centerItem = (
+    key: 'ring',
+    label: 'Nostringer',
+    icon: Icons.fingerprint_rounded,
+    color: Color(0xFFB57CFF),
+  );
 
   @override
   void initState() {
@@ -76,23 +86,39 @@ class _RadialMenuState extends State<RadialMenu>
             top: centerY - 36,
             child: ScaleTransition(
               scale: CurvedAnimation(parent: _ctrl, curve: Curves.easeOutBack),
-              child: Container(
-                width: 72,
-                height: 72,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: const Color(0xFF111A46),
-                  border: Border.all(color: Colors.deepPurpleAccent, width: 2),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.deepPurpleAccent.withValues(alpha: .45),
-                      blurRadius: 25,
+              child: Column(children: [
+                InkWell(
+                  onTap: () {
+                    Navigator.of(context).pop();
+                    widget.onSelect(centerItem.key);
+                  },
+                  customBorder: const CircleBorder(),
+                  child: Container(
+                    width: 72,
+                    height: 72,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: const Color(0xFF111A46),
+                      border:
+                          Border.all(color: centerItem.color, width: 2),
+                      boxShadow: [
+                        BoxShadow(
+                          color: centerItem.color.withValues(alpha: .45),
+                          blurRadius: 25,
+                        ),
+                      ],
                     ),
-                  ],
+                    child: Icon(centerItem.icon,
+                        size: 38, color: centerItem.color),
+                  ),
                 ),
-                child: const Icon(Icons.lock_rounded,
-                    size: 38, color: Color(0xFFB57CFF)),
-              ),
+                const SizedBox(height: 6),
+                Text(centerItem.label,
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: centerItem.color.withValues(alpha: .9))),
+              ]),
             ),
           ),
           const Positioned(
