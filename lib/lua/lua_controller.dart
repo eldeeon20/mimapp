@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:lua_dardo_plus/lua.dart';
@@ -12,6 +13,7 @@ import '../ai/laurelia_chat.dart';
 import '../media/media_player.dart';
 import '../services/hf.dart';
 import '../services/kem.dart';
+import '../services/nostringer.dart';
 import '../services/gpu/gpu_attention.dart';
 import '../services/gpu/gpu_context.dart';
 import '../services/gpu/gpu_gelu.dart';
@@ -36,6 +38,7 @@ part 'lua_kem.dart';
 part 'lua_hf.dart';
 part 'lua_gpu.dart';
 part 'lua_nostr.dart';
+part 'lua_nostrring.dart';
 part 'lua_downloads.dart';
 
 /// Controlador Lua: lee la página desde Lua y controla los bucles (recorrido
@@ -235,7 +238,15 @@ end
     if (status != ThreadStatus.luaOk) {
       throw Exception('El script Lua no compiló (status: $status)');
     }
-    _lua.call(0, 0);
+    // Llamada PROTEGIDA: un error de ejecución del script (index nil,
+    // call nil, etc.) llega acá con su mensaje real y termina visible
+    // en el banner de la UI en vez de una excepción críptica.
+    final callStatus = _lua.pCall(0, 0, 0);
+    if (callStatus != ThreadStatus.luaOk) {
+      final err = _lua.toStr(-1) ?? 'error $callStatus';
+      _lua.pop(1);
+      throw Exception('Error Lua al ejecutar la página: $err');
+    }
     _ensureDrainTimer();
     return _parsePage();
   }
@@ -257,7 +268,12 @@ end
         for (final a in args) {
           _lua.pushString(a);
         }
-        _lua.pCall(args.length, 0, 0);
+        final st = _lua.pCall(args.length, 0, 0);
+        if (st != ThreadStatus.luaOk) {
+          // visible en logs: los errores de handlers no se tragan más
+          debugPrint('Lua handler "$name" falló: ${_lua.toStr(-1)}');
+          _lua.pop(1);
+        }
         _lua.pop(2); // fn+args consumidos; queda handlers + page
       } else {
         _lua.pop(3);
@@ -282,6 +298,7 @@ end
     registerHfGlobals(this);
     registerGpuGlobals(this);
     registerNostrGlobals(this);
+    registerNostrRingGlobals(this);
     registerDownloadsGlobals(this);
   }
 
@@ -306,12 +323,17 @@ end
   }
 
   /// theme_apply{} desde el prelude.
+  ///
+  /// Defensiva al máximo: si algo raro pasa leyendo la tabla (diferencias
+  /// de semántica de next() entre builds), la página IGUAL abre con tema
+  /// default en vez de romper toda la carga.
   int _luaThemeApply(LuaState ls) {
-    // lee tabla tope como mapa simple clave->valor escalar
-    final m = <String, Object?>{};
-    if (ls.isTable(-1)) {
+    try {
+      // argumento en índice 1 (convención C de callbacks)
+      if (!ls.isTable(1)) return 0;
+      final m = <String, Object?>{};
       ls.pushNil();
-      while (ls.next(-2) != 0) {
+      while (ls.next(1) != 0) {
         final k = ls.toStr(-2);
         Object? v;
         if (ls.isNumber(-1)) {
@@ -320,11 +342,13 @@ end
           v = ls.toStr(-1);
         }
         if (k != null && v != null) m[k] = v;
-        ls.pop(1);
+        ls.pop(1); // deja la clave para el próximo next()
       }
+      ls.pop(1); // la tabla argumento
+      luaTheme.apply(m);
+    } catch (_) {
+      // nunca romper la carga por el tema
     }
-    ls.pop(1);
-    luaTheme.apply(m);
     return 0;
   }
 
@@ -366,7 +390,11 @@ end
     final body = <GuiNode>[];
     for (var i = 1; i <= count; i++) {
       _lua.getI(-1, i);
-      body.add(GuiNode.fromMap(_readNodeMap()));
+      try {
+        body.add(GuiNode.fromMap(_readNodeMap()));
+      } catch (e) {
+        throw Exception('nodo $i de page.body ilegible: $e');
+      }
       _lua.pop(1);
     }
     _lua.pop(1); // body

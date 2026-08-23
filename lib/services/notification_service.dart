@@ -126,7 +126,7 @@ class NotificationService {
         actions: [
           AndroidNotificationAction(
             'exit',
-            'Salir',
+            '✕',
             showsUserInterface: false,
           ),
         ],
@@ -135,7 +135,7 @@ class NotificationService {
     await _plugin.show(
       id: serviceNotificationId,
       title: 'Secure App',
-      body: 'Servicio activo · toca Salir para detener',
+      body: 'Servicio activo · toca ✕ para salir',
       notificationDetails: details,
     );
   }

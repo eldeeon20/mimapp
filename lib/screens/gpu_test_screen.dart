@@ -79,7 +79,6 @@ class _OpsTabState extends State<_OpsTab>
     setState(() {
       _ready = GpuContext.instance.ready;
       _initing = false;
-      if (!_f16 && !GpuContext.instance.hasF16) _f16 = false;
     });
   }
 
@@ -90,13 +89,16 @@ class _OpsTabState extends State<_OpsTab>
 
   Future<void> _runGelu() async {
     try {
+      final useF16 = _f16 && GpuContext.instance.hasF16;
       final input = _randData(_n);
-      final r = await _gelu.run(input, f16: _f16);
+      final r = await _gelu.run(input, f16: useF16);
       setState(() {
         _results.insert(
             0,
-            _OpCard('GELU ${_f16 ? "F16" : "F32"}', true, r.elapsedMs,
-                '${input.length} elementos · ${(input.length * (_f16 ? 2 : 4) / 1024).toStringAsFixed(0)} KB',
+            _OpCard('GELU ${useF16 ? "F16" : "F32"}${_f16 && !useF16 ? " (auto)" : ""}',
+                true,
+                r.elapsedMs,
+                '${input.length} elementos · ${(input.length * (useF16 ? 2 : 4) / 1024).toStringAsFixed(0)} KB',
                 r.data.take(8).toList()));
       });
     } catch (e) {
@@ -107,17 +109,20 @@ class _OpsTabState extends State<_OpsTab>
   Future<void> _runLinear() async {
     try {
       const m = 256, k = 256, n = 256;
+      final useF16 = _f16 && GpuContext.instance.hasF16;
       final input = _randData(m * k);
       final weights = _randData(n * k);
       final bias = _randData(n);
       final r = await _linear.run(
           input: input, weights: weights, bias: bias, m: m, n: n, k: k,
-          f16: _f16);
+          f16: useF16);
       setState(() {
         _results.insert(
             0,
-            _OpCard('LINEAR ${_f16 ? "F16" : "F32"}', true, r.elapsedMs,
-                '($m×$k)·($k×$n)ᵀ+b → ${(m * k + n * k) * (_f16 ? 2 : 4) / 1024} KB pesos',
+            _OpCard('LINEAR ${useF16 ? "F16" : "F32"}${_f16 && !useF16 ? " (auto)" : ""}',
+                true,
+                r.elapsedMs,
+                '($m×$k)·($k×$n)ᵀ+b → ${(m * k + n * k) * (useF16 ? 2 : 4) / 1024} KB pesos',
                 r.data.take(8).toList()));
       });
     } catch (e) {
@@ -128,15 +133,18 @@ class _OpsTabState extends State<_OpsTab>
   Future<void> _runAttention() async {
     try {
       const s = 128, d = 64;
+      final useF16 = _f16 && GpuContext.instance.hasF16;
       final q = _randData(s * d);
       final kk = _randData(s * d);
       final v = _randData(s * d);
       final r =
-          await _attn.run(q: q, k: kk, v: v, seq: s, dim: d, f16: _f16);
+          await _attn.run(q: q, k: kk, v: v, seq: s, dim: d, f16: useF16);
       setState(() {
         _results.insert(
             0,
-            _OpCard('ATTENTION ${_f16 ? "F16" : "F32"}', true, r.elapsedMs,
+            _OpCard('ATTENTION ${useF16 ? "F16" : "F32"}${_f16 && !useF16 ? " (auto)" : ""}',
+                true,
+                r.elapsedMs,
                 'seq=$s dim=$d softmax(QKᵀ/√d)·V',
                 r.data.take(8).toList()));
       });
@@ -175,7 +183,7 @@ class _OpsTabState extends State<_OpsTab>
               style: TextStyle(fontSize: 11)),
           Switch(
             value: _f16,
-            onChanged: ctx.hasF16 ? (v) => setState(() => _f16 = v) : null,
+            onChanged: (v) => setState(() => _f16 = v),
           ),
         ]),
       ),

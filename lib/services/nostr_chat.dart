@@ -15,13 +15,14 @@ class NostrChat {
     String? nsec,
     required String peerNpub,
     List<String> dmRelays = const [],
+    List<String> readRelays = const [],
     int nSeconds = 3600,
     int nLimit = 10,
   }) async {
     await close();
     final c = await rust.nostrDmNew(nsec: nsec, peerNpub: peerNpub);
     if (dmRelays.isNotEmpty) {
-      await c.addRelays(dmRelays: dmRelays, readRelays: const []);
+      await c.addRelays(dmRelays: dmRelays, readRelays: readRelays);
     }
     await c.subscribe(nSeconds: nSeconds, nLimit: nLimit);
     _client = c;

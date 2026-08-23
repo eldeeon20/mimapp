@@ -36,11 +36,10 @@ class _DmPane extends StatefulWidget {
 }
 
 class _DmPaneState extends State<_DmPane> {
-  static const defaultRelays = [
-    'wss://relay.damus.io',
-    'wss://nos.lol',
-    'wss://relay.nostr.wine',
-  ];
+  // Combo probado de Gtool: DM=nos.lol, lectura=primal.net.
+  // nostr.wine es de pago y no entrega gift wraps anónimos.
+  static const defaultDmRelays = ['wss://nos.lol'];
+  static const defaultReadRelays = ['wss://relay.primal.net'];
 
   final _keys = NostrKeys();
   final _nsecCtrl = TextEditingController();
@@ -99,7 +98,8 @@ class _DmPaneState extends State<_DmPane> {
       await chat.init(
         nsec: nsec.isEmpty ? null : nsec,
         peerNpub: npub,
-        dmRelays: defaultRelays,
+        dmRelays: defaultDmRelays,
+        readRelays: defaultReadRelays,
         nSeconds: 3600,
         nLimit: 10,
       );

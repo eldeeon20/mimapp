@@ -41,10 +41,12 @@ class NostrPeerTestScreen extends StatelessWidget {
   }
 }
 
+// Combo probado de Gtool (589 msgs recibidos): nos.lol + primal.net.
+// nostr.wine es de pago y no entrega gift wraps anónimos; damus a veces
+// filtra kind 1059 sin auth.
 const _relays = [
-  'wss://relay.damus.io',
   'wss://nos.lol',
-  'wss://relay.nostr.wine',
+  'wss://relay.primal.net',
 ];
 
 class _ParticipantPane extends StatefulWidget {

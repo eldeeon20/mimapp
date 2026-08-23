@@ -16,10 +16,11 @@ void registerNostrGlobals(LuaController c) {
   c._registerSync('obs_poll_start', (ls) => _luaObsPoll(ls, c));
 }
 
+// Combo probado de Gtool: nos.lol (DM) + primal.net (lectura).
+// nostr.wine es de pago y no entrega gift wraps anónimos.
 const _nostrDefaults = [
-  'wss://relay.damus.io',
   'wss://nos.lol',
-  'wss://relay.nostr.wine',
+  'wss://relay.primal.net',
 ];
 
 List<String> _relaysArg(LuaState ls, int idx) {
