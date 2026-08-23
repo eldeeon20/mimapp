@@ -6,6 +6,7 @@ import '../lua/lua_page.dart';
 import '../media/media_player.dart';
 import '../screens/ai_screen.dart';
 import '../screens/downloads_test_screen.dart';
+import '../screens/torrent_screen.dart';
 import '../screens/gpu_test_screen.dart';
 import '../screens/hf_test_screen.dart';
 import '../screens/kem_test_screen.dart';
@@ -118,6 +119,8 @@ class _HomePageState extends State<HomePage> {
               _openTest(context, 'GPU Compute (WGSL)', const GpuTestScreen());
             case 'dl':
               _openTest(context, 'Descargas', const DownloadsTestScreen());
+            case 'bt':
+              _openTest(context, 'Torrents (rqbit)', const TorrentScreen());
           }
         }),
       ),

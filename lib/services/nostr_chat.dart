@@ -44,6 +44,17 @@ class NostrChat {
 
   Future<String> publicKey() async => _require().publicKey();
 
+  /// Drena el registro de eventos de Rust (init/relays/send/poll).
+  Future<List<String>> takeLogs() async {
+    final c = _client;
+    if (c == null) return const [];
+    try {
+      return await c.takeLogs();
+    } catch (_) {
+      return const [];
+    }
+  }
+
   Future<void> close() async {
     final c = _client;
     _client = null;

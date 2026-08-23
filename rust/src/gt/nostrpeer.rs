@@ -16,6 +16,8 @@ use std::sync::{Arc, Mutex};
 use tokio::runtime::Runtime;
 use tokio::sync::broadcast;
 
+use super::eventlog::EventLog;
+
 const POW_DIFFICULTY: u8 = 2;
 
 pub struct PeerMessage {
@@ -27,6 +29,8 @@ pub struct PeerMessage {
 /// Núcleo puro del chat con observador (equivalente a NostrPeer de Godot).
 pub struct SharedKeyChat {
     runtime: Arc<Runtime>,
+    /// Registro de eventos visible desde la UI (take_logs).
+    pub logs: EventLog,
     client: Arc<Mutex<Option<Client>>>,
     shared_keys: Arc<Mutex<Option<Keys>>>,
     sender_keys: Arc<Mutex<Option<Keys>>>,
@@ -36,6 +40,7 @@ pub struct SharedKeyChat {
 impl SharedKeyChat {
     pub fn new() -> Result<Self> {
         Ok(Self {
+            logs: EventLog::new(),
             runtime: Arc::new(Runtime::new()?),
             client: Arc::new(Mutex::new(None)),
             shared_keys: Arc::new(Mutex::new(None)),
@@ -55,6 +60,7 @@ impl SharedKeyChat {
         since: u64,
         until: u64,
     ) -> Result<String> {
+        self.logs.push("init_participant: parseando nsec…");
         let sk = Keys::parse(&sender_secret)
             .map_err(|e| anyhow!("Invalid sender secret: {}", e))?;
         let receiver = PublicKey::from_str(&receiver_pubkey)
@@ -67,8 +73,14 @@ impl SharedKeyChat {
             .map_err(|e| anyhow!("Invalid shared key bytes: {}", e))?;
         let shared_keys = Keys::new(shared_secret_key);
 
+        self.logs.push(format!(
+            "Mode: Participant · shared key: {}…",
+            &shared_keys.secret_key().to_secret_hex()[..16]
+        ));
+
         let client = Client::new(Keys::generate());
         for url in &relay_urls {
+            self.logs.push(format!("Adding relay: {url}"));
             self.runtime.block_on(async {
                 client.add_relay(url).await.map_err(|e| {
                     anyhow!("Failed to add relay {}: {}", url, e)
@@ -76,6 +88,7 @@ impl SharedKeyChat {
                 Ok::<(), anyhow::Error>(())
             })?;
         }
+        self.logs.push("connect(): conectando a relays…");
         self.runtime.block_on(client.connect());
 
         let mut filter = Filter::new()
@@ -88,6 +101,10 @@ impl SharedKeyChat {
         if until > 0 {
             filter = filter.until(Timestamp::from(until));
         }
+        self.logs.push(format!(
+            "subscribe GiftWrap pk={} limit={n_limit}",
+            shared_keys.public_key().to_hex()
+        ));
         self.runtime.block_on(async {
             client.subscribe(filter, None).await.map_err(|e| {
                 anyhow!("Failed to subscribe: {}", e)
@@ -98,6 +115,7 @@ impl SharedKeyChat {
             *self.notifications.lock().unwrap() = Some(client.notifications());
             Ok::<(), anyhow::Error>(())
         })?;
+        self.logs.push("✓ iniciado (participant): suscripción activa");
 
         Ok(self.shared_keys.lock().unwrap().as_ref().unwrap()
             .secret_key().to_secret_hex())
@@ -116,8 +134,14 @@ impl SharedKeyChat {
             .map_err(|e| anyhow!("Invalid shared key: {}", e))?;
         let shared_keys = Keys::new(shared_secret_key);
 
+        self.logs.push(format!(
+            "Mode: Participant · shared key: {}…",
+            &shared_keys.secret_key().to_secret_hex()[..16]
+        ));
+
         let client = Client::new(Keys::generate());
         for url in &relay_urls {
+            self.logs.push(format!("Adding relay: {url}"));
             self.runtime.block_on(async {
                 client.add_relay(url).await.map_err(|e| {
                     anyhow!("Failed to add relay {}: {}", url, e)
@@ -125,6 +149,7 @@ impl SharedKeyChat {
                 Ok::<(), anyhow::Error>(())
             })?;
         }
+        self.logs.push("connect(): conectando a relays…");
         self.runtime.block_on(client.connect());
 
         let mut filter = Filter::new()
@@ -137,6 +162,10 @@ impl SharedKeyChat {
         if until > 0 {
             filter = filter.until(Timestamp::from(until));
         }
+        self.logs.push(format!(
+            "subscribe GiftWrap pk={} limit={n_limit}",
+            shared_keys.public_key().to_hex()
+        ));
         self.runtime.block_on(async {
             client.subscribe(filter, None).await.map_err(|e| {
                 anyhow!("Failed to subscribe: {}", e)
@@ -147,6 +176,7 @@ impl SharedKeyChat {
             *self.notifications.lock().unwrap() = Some(client.notifications());
             Ok::<(), anyhow::Error>(())
         })?;
+        self.logs.push("✓ iniciado (observer): solo lectura");
         Ok(())
     }
 
@@ -165,6 +195,8 @@ impl SharedKeyChat {
             _ => return Err(anyhow!("Client, Sender or Shared keys not initialized")),
         };
 
+        self.logs.push(format!("send: enviant {} chars…", message.len()));
+        let logs = self.logs.clone();
         self.runtime.block_on(async move {
             let wrapped_event =
                 mostro_wrap(&sender, shared.public_key(), message, vec![]).await
@@ -172,8 +204,14 @@ impl SharedKeyChat {
             client.send_event(&wrapped_event).await.map_err(|e| {
                 anyhow!("Error sending event: {}", e)
             })?;
+            logs.push("✓ enviado al relay");
             Ok::<(), anyhow::Error>(())
         })
+    }
+
+    /// Drena el registro de eventos para mostrarlo en la UI.
+    pub fn take_logs(&self) -> Vec<String> {
+        self.logs.drain()
     }
 
     /// Poll no bloqueante de mensajes nuevos (los descarta si son viejos).
@@ -184,11 +222,17 @@ impl SharedKeyChat {
         let mut messages = Vec::new();
         let shared_keys = match shared_guard.as_ref() {
             Some(k) => k.clone(),
-            None => return Ok(messages),
+            None => {
+                self.logs.push("✗ poll sin iniciar (no hay shared key)");
+                return Err(anyhow!("chat no iniciado"));
+            }
         };
         let notifications = match notifications_guard.as_mut() {
             Some(n) => n,
-            None => return Ok(messages),
+            None => {
+                self.logs.push("✗ poll sin receiver (¿falló init?)");
+                return Err(anyhow!("sin receiver de notificaciones"));
+            }
         };
 
         loop {
@@ -206,7 +250,11 @@ impl SharedKeyChat {
                                         Some(inner_event)
                                     }
                                 }
-                                Err(_) => None,
+                                Err(e) => {
+                                    self.logs
+                                        .push(format!("unwrap falló: {e}"));
+                                    None
+                                }
                             }
                         });
                         if let Some(inner_event) = res {
@@ -220,13 +268,21 @@ impl SharedKeyChat {
                 }
                 Err(broadcast::error::TryRecvError::Empty) => break,
                 Err(broadcast::error::TryRecvError::Lagged(_)) => continue,
-                Err(broadcast::error::TryRecvError::Closed) => break,
+                Err(broadcast::error::TryRecvError::Closed) => {
+                    self.logs.push("✗ canal de notificaciones cerrado");
+                    break;
+                }
             }
+        }
+        if !messages.is_empty() {
+            self.logs
+                .push(format!("poll: {} mensaje(s) nuevo(s)", messages.len()));
         }
         Ok(messages)
     }
 
     pub fn disconnect(&self) {
+        self.logs.push("disconnect()");
         if let Some(client) = self.client.lock().unwrap().as_ref() {
             self.runtime.block_on(client.disconnect());
         }

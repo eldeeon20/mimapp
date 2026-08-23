@@ -74,6 +74,11 @@ impl NostrDm {
     pub fn disconnect(&mut self) -> Result<()> {
         self.client.disconnect().map_err(|e| anyhow!("{e:#}"))
     }
+
+    /// Drena el registro de eventos (init/relays/subscribe/send/poll).
+    pub fn take_logs(&mut self) -> Vec<String> {
+        self.client.take_logs()
+    }
 }
 
 /// Constructor libre (el codegen expone las clases opacas como abstractas).

@@ -120,13 +120,18 @@ class LaureliaChat {
         final localName = missing.first;
         final remoteName = localName == _localCkpt ? _remoteCkpt : tok;
         final target = File(await _path(localName));
-        final req = http.Request('GET', Uri.parse(baseUrl + remoteName));
+        final req = http.Request('GET', Uri.parse(baseUrl + remoteName))
+          // Sin compresión: con gzip el SDK descomprime pero Content-Length
+          // queda comprimido → MB mentirosos y % > 100.
+          ..headers['accept-encoding'] = 'identity';
         final res = await client.send(req);
         if (res.statusCode != 200) {
           _progress('Error HTTP ${res.statusCode} al descargar $remoteName');
           return false;
         }
-        final total = res.contentLength ?? 0;
+        // -1 = chunked/sin header → tratar como desconocido (0).
+        final cl = res.contentLength ?? -1;
+        final total = cl > 0 ? cl : 0;
         var written = 0;
         final sink = target.openWrite();
 

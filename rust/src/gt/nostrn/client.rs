@@ -7,6 +7,7 @@ use tokio::runtime::Runtime;
 use tokio::sync::{broadcast, Mutex};
 
 use super::relays::{compose_write_relays, connect_relays};
+use crate::gt::eventlog::EventLog;
 
 /// Estructura que almacena la configuración del cliente Nostr para reutilización.
 /// No usa threads ni channels - todas las operaciones son síncronas desde la perspectiva del llamador.
@@ -15,6 +16,8 @@ pub struct NostrClient {
     keys: Keys,
     peer_pk: PublicKey,
     runtime: Arc<Runtime>,
+    /// Registro de eventos visible desde la UI (take_logs).
+    pub logs: EventLog,
     subscription_id: Option<SubscriptionId>,
     notifications: Arc<Mutex<Option<broadcast::Receiver<RelayPoolNotification>>>>,
     pub n_seconds: u64,
@@ -53,11 +56,24 @@ impl NostrClient {
                 .context("Failed to create Tokio runtime")?
         );
 
+        let logs = EventLog::new();
+        logs.push(if nsec.is_some() {
+            "cliente creado (nsec propio)"
+        } else {
+            "cliente creado (nsec GENERADA nueva)"
+        });
+        logs.push(format!(
+            "yo: {} · peer: {}",
+            keys.public_key().to_bech32().unwrap_or_default(),
+            peer_pk.to_bech32().unwrap_or_default()
+        ));
+
         Ok(Self {
             client,
             keys,
             peer_pk,
             runtime,
+            logs,
             subscription_id: None,
             notifications: Arc::new(Mutex::new(None)),
             n_seconds: 3600,
@@ -73,9 +89,13 @@ impl NostrClient {
     /// * `read_relays` - Lista de relays de lectura (opcional, usa dm_relays si está vacío)
     pub fn add_relays(&mut self, dm_relays: Vec<String>, read_relays: Option<Vec<String>>) -> Result<()> {
         if dm_relays.is_empty() {
+            self.logs.push("✗ sin relays DM: se requiere al menos uno");
             return Err(anyhow!(
                 "Strict NIP-17 mode requires at least one DM relay"
             ));
+        }
+        for r in &dm_relays {
+            self.logs.push(format!("DM relay: {r}"));
         }
 
         // Determinar relays de lectura
@@ -93,9 +113,15 @@ impl NostrClient {
         let write = compose_write_relays(&dm_relays);
 
         // Conectar usando el runtime
+        self.logs.push("connect(): conectando relays…");
         self.runtime.block_on(async {
             connect_relays(&self.client, &read, &write).await
         })?;
+        self.logs.push(format!(
+            "✓ relays conectados (lectura:{}, escritura:{})",
+            read.len(),
+            write.len()
+        ));
 
         Ok(())
     }
@@ -116,42 +142,58 @@ impl NostrClient {
             .limit(self.n_limit)
             .since(Timestamp::from(Timestamp::now().as_u64().saturating_sub(self.n_seconds)));
 
-        println!("      [DEBUG] Suscribiendo a:");
-        println!("      - Mensajes para mi: {}", self.keys.public_key().to_bech32()?);
-        println!("      - Mensajes del peer: {}", self.peer_pk.to_bech32()?);
+        self.logs.push(format!(
+            "subscribe: para mí={} · del peer={}",
+            self.keys.public_key().to_bech32()?,
+            self.peer_pk.to_bech32()?
+        ));
 
         let sub_id = self.runtime.block_on(async {
             // Subscribe to messages TO me
-            let id1 = self.client.subscribe(filter_to_me, None).await?;
-            println!("      [DEBUG] Suscripción 1 ID: {}", id1.id());
-            
-            // Subscribe to messages FROM peer
-            let id2 = self.client.subscribe(filter_from_peer, None).await?;
-            println!("      [DEBUG] Suscripción 2 ID: {}", id2.id());
-            
+            let id1 = self
+                .client
+                .subscribe(filter_to_me, None)
+                .await
+                .map_err(|e| anyhow!("subscribe(to_me): {e}"))?;
+            let id2 = self
+                .client
+                .subscribe(filter_from_peer, None)
+                .await
+                .map_err(|e| anyhow!("subscribe(from_peer): {e}"))?;
             Ok::<_, anyhow::Error>(id1)
         })?;
 
         self.subscription_id = Some(sub_id.id().clone());
-        
+
         // Inicializar el receiver de notificaciones UNA VEZ
         let notifications_receiver = self.client.notifications();
         self.runtime.block_on(async {
             *self.notifications.lock().await = Some(notifications_receiver);
         });
-        
+        self.logs.push("✓ suscripto (2 filtros) · receiver listo");
+
         Ok(())
+    }
+
+    /// Drena el registro de eventos para mostrarlo en la UI.
+    pub fn take_logs(&self) -> Vec<String> {
+        self.logs.drain()
     }
     /// Envía un mensaje privado al destinatario.
     /// 
     /// # Argumentos
     /// * `message` - Contenido del mensaje a enviar
     pub fn send_message(&self, message: &str) -> Result<()> {
+        self.logs
+            .push(format!("send NIP-17: {} chars…", message.len()));
+        let logs = self.logs.clone();
         self.runtime.block_on(async {
             self.client
                 .send_private_msg(self.peer_pk, message, [])
                 .await
-                .context("Failed to send private message")
+                .context("Failed to send private message")?;
+            logs.push("✓ enviado al relay");
+            Ok::<(), anyhow::Error>(())
         })?;
         Ok(())
     }
@@ -166,12 +208,15 @@ impl NostrClient {
         let mut event_count = 0;
         let mut system_count = 0;
         let mut giftwrap_count = 0;
-        
+        let mut unwrap_errors = 0usize;
+        let mut has_receiver = true;
+
         self.runtime.block_on(async {
             // Reutilizar el receiver de notificaciones existente
             let mut notifications_guard = self.notifications.lock().await;
             if notifications_guard.is_none() {
-                println!("      [DEBUG] ⚠️  No hay receiver de notificaciones. ¿Llamaste a subscribe()?");
+                // antes: silencio total. Ahora el host ve por qué no llega nada.
+                has_receiver = false;
                 return;
             }
             
@@ -179,7 +224,7 @@ impl NostrClient {
             let timeout_duration = tokio::time::Duration::from_secs(self.poll_timeout);
             let deadline = tokio::time::Instant::now() + timeout_duration;
             
-            println!("      [DEBUG] Esperando notificaciones por {} segundos...", self.poll_timeout);
+
             
             // Esperar mensajes hasta el timeout
             loop {
@@ -194,34 +239,35 @@ impl NostrClient {
                         match &notification {
                             RelayPoolNotification::Event { relay_url, event, .. } => {
                                 event_count += 1;
-                                println!("      [DEBUG] Evento recibido de {}: Kind={}, ID={}", 
-                                         relay_url, event.kind, event.id);
                                 if event.kind == Kind::GiftWrap {
                                     giftwrap_count += 1;
-                                    println!("      [DEBUG] GiftWrap recibido, intentando desencriptar...");
                                     match self.client.unwrap_gift_wrap(&event).await {
                                         Ok(UnwrappedGift { sender, rumor }) => {
-                                            println!("      [DEBUG] Desencriptado exitoso. Sender: {}, Kind: {}", 
-                                                     sender.to_hex().chars().take(8).collect::<String>(),
-                                                     rumor.kind);
-                                            // Solo mostrar mensajes del peer seleccionado
+                                            // Solo mensajes del peer seleccionado
                                             if rumor.kind == Kind::PrivateDirectMessage && sender == self.peer_pk {
-                                                println!("      [DEBUG] ✓ Mensaje del peer correcto!");
                                                 messages.push(ReceivedMessage {
                                                     sender,
                                                     content: rumor.content,
                                                     timestamp: rumor.created_at,
                                                 });
+                                                self.logs.push(format!(
+                                                    "✓ DM del peer vía {relay_url}"));
                                             } else {
-                                                println!("      [DEBUG] ✗ Mensaje de otro peer o tipo incorrecto");
+                                                self.logs.push(format!(
+                                                    "giftwrap de otro ({}, kind {}) descartado",
+                                                    &sender.to_hex()[..8.min(sender.to_hex().len())],
+                                                    rumor.kind));
                                             }
                                         }
                                         Err(e) => {
-                                            println!("      [DEBUG] Error desencriptando: {}", e);
+                                            unwrap_errors += 1;
+                                            self.logs.push(format!(
+                                                "✗ desencriptado falló: {e}"));
                                         }
                                     }
                                 } else if event.kind == Kind::EncryptedDirectMessage {
-                                    println!("      [DEBUG] ⚠️ Recibido mensaje legado (Kind 4). Este cliente espera NIP-17 (GiftWrap).");
+                                    self.logs.push(
+                                        "⚠ mensaje legado kind-4 (esperamos NIP-17)".to_string());
                                 }
                             },
                             RelayPoolNotification::Message { relay_url, message } => {
@@ -229,7 +275,7 @@ impl NostrClient {
                              //   println!("      [DEBUG] Mensaje de sistema de {}: {:?}", relay_url, message);
                             },
                             RelayPoolNotification::Shutdown => {
-                                println!("      [DEBUG] Notificación de Shutdown");
+                                self.logs.push("⚠ relay pool shutdown".to_string());
                             },
 
                         }
@@ -238,9 +284,18 @@ impl NostrClient {
                 }
             }
             
-            println!("      [DEBUG] Resumen: {} Eventos, {} Mensajes de Sistema (EOSE/OK), {} GiftWraps, {} Mensajes Válidos", 
-                     event_count, system_count, giftwrap_count, messages.len());
         });
+
+        if !has_receiver {
+            self.logs.push("✗ poll sin receiver: ¿llamaste a subscribe()?");
+            return Err(anyhow!("sin receiver de notificaciones"));
+        }
+        if !messages.is_empty() || giftwrap_count > 0 || unwrap_errors > 0 {
+            self.logs.push(format!(
+                "poll: {event_count} eventos · {giftwrap_count} giftwraps ·                  {unwrap_errors} fallos · {} válidos",
+                messages.len()
+            ));
+        }
 
         Ok(messages)
     }

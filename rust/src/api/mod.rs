@@ -10,3 +10,4 @@ pub mod nostringer;
 pub mod pkarr;
 pub mod shamir;
 pub mod simple;
+pub mod torrent;

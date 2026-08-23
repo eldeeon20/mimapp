@@ -1,5 +1,20 @@
+import 'dart:io';
+
+import 'package:flutter/services.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+
+import 'status_notifier.dart';
+
+/// Handler para cuando tocan "Salir" con la app EN SEGUNDO PLANO.
+/// Obligatorio top-level con vm:entry-point; sin esto el botón no hace
+/// nada salvo que la app esté abierta en primer plano.
+@pragma('vm:entry-point')
+void notificationBackgroundHandler(NotificationResponse response) {
+  if (response.actionId == 'exit') {
+    NotificationService.exitApp();
+  }
+}
 
 class NotificationService {
   static final FlutterLocalNotificationsPlugin _plugin =
@@ -15,38 +30,61 @@ class NotificationService {
   /// el foregroundServiceNotificationId de flutter_background_service).
   static const serviceNotificationId = 888;
 
+  /// SALIR = KILL TOTAL. Detiene el servicio en primer plano, cancela
+  /// TODAS las notificaciones (servicio 888, estado 777, descargas 9000+)
+  /// y mata el proceso de la app. Funciona igual desde primer o segundo
+  /// plano (es static puro, sin UI).
+  static Future<void> exitApp() async {
+    // 1) parar el foreground service
+    try {
+      FlutterBackgroundService().invoke('stop');
+    } catch (_) {}
+    await Future.delayed(const Duration(milliseconds: 300));
+
+    // 2) cancelar todas las notificaciones persistentes conocidas
+    for (final id in [
+      serviceNotificationId,
+      StatusNotifier.notificationId,
+      ...List.generate(50, (i) => 9000 + i), // rango de descargas
+    ]) {
+      try {
+        await _plugin.cancel(id: id);
+      } catch (_) {}
+    }
+
+    // 3) cerrar la app de verdad: quitar tarea + kill del proceso
+    try {
+      await SystemNavigator.pop(explicit: true);
+    } catch (_) {}
+    await Future.delayed(const Duration(milliseconds: 200));
+    exit(0);
+  }
+
   static Future<void> init({
     Future<void> Function()? onExitAction,
   }) async {
-    const androidSettings = AndroidInitializationSettings('ic_bg_service_small');
-
-    const darwinSettings = DarwinInitializationSettings(
-      requestAlertPermission: false,
-      requestBadgePermission: false,
-      requestSoundPermission: false,
-    );
-
-    const initSettings = InitializationSettings(
-      android: androidSettings,
-      iOS: darwinSettings,
-    );
-
     await _plugin.initialize(
-      settings: initSettings,
+      settings: const InitializationSettings(
+        android: AndroidInitializationSettings('ic_bg_service_small'),
+        iOS: DarwinInitializationSettings(
+          requestAlertPermission: false,
+          requestBadgePermission: false,
+          requestSoundPermission: false,
+        ),
+      ),
       onDidReceiveNotificationResponse: (NotificationResponse response) {
         if (response.actionId == 'exit') {
-          // Botón "Salir": detener el servicio en primer plano y limpiar
-          // TODAS las notificaciones persistentes (888 + estado 777).
-          // El teardown completo lo pasa el caller (bootstrap) porque ahí
-          // viven StatusNotifier/FlutterBackgroundService sin ciclos.
+          // App en primer plano: mismo kill total.
           if (onExitAction != null) {
             onExitAction();
           } else {
-            FlutterBackgroundService().invoke('stop');
-            _plugin.cancel(id: serviceNotificationId);
+            exitApp();
           }
         }
       },
+      // Camino CRÍTICO: tocar "Salir" con la app en segundo plano.
+      onDidReceiveBackgroundNotificationResponse:
+          notificationBackgroundHandler,
     );
 
     // Crear canal en Android
@@ -67,11 +105,6 @@ class NotificationService {
         .resolvePlatformSpecificImplementation<
             AndroidFlutterLocalNotificationsPlugin>()
         ?.requestNotificationsPermission();
-  }
-
-  @pragma('vm:entry-point')
-  static void notificationTapBackground(NotificationResponse response) {
-    // Manejar tap en background
   }
 
   static FlutterLocalNotificationsPlugin get plugin => _plugin;

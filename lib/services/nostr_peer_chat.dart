@@ -61,7 +61,17 @@ class NostrPeerChat {
   Future<void> send(String message) => _inner.send(message: message);
 
   /// Poll no bloqueante; mensajes ya desencriptados y verificados.
+  /// Falla con excepción si el chat no fue iniciado (antes: silencio).
   Future<List<rust.PeerMessage>> poll() => _inner.poll();
+
+  /// Drena el registro de eventos de Rust (init/relays/subscribe/send).
+  Future<List<String>> takeLogs() async {
+    try {
+      return await _inner.takeLogs();
+    } catch (_) {
+      return const [];
+    }
+  }
 
   Future<void> close() async {
     try {

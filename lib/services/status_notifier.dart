@@ -21,7 +21,10 @@ class StatusNotifier {
   static final StatusNotifier instance = StatusNotifier._();
   StatusNotifier._();
 
-  static const _id = 777;
+  /// ID público para que el botón Salir pueda cancelarla desde cualquier
+  /// isolate (el panel "Estado de Secure App").
+  static const notificationId = 777;
+  static const _id = notificationId;
   static const _channelId = 'pr_app_status';
   static const _channelName = 'Estado de la app';
 

@@ -98,6 +98,11 @@ impl NostrPeerChat {
     pub fn disconnect(&self) {
         self.inner.disconnect();
     }
+
+    /// Drena el registro de eventos (init/relays/subscribe/send/poll).
+    pub fn take_logs(&self) -> Vec<String> {
+        self.inner.take_logs()
+    }
 }
 
 /// Constructor libre (el codegen expone las clases opacas como abstractas).

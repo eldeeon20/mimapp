@@ -49,6 +49,8 @@ class _DmPaneState extends State<_DmPane> {
   final _messages = <_Bubble>[];
   final _scroll = ScrollController();
 
+  final _log = <String>[];
+
   NostrChat? _chat;
   Timer? _timer;
   String? _myNpub;
@@ -105,7 +107,9 @@ class _DmPaneState extends State<_DmPane> {
       setState(() {
         _chat = chat;
         _myNpub = pk;
+        _log.add('✓ iniciado · yo: $pk');
       });
+      await _drainLogs();
       _startPolling();
     } catch (e) {
       setState(() => _error = '$e');
@@ -119,8 +123,20 @@ class _DmPaneState extends State<_DmPane> {
     _timer = Timer.periodic(const Duration(seconds: 2), (_) => _poll());
   }
 
+  Future<void> _drainLogs() async {
+    final c = _chat;
+    if (c == null) return;
+    try {
+      final lines = await c.takeLogs();
+      if (lines.isNotEmpty && mounted) {
+        setState(() => _log.addAll(lines.take(50)));
+      }
+    } catch (_) {}
+  }
+
   Future<void> _poll() async {
     if (!connected) return;
+    await _drainLogs();
     try {
       final msgs = await _chat!.poll(timeoutSecs: 2);
       if (msgs.isEmpty || !mounted) return;
@@ -130,7 +146,10 @@ class _DmPaneState extends State<_DmPane> {
         }
       });
       _scrollDown();
-    } catch (_) {}
+    } catch (e) {
+      // antes: tragado. Ahora visible.
+      if (mounted) setState(() => _error = 'poll: $e');
+    }
   }
 
   Future<void> _send() async {
@@ -156,6 +175,31 @@ class _DmPaneState extends State<_DmPane> {
     });
   }
 
+  Widget _logPanel() {
+    return ExpansionTile(
+      title: Text('Registro (${_log.length})',
+          style: const TextStyle(fontSize: 11)),
+      initiallyExpanded: _error.isNotEmpty,
+      children: [
+        Container(
+          constraints: const BoxConstraints(maxHeight: 130),
+          padding: const EdgeInsets.all(6),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: .35),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: _log.length,
+            itemBuilder: (_, i) => SelectableText(_log[i],
+                style:
+                    const TextStyle(fontSize: 9, color: Colors.white54)),
+          ),
+        ),
+      ],
+    );
+  }
+
   void _scrollDown() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scroll.hasClients) {
@@ -177,6 +221,7 @@ class _DmPaneState extends State<_DmPane> {
           if (!connected) _configForm() else ...[
             Expanded(child: _bubbles()),
             _inputRow(),
+            _logPanel(),
           ],
         ],
       ),

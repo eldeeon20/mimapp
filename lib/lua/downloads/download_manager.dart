@@ -117,12 +117,18 @@ class DownloadManager with ChangeNotifier {
     try {
       final req = http.Request('GET', Uri.parse(task.url))
         ..followRedirects = true
-        ..maxRedirects = 8;
+        ..maxRedirects = 8
+        // Sin compresión: si el server manda gzip, el SDK descomprime el
+        // stream pero Content-Length queda en tamaño COMPRIMIDO → los MB
+        // mostrados no coincidían con lo bajado (y % > 100).
+        ..headers['accept-encoding'] = 'identity';
       final res = await client.send(req);
       if (res.statusCode != 200) {
         throw Exception('HTTP ${res.statusCode}');
       }
-      task.total = res.contentLength ?? 0;
+      // contentLength puede ser -1 (chunked/sin header) → tratar como 0.
+      final cl = res.contentLength ?? -1;
+      task.total = cl > 0 ? cl : 0;
       sink = File(task.path).openWrite();
       await NotificationService.showDownloadProgress(
         id: task.id,
@@ -153,8 +159,9 @@ class DownloadManager with ChangeNotifier {
       await sink.flush();
 
       if (task.status == DlStatus.activa) {
+        // Con total desconocido (0) el fin normal del stream = OK.
         task.status =
-            (task.total == 0 || task.received >= task.total)
+            (task.total <= 0 || task.received >= task.total)
                 ? DlStatus.ok
                 : DlStatus.error;
         task.error = task.status == DlStatus.error

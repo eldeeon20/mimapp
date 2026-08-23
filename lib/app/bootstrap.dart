@@ -91,21 +91,9 @@ Future<void> _initNotifications() async {
   }
 }
 
-/// Teardown completo del botón "Salir" de la notificación de servicio:
-/// detiene el FGS, espera a que muera y cancela TODAS las persistentes
-/// (servicio 888 + estado 777). La de medios queda si hay música.
-Future<void> _handleExitAction() async {
-  // invoke() es void síncrono en fb_service v5; la orden llega por canal.
-  FlutterBackgroundService().invoke('stop');
-  await Future.delayed(const Duration(milliseconds: 400));
-  try {
-    await NotificationService.plugin
-        .cancel(id: NotificationService.serviceNotificationId);
-  } catch (_) {}
-  try {
-    await StatusNotifier.instance.cancel();
-  } catch (_) {}
-}
+/// Botón "Salir" = KILL TOTAL de la app (servicio, todas las
+/// notificaciones y proceso). Misma rutina que el camino en segundo plano.
+Future<void> _handleExitAction() => NotificationService.exitApp();
 
 Future<void> _initBackgroundService() async {
   try {

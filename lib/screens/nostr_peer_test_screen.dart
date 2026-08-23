@@ -71,6 +71,7 @@ class _ParticipantPaneState extends State<_ParticipantPane>
   String? _sharedKey;
   bool _busy = false;
   String _error = '';
+  final _log = <String>[];
 
   @override
   bool get wantKeepAlive => true;
@@ -113,7 +114,14 @@ class _ParticipantPaneState extends State<_ParticipantPane>
         relays: _relays,
         nLimit: 10,
       );
-      setState(() => _sharedKey = shared);
+      // FIX CRÍTICO: antes el chat nunca se guardaba → poll no hacía nada
+      // y send explotaba en silencio con null-check.
+      setState(() {
+        _chat = chat;
+        _sharedKey = shared;
+        _log.add('✓ conectado como participante');
+      });
+      await _drainLogs(chat);
       _timer = Timer.periodic(const Duration(seconds: 2), (_) => _poll());
     } catch (e) {
       setState(() => _error = '$e');
@@ -122,9 +130,19 @@ class _ParticipantPaneState extends State<_ParticipantPane>
     }
   }
 
+  Future<void> _drainLogs(NostrPeerChat chat) async {
+    try {
+      final lines = await chat.takeLogs();
+      if (lines.isNotEmpty && mounted) {
+        setState(() => _log.addAll(lines.take(50)));
+      }
+    } catch (_) {}
+  }
+
   Future<void> _poll() async {
     final chat = _chat;
     if (chat == null) return;
+    await _drainLogs(chat);
     try {
       final msgs = await chat.poll();
       if (msgs.isEmpty || !mounted) return;
@@ -134,7 +152,10 @@ class _ParticipantPaneState extends State<_ParticipantPane>
         }
       });
       _scrollDown();
-    } catch (_) {}
+    } catch (e) {
+      // antes: tragado. Ahora visible en rojo.
+      if (mounted) setState(() => _error = 'poll: $e');
+    }
   }
 
   Future<void> _send() async {
@@ -278,7 +299,33 @@ class _ParticipantPaneState extends State<_ParticipantPane>
           onPressed: _send,
         ),
       ]),
+      _logPanel(),
     ]);
+  }
+
+  Widget _logPanel() {
+    return ExpansionTile(
+      title: Text('Registro (${_log.length})',
+          style: const TextStyle(fontSize: 11)),
+      initiallyExpanded: _error.isNotEmpty,
+      children: [
+        Container(
+          constraints: const BoxConstraints(maxHeight: 130),
+          padding: const EdgeInsets.all(6),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: .35),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: _log.length,
+            itemBuilder: (_, i) => SelectableText(_log[i],
+                style:
+                    const TextStyle(fontSize: 9, color: Colors.white54)),
+          ),
+        ),
+      ],
+    );
   }
 
   Widget _bubbles() {
@@ -324,6 +371,7 @@ class _ObserverPaneState extends State<_ObserverPane>
   Timer? _timer;
   bool _busy = false;
   String _error = '';
+  final _log = <String>[];
 
   @override
   bool get wantKeepAlive => true;
@@ -349,7 +397,11 @@ class _ObserverPaneState extends State<_ObserverPane>
     try {
       final chat = await NostrPeerChat.create();
       await chat.initObserver(sharedKeyHex: _keyCtrl.text.trim(), relays: _relays);
-      setState(() => _chat = chat);
+      setState(() {
+        _chat = chat;
+        _log.add('✓ observador conectado (solo lectura)');
+      });
+      await _drainLogs(chat);
       _timer = Timer.periodic(const Duration(seconds: 2), (_) => _poll());
     } catch (e) {
       setState(() => _error = '$e');
@@ -358,9 +410,19 @@ class _ObserverPaneState extends State<_ObserverPane>
     }
   }
 
+  Future<void> _drainLogs(NostrPeerChat chat) async {
+    try {
+      final lines = await chat.takeLogs();
+      if (lines.isNotEmpty && mounted) {
+        setState(() => _log.addAll(lines.take(50)));
+      }
+    } catch (_) {}
+  }
+
   Future<void> _poll() async {
     final chat = _chat;
     if (chat == null) return;
+    await _drainLogs(chat);
     try {
       final msgs = await chat.poll();
       if (msgs.isEmpty || !mounted) return;
@@ -369,7 +431,34 @@ class _ObserverPaneState extends State<_ObserverPane>
           _messages.add('${_short(m.pubkey)}: ${m.content}');
         }
       });
-    } catch (_) {}
+    } catch (e) {
+      // antes: tragado. Ahora visible.
+      if (mounted) setState(() => _error = 'poll: $e');
+    }
+  }
+
+  Widget _logPanel() {
+    return ExpansionTile(
+      title: Text('Registro (${_log.length})',
+          style: const TextStyle(fontSize: 11)),
+      children: [
+        Container(
+          constraints: const BoxConstraints(maxHeight: 130),
+          padding: const EdgeInsets.all(6),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: .35),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: _log.length,
+            itemBuilder: (_, i) => SelectableText(_log[i],
+                style:
+                    const TextStyle(fontSize: 9, color: Colors.white54)),
+          ),
+        ),
+      ],
+    );
   }
 
   @override
@@ -380,8 +469,9 @@ class _ObserverPaneState extends State<_ObserverPane>
       padding: const EdgeInsets.all(8),
       child: connected
           ? ListView.builder(
-              itemCount: _messages.length + 1,
+              itemCount: _messages.length + 2,
               itemBuilder: (_, i) {
+                if (i == _messages.length + 1) return _logPanel();
                 if (i == 0) {
                   return Container(
                     margin: const EdgeInsets.only(bottom: 8),
