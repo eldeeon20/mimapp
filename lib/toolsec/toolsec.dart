@@ -5,6 +5,8 @@ import 'package:saf_stream/saf_stream.dart';
 import 'package:saf_util/saf_util.dart';
 import 'package:saf_util/saf_util_platform_interface.dart';
 
+import '../services/crypto_vault.dart';
+
 /// Excepción cuando no se puede escribir sobre el archivo original.
 /// Lleva los bytes ya cifrados para ofrecer guardar una copia.
 class ToolSecCantWriteException implements Exception {
@@ -28,8 +30,11 @@ class ToolSecCantWriteException implements Exception {
 ///   await ts.encodeFileWithFallback('script.gd'); // fallback Android
 class ToolSec {
   final int _seed;
+  final String _seedString;
 
-  ToolSec(String seed) : _seed = _djb2(seed);
+  ToolSec(String seed)
+      : _seed = _djb2(seed),
+        _seedString = seed;
 
   /// djb2 hash — mismo que Godot String.hash_u32().
   static int _djb2(String s) {
@@ -62,6 +67,35 @@ class ToolSec {
       state = next;
     }
     return result;
+  }
+
+  // =========================================================================
+  // V2 fuerte: AES-256-GCM + PBKDF2 (ver CryptoVault). El XOR queda para
+  // compatibilidad con Godot/Rust y archivos viejos; los datos nuevos en
+  // reposo deberían usar estos métodos.
+  // =========================================================================
+
+  /// ¿Son bytes de un envelope fuerte (PRBX)?
+  static bool isStrong(Uint8List data) => CryptoVault.isEnvelope(data);
+
+  /// Cifra con AES-256-GCM derivando la clave de la semilla vía PBKDF2
+  /// (salt aleatorio por archivo + tag de autenticación).
+  Future<Uint8List> processBytesStrong(Uint8List plain) {
+    return CryptoVault.encrypt(plain, _seedString);
+  }
+
+  /// Descifra fuerte. null = passphrase incorrecta o datos alterados.
+  Future<Uint8List?> processBytesStrongDecrypt(Uint8List enc) {
+    return CryptoVault.decrypt(enc, _seedString);
+  }
+
+  /// Auto-detecta: envelope PRBX -> descifra fuerte; si no, XOR legado.
+  /// null solo si era PRBX y falló la autenticación.
+  Future<Uint8List?> processBytesAuto(Uint8List data) async {
+    if (isStrong(data)) {
+      return processBytesStrongDecrypt(data);
+    }
+    return processBytes(data);
   }
 
   // =========================================================================

@@ -5,12 +5,13 @@ import 'dart:typed_data';
 import 'package:path_provider/path_provider.dart';
 
 import '../toolsec/toolsec.dart';
+import 'crypto_vault.dart';
 
 /// Estado persistente del usuario, guardado cifrado en `config.pr`.
 ///
-/// El archivo en disco siempre está cifrado con ToolSec (XOR por semilla
-/// `masterKey`). Al cargar se descifra en RAM y el plaintext nunca se escribe
-/// a disco.
+/// Formato V2: envelope AES-256-GCM (CryptoVault, clave derivada de
+/// `masterKey` vía PBKDF2 con salt aleatorio). Los config.pr viejos (XOR)
+/// se detectan al cargar y se re-guardan migrados automáticamente.
 class Settings {
   static final Settings instance = Settings._();
   Settings._();
@@ -42,7 +43,20 @@ class Settings {
       final file = File('${dir.path}/config.pr');
       if (await file.exists()) {
         final enc = await file.readAsBytes();
-        final plain = ToolSec(masterKey).processBytes(enc);
+        Uint8List? plain;
+        bool needsMigration = false;
+        if (CryptoVault.isEnvelope(enc)) {
+          // Formato nuevo (AES-256-GCM). null = masterKey incorrecta.
+          plain = await CryptoVault.decrypt(enc, masterKey);
+        } else {
+          // Legado XOR: descifrar y marcar para migrar a V2 al guardar.
+          plain = ToolSec(masterKey).processBytes(enc);
+          needsMigration = true;
+        }
+        if (plain == null) {
+          print('Settings.load: envelope V2 no autenticado, defaults');
+          return;
+        }
         final map = jsonDecode(utf8.decode(plain)) as Map<String, dynamic>;
         mediaShowUri = map['mediaShowUri'] as bool? ?? false;
         if (map['accounts'] is Map) {
@@ -72,6 +86,10 @@ class Settings {
               .map((e) => Map<String, dynamic>.from(e))
               .toList();
         }
+        if (needsMigration) {
+          // Legado XOR -> re-guardar ya como envelope V2 (AES-GCM).
+          await save();
+        }
       }
     } catch (e) {
       // Archivo corrupto/ilegible: se quedan los defaults.
@@ -92,7 +110,8 @@ class Settings {
         'nostrKeys': nostrKeys,
       };
       final plain = utf8.encode(jsonEncode(map));
-      final enc = ToolSec(masterKey).processBytes(Uint8List.fromList(plain));
+      final enc =
+          await ToolSec(masterKey).processBytesStrong(Uint8List.fromList(plain));
       final dir = await getApplicationSupportDirectory();
       final file = File('${dir.path}/config.pr');
       await file.writeAsBytes(enc);

@@ -52,23 +52,9 @@ jobs:
         with:
           channel: stable
 
+      # Toolchain Rust mínima para codegen (cargo-expand la necesita);
+      # el build pesado de crates viene después del gate de análisis.
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-
-      - name: Set up Android SDK
-        if: matrix.target == 'android'
-        uses: android-actions/setup-android@v4
-
-      - name: Accept Android licenses and install NDK
-        if: matrix.target == 'android'
-        run: |
-          yes | sdkmanager --licenses > /dev/null 2>&1 || true
-          sdkmanager "ndk;27.0.12077973" > /dev/null 2>&1 || true
-
-      - name: Enable Windows desktop
-        if: matrix.target == 'windows'
-        run: flutter config --enable-windows-desktop
 
       # ------------------------------------------------------------- cache
       - name: Cache Dart pub packages
@@ -88,6 +74,12 @@ jobs:
           key: cargo-${{ runner.os }}-${{ hashFiles('rust/Cargo.toml') }}
           restore-keys: |
             cargo-${{ runner.os }}-
+
+      - name: Cache cargo-expand binary
+        uses: actions/cache@v5
+        with:
+          path: ~/.cargo/bin
+          key: cargo-bin-${{ runner.os }}-v1
 
       - name: Cache Gradle
         if: matrix.target == 'android'
@@ -122,23 +114,47 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force "$HOME\.local\bin" | Out-Null
-          Invoke-WebRequest -Uri "https://github.com/fzyzcjy/flutter_rust_bridge/releases/download/v2.12.0/flutter_rust_bridge_codegen-x86_64-pc-windows-msvc-v2.12.0.zip" -OutFile "$env:RUNNER_TEMP\frb.zip"
-          Expand-Archive -Path "$env:RUNNER_TEMP\frb.zip" -DestinationPath "$HOME\.local\bin" -Force
-          Add-Content -Path $env:GITHUB_PATH -Value "$HOME\.local\bin"
+          Invoke-WebRequest -Uri "https://github.com/fzyzcjy/flutter_rust_bridge/releases/download/v2.12.0/flutter_rust_bridge_codegen-x86_64-pc-windows-msvc-v2.12.0.zip" -OutFile "$env:RUNNER_TEMP/frb.zip"
+          Expand-Archive -Path "$env:RUNNER_TEMP/frb.zip" -DestinationPath "$HOME/.local/bin" -Force
+          Add-Content -Path $env:GITHUB_PATH -Value "$HOME/.local/bin"
 
       - name: Ensure codegen in PATH
         if: steps.codegen-cache.outputs.cache-hit == 'true'
         run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      # ------------------------------------------------------------- build
+      # --------------------------------------------------- dart + codegen
       - name: Fetch Dart packages
         run: flutter pub get
 
       - name: Install cargo-expand (needed by codegen)
-        run: cargo install cargo-expand
+        run: |
+          if ! command -v cargo-expand > /dev/null 2>&1; then
+            cargo install cargo-expand
+          fi
 
       - name: Generate Rust <-> Dart bindings
         run: flutter_rust_bridge_codegen generate
+
+      # FAIL FAST: análisis Dart ANTES del build pesado (NDK, wgpu, Gradle).
+      # Un error de sintaxis/tipos cuesta ~4 min en vez de 20+.
+      # Los warnings no cortan el build; solo los errores.
+      - name: Analyze Dart (fail fast)
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      # ------------------------------------------------------------- build
+      - name: Set up Android SDK
+        if: matrix.target == 'android'
+        uses: android-actions/setup-android@v4
+
+      - name: Accept Android licenses and install NDK
+        if: matrix.target == 'android'
+        run: |
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager "ndk;27.0.12077973" > /dev/null 2>&1 || true
+
+      - name: Enable Windows desktop
+        if: matrix.target == 'windows'
+        run: flutter config --enable-windows-desktop
 
       - name: Build ${{ matrix.target }}
         run: ${{ matrix.command }}
