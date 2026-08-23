@@ -85,10 +85,29 @@ Future<void> _initServiceChannel() async {
 
 Future<void> _initNotifications() async {
   try {
-    await NotificationService.init();
+    await NotificationService.init(onExitAction: _handleExitAction);
   } catch (e) {
     debugPrint('NotificationService init error: $e');
   }
+}
+
+/// Teardown completo del botón "Salir" de la notificación de servicio:
+/// detiene el FGS, espera a que muera y cancela TODAS las persistentes
+/// (servicio 888 + estado 777). La de medios queda si hay música.
+Future<void> _handleExitAction() async {
+  try {
+    await FlutterBackgroundService().invoke('stop');
+  } catch (e) {
+    debugPrint('invoke stop error: $e');
+  }
+  await Future.delayed(const Duration(milliseconds: 400));
+  try {
+    await NotificationService.plugin
+        .cancel(id: NotificationService.serviceNotificationId);
+  } catch (_) {}
+  try {
+    await StatusNotifier.instance.cancel();
+  } catch (_) {}
 }
 
 Future<void> _initBackgroundService() async {
@@ -109,6 +128,12 @@ Future<void> _initBackgroundService() async {
         onForeground: onServiceStart,
       ),
     );
+    // Postear UNA vez desde el isolate PRINCIPAL (con el botón "Salir")
+    // para pisar la notificación inicial del plugin, que sale sin acciones.
+    // IMPORTANTE: NO inicializar FLN dentro del isolate del servicio —
+    // eso le roba a la UI principal los callbacks de las acciones.
+    await Future.delayed(const Duration(milliseconds: 1200));
+    await NotificationService.showServiceNotification();
   } catch (e) {
     debugPrint('BackgroundService init error: $e');
   }
@@ -132,27 +157,8 @@ Future<void> _initColab() async {
 
 @pragma('vm:entry-point')
 Future<void> onServiceStart(ServiceInstance service) async {
+  // ÚNICA responsabilidad del isolate del servicio: escuchar la orden de
+  // parada. FLN NO se inicializa acá (si no, los taps/acciones de las
+  // notificaciones dejan de llegar al isolate principal).
   service.on('stop').listen((_) => service.stopSelf());
-
-  // Inicializar FLN en el isolate del servicio para poder sobreescribir la
-  // notificación en primer plano con un botón "Salir".
-  try {
-    await NotificationService.init();
-  } catch (e) {
-    debugPrint('FLN init en servicio: $e');
-  }
-
-  // El plugin puede reescribir su notificación (sin acción) después de
-  // onStart; por eso la repostimos una vez para asegurar el botón "Salir".
-  Future<void> post() async {
-    try {
-      await NotificationService.showServiceNotification();
-    } catch (e) {
-      debugPrint('showServiceNotification: $e');
-    }
-  }
-
-  await post();
-  await Future.delayed(const Duration(milliseconds: 1000));
-  await post();
 }

@@ -15,7 +15,9 @@ class NotificationService {
   /// el foregroundServiceNotificationId de flutter_background_service).
   static const serviceNotificationId = 888;
 
-  static Future<void> init() async {
+  static Future<void> init({
+    Future<void> Function()? onExitAction,
+  }) async {
     const androidSettings = AndroidInitializationSettings('ic_bg_service_small');
 
     const darwinSettings = DarwinInitializationSettings(
@@ -33,10 +35,16 @@ class NotificationService {
       settings: initSettings,
       onDidReceiveNotificationResponse: (NotificationResponse response) {
         if (response.actionId == 'exit') {
-          // Botón "Salir": detiene el servicio en primer plano y quita
-          // la notificación.
-          FlutterBackgroundService().invoke('stop');
-          _plugin.cancel(id: serviceNotificationId);
+          // Botón "Salir": detener el servicio en primer plano y limpiar
+          // TODAS las notificaciones persistentes (888 + estado 777).
+          // El teardown completo lo pasa el caller (bootstrap) porque ahí
+          // viven StatusNotifier/FlutterBackgroundService sin ciclos.
+          if (onExitAction != null) {
+            onExitAction();
+          } else {
+            FlutterBackgroundService().invoke('stop');
+            _plugin.cancel(id: serviceNotificationId);
+          }
         }
       },
     );
