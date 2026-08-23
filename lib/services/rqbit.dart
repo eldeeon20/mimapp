@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:flutter_rust_bridge/flutter_rust_bridge.dart' as frb;
+
 import '../src/rust/api/torrent/actions.dart' as t_act;
 import '../src/rust/api/torrent/add.dart' as t_add;
 import '../src/rust/api/torrent/detail.dart' as t_det;
@@ -135,5 +137,5 @@ class RqbitBridge {
   // Vec<usize> del lado Rust llega como Uint64List.
   static Future<void> setOnlyFiles(int id, List<int> files) =>
       t_act.torrentSetOnlyFiles(
-          id: id, files: Uint64List.fromList(files));
+          id: id, files: frb.Uint64List.fromList(files));
 }
