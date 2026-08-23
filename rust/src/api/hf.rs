@@ -1,28 +1,16 @@
 /// Cliente HuggingFace — portado de Gtool `hf_godot.rs` sin Godot.
 ///
-/// Subir/bajar archivos, crear/borrar repos, buscar modelos, rangos HTTP
-/// para leer porciones de archivos grandes (ej. checkpoints).
+/// Subir/bajar archivos, crear/borrar repos, buscar modelos y rangos HTTP.
+/// Patrón Gtool: match inline por tipo de repo en cada método (los tipos
+/// HFRepositorySync<RepoTypeX> son genéricos y no se pueden unificar).
 use std::path::PathBuf;
 
-use hf_hub::{HFClientBuilder, HFClientSync};
+use hf_hub::repository::AddSource;
+use hf_hub::{HFClientBuilder, HFClientSync, RepoTypeDataset, RepoTypeModel, RepoTypeSpace};
 
 #[flutter_rust_bridge::frb(opaque)]
 pub struct HfClient {
-    client: HFClientSync,
-}
-
-enum Rt {
-    Model,
-    Dataset,
-    Space,
-}
-
-fn parse_rt(repo_type: &str) -> Rt {
-    match repo_type.to_lowercase().as_str() {
-        "dataset" => Rt::Dataset,
-        "space" => Rt::Space,
-        _ => Rt::Model,
-    }
+    client: Option<HFClientSync>,
 }
 
 fn split_repo(repo_id: &str) -> (String, String) {
@@ -42,22 +30,13 @@ impl HfClient {
             b = b.token(token);
         }
         let client = b.build_sync().map_err(|e| format!("HF client error: {e:?}"))?;
-        Ok(HfClient { client })
+        Ok(HfClient { client: Some(client) })
     }
 
-    fn with_repo<T>(
-        &self,
-        repo_id: &str,
-        repo_type: &str,
-        f: impl Fn(&hf_hub::repository::Repository) -> Result<T, hf_hub::RepoError>,
-    ) -> Result<T, String> {
-        let (ns, name) = split_repo(repo_id);
-        let r = match parse_rt(repo_type) {
-            Rt::Dataset => self.client.dataset(&ns, &name),
-            Rt::Space => self.client.space(&ns, &name),
-            Rt::Model => self.client.model(&ns, &name),
-        };
-        f(&r).map_err(|e| format!("HF op failed: {e:?}"))
+    fn require(&self) -> Result<HFClientSync, String> {
+        self.client
+            .clone()
+            .ok_or_else(|| "HfClient no inicializado".to_string())
     }
 
     /// Sube un archivo local al repo (requiere token con permiso write).
@@ -69,16 +48,36 @@ impl HfClient {
         commit_message: String,
         repo_type: String,
     ) -> Result<(), String> {
+        let client = self.require()?;
+        let (namespace, name) = split_repo(&repo_id);
         let bytes = std::fs::read(&local_file_path)
             .map_err(|e| format!("no se pudo leer {local_file_path}: {e:?}"))?;
-        self.with_repo(&repo_id, &repo_type, |r| {
-            r.upload_file()
-                .source(hf_hub::repository::AddSource::bytes(bytes.clone()))
-                .path_in_repo(path_in_repo.clone())
-                .commit_message(commit_message.clone())
-                .send()
-                .map(|_| ())
-        })
+
+        match repo_type.to_lowercase().as_str() {
+            "dataset" => client
+                .dataset(&namespace, &name)
+                .upload_file()
+                .source(AddSource::bytes(bytes))
+                .path_in_repo(path_in_repo)
+                .commit_message(commit_message)
+                .send(),
+            "space" => client
+                .space(&namespace, &name)
+                .upload_file()
+                .source(AddSource::bytes(bytes))
+                .path_in_repo(path_in_repo)
+                .commit_message(commit_message)
+                .send(),
+            _ => client
+                .model(&namespace, &name)
+                .upload_file()
+                .source(AddSource::bytes(bytes))
+                .path_in_repo(path_in_repo)
+                .commit_message(commit_message)
+                .send(),
+        }
+        .map(|_| ())
+        .map_err(|e| format!("upload falló ({repo_id}): {e:?}"))
     }
 
     /// Descarga un archivo del repo a local_dir; retorna el path final.
@@ -89,16 +88,35 @@ impl HfClient {
         local_dir: String,
         repo_type: String,
     ) -> Result<String, String> {
-        let path = self.with_repo(&repo_id, &repo_type, |r| {
-            r.download_file()
-                .filename(filename.clone())
-                .local_dir(PathBuf::from(local_dir.clone()))
-                .send()
-        })?;
+        let client = self.require()?;
+        let (namespace, name) = split_repo(&repo_id);
+        let dir = PathBuf::from(local_dir);
+
+        let path = match repo_type.to_lowercase().as_str() {
+            "dataset" => client
+                .dataset(&namespace, &name)
+                .download_file()
+                .filename(filename)
+                .local_dir(dir)
+                .send(),
+            "space" => client
+                .space(&namespace, &name)
+                .download_file()
+                .filename(filename)
+                .local_dir(dir)
+                .send(),
+            _ => client
+                .model(&namespace, &name)
+                .download_file()
+                .filename(filename)
+                .local_dir(dir)
+                .send(),
+        }
+        .map_err(|e| format!("download falló ({repo_id}/{filename}): {e:?}"))?;
+
         Ok(path.to_string_lossy().to_string())
     }
 
-    /// Baja un RANGO de bytes: usar la función libre `hf_download_file_range`.
     /// Borra un archivo del repo.
     pub fn delete_file(
         &self,
@@ -106,59 +124,99 @@ impl HfClient {
         path_in_repo: String,
         repo_type: String,
     ) -> Result<(), String> {
-        self.with_repo(&repo_id, &repo_type, |r| {
-            r.delete_file()
-                .path_in_repo(path_in_repo.clone())
-                .send()
-                .map(|_| ())
-        })
+        let client = self.require()?;
+        let (namespace, name) = split_repo(&repo_id);
+
+        match repo_type.to_lowercase().as_str() {
+            "dataset" => client
+                .dataset(&namespace, &name)
+                .delete_file()
+                .path_in_repo(path_in_repo)
+                .send(),
+            "space" => client
+                .space(&namespace, &name)
+                .delete_file()
+                .path_in_repo(path_in_repo)
+                .send(),
+            _ => client
+                .model(&namespace, &name)
+                .delete_file()
+                .path_in_repo(path_in_repo)
+                .send(),
+        }
+        .map(|_| ())
+        .map_err(|e| format!("delete_file falló ({repo_id}): {e:?}"))
     }
 
-    /// Borra un repositorio entero (peligroso).
+    /// Borra un repositorio entero (peligroso). missing_ok: no falla si no existe.
     pub fn delete_repository(&self, repo_id: String, repo_type: String) -> Result<(), String> {
-        let rt = match parse_rt(&repo_type) {
-            Rt::Dataset => hf_hub::RepoType::Dataset,
-            Rt::Space => hf_hub::RepoType::Space,
-            Rt::Model => hf_hub::RepoType::Model,
+        let client = self.require()?;
+        let res = match repo_type.to_lowercase().as_str() {
+            "dataset" => client
+                .delete_repository()
+                .repo_type(RepoTypeDataset)
+                .repo_id(repo_id.clone())
+                .missing_ok(true)
+                .send(),
+            "space" => client
+                .delete_repository()
+                .repo_type(RepoTypeSpace)
+                .repo_id(repo_id.clone())
+                .missing_ok(true)
+                .send(),
+            _ => client
+                .delete_repository()
+                .repo_type(RepoTypeModel)
+                .repo_id(repo_id.clone())
+                .missing_ok(true)
+                .send(),
         };
-        self.client
-            .delete_repository()
-            .repo_type(rt)
-            .repo_id(repo_id.clone())
-            .missing_ok(true)
-            .send()
+        res.map(|_| ())
             .map_err(|e| format!("delete_repository falló ({repo_id}): {e:?}"))
     }
 
-    /// Crea un repositorio (exist_ok).
+    /// Crea un repositorio (exist_ok: no falla si ya existe).
     pub fn create_repository(
         &self,
         repo_id: String,
         repo_type: String,
         private: bool,
     ) -> Result<(), String> {
-        let rt = match parse_rt(&repo_type) {
-            Rt::Dataset => hf_hub::RepoType::Dataset,
-            Rt::Space => hf_hub::RepoType::Space,
-            Rt::Model => hf_hub::RepoType::Model,
+        let client = self.require()?;
+        let res = match repo_type.to_lowercase().as_str() {
+            "dataset" => client
+                .create_repository()
+                .repo_type(RepoTypeDataset)
+                .repo_id(repo_id.clone())
+                .private(private)
+                .exist_ok(true)
+                .send(),
+            "space" => client
+                .create_repository()
+                .repo_type(RepoTypeSpace)
+                .repo_id(repo_id.clone())
+                .private(private)
+                .exist_ok(true)
+                .send(),
+            _ => client
+                .create_repository()
+                .repo_type(RepoTypeModel)
+                .repo_id(repo_id.clone())
+                .private(private)
+                .exist_ok(true)
+                .send(),
         };
-        self.client
-            .create_repository()
-            .repo_type(rt)
-            .repo_id(repo_id.clone())
-            .private(private)
-            .exist_ok(true)
-            .send()
+        res.map(|_| ())
             .map_err(|e| format!("create_repository falló ({repo_id}): {e:?}"))
     }
 
     /// Busca modelos de un autor → ids ("autor/modelo").
     pub fn search_models(&self, author: String, limit: i64) -> Result<Vec<String>, String> {
-        let models = self
-            .client
+        let client = self.require()?;
+        let models = client
             .list_models()
             .author(author)
-            .limit(limit.max(1) as usize)
+            .limit(limit.clamp(1, 100) as usize)
             .send()
             .map_err(|e| format!("search_models falló: {e:?}"))?;
         Ok(models.into_iter().map(|m| m.id).collect())
@@ -166,21 +224,38 @@ impl HfClient {
 
     /// ¿Existe el repo?
     pub fn repo_exists(&self, repo_id: String, repo_type: String) -> bool {
-        self.with_repo(&repo_id, &repo_type, |r| r.exists().send())
-            .unwrap_or(false)
+        let Ok(client) = self.require() else { return false };
+        let (namespace, name) = split_repo(&repo_id);
+        let res = match repo_type.to_lowercase().as_str() {
+            "dataset" => client.dataset(&namespace, &name).exists().send(),
+            "space" => client.space(&namespace, &name).exists().send(),
+            _ => client.model(&namespace, &name).exists().send(),
+        };
+        res.unwrap_or(false)
     }
 
     /// ¿Existe un archivo dentro del repo?
-    pub fn file_exists(
-        &self,
-        repo_id: String,
-        filename: String,
-        repo_type: String,
-    ) -> bool {
-        self.with_repo(&repo_id, &repo_type, |r| {
-            r.file_exists().filename(filename.clone()).send()
-        })
-        .unwrap_or(false)
+    pub fn file_exists(&self, repo_id: String, filename: String, repo_type: String) -> bool {
+        let Ok(client) = self.require() else { return false };
+        let (namespace, name) = split_repo(&repo_id);
+        let res = match repo_type.to_lowercase().as_str() {
+            "dataset" => client
+                .dataset(&namespace, &name)
+                .file_exists()
+                .filename(filename)
+                .send(),
+            "space" => client
+                .space(&namespace, &name)
+                .file_exists()
+                .filename(filename)
+                .send(),
+            _ => client
+                .model(&namespace, &name)
+                .file_exists()
+                .filename(filename)
+                .send(),
+        };
+        res.unwrap_or(false)
     }
 
     /// Lista archivos del repo (recursive opcional).
@@ -190,9 +265,28 @@ impl HfClient {
         recursive: bool,
         repo_type: String,
     ) -> Result<Vec<String>, String> {
-        let entries = self.with_repo(&repo_id, &repo_type, |r| {
-            r.list_tree().recursive(recursive).send()
-        })?;
+        let client = self.require()?;
+        let (namespace, name) = split_repo(&repo_id);
+
+        let entries = match repo_type.to_lowercase().as_str() {
+            "dataset" => client
+                .dataset(&namespace, &name)
+                .list_tree()
+                .recursive(recursive)
+                .send(),
+            "space" => client
+                .space(&namespace, &name)
+                .list_tree()
+                .recursive(recursive)
+                .send(),
+            _ => client
+                .model(&namespace, &name)
+                .list_tree()
+                .recursive(recursive)
+                .send(),
+        }
+        .map_err(|e| format!("list_repo_files falló ({repo_id}): {e:?}"))?;
+
         Ok(entries
             .into_iter()
             .map(|entry| match entry {
@@ -204,7 +298,7 @@ impl HfClient {
 }
 
 /// Baja un RANGO de bytes de un archivo grande (HTTP Range directo).
-/// No requiere cliente inicializado; usa el token pasado.
+/// No requiere cliente inicializado ni login (token opcional).
 #[flutter_rust_bridge::frb]
 pub fn hf_download_file_range(
     repo_id: String,
@@ -214,36 +308,25 @@ pub fn hf_download_file_range(
     token: String,
     repo_type: String,
 ) -> Result<Vec<u8>, String> {
-    range_download(repo_id, filename, start, end, token, repo_type)
-}
-
-fn range_download(
-    repo_id: String,
-    filename: String,
-    start: i64,
-    end: i64,
-    token: String,
-    repo_type: String,
-) -> Result<Vec<u8>, String> {
-    let base_url = match parse_rt(&repo_type) {
-        Rt::Dataset => "https://huggingface.co/datasets",
-        Rt::Space => "https://huggingface.co/spaces",
-        Rt::Model => "https://huggingface.co",
+    let base_url = match repo_type.to_lowercase().as_str() {
+        "dataset" => "https://huggingface.co/datasets",
+        "space" => "https://huggingface.co/spaces",
+        _ => "https://huggingface.co",
     };
-    let url = format!("{}/{}/resolve/main/{}", base_url, repo_id, filename);
+    let url = format!("{base_url}/{repo_id}/resolve/main/{filename}");
 
     let mut req = reqwest::blocking::Client::builder()
         .user_agent("pr_app-hf/1.0")
         .build()
         .map_err(|e| format!("{e:?}"))?
         .get(&url)
-        .header("Range", format!("bytes={}-{}", start, end));
+        .header("Range", format!("bytes={start}-{end}"));
     if !token.is_empty() {
-        req = req.header("Authorization", format!("Bearer {}", token));
+        req = req.header("Authorization", format!("Bearer {token}"));
     }
     let response = req.send().map_err(|e| format!("request failed: {e:?}"))?;
     if !response.status().is_success() {
-        return Err(format!("HTTP {} en {}", response.status(), url));
+        return Err(format!("HTTP {} en {url}", response.status()));
     }
     let data = response.bytes().map_err(|e| format!("read failed: {e:?}"))?;
     Ok(data.to_vec())

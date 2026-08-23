@@ -5,10 +5,16 @@ import '../colab_cli/colab_dialog.dart';
 import '../lua/lua_page.dart';
 import '../media/media_player.dart';
 import '../screens/ai_screen.dart';
+import '../screens/hf_test_screen.dart';
+import '../screens/kem_test_screen.dart';
 import '../screens/media_screen.dart';
+import '../screens/nostr_dm_test_screen.dart';
+import '../screens/nostr_peer_test_screen.dart';
 import '../screens/settings_screen.dart';
+import '../screens/shamir_test_screen.dart';
 import '../toolsec/toolsec_dialog.dart';
 import 'widgets/bottom_bar.dart';
+import 'widgets/radial_menu.dart';
 
 /// App principal: tema oscuro + HomePage.
 class PrApp extends StatelessWidget {
@@ -84,6 +90,43 @@ class _HomePageState extends State<HomePage> {
     ));
   }
 
+  void _openRadialMenu(BuildContext context) {
+    showDialog(
+      context: context,
+      barrierColor: Colors.transparent,
+      useSafeArea: false,
+      builder: (_) => Dialog.fullscreen(
+        backgroundColor: Colors.transparent,
+        child: RadialMenu(onSelect: (key) {
+          switch (key) {
+            case 'dm':
+              _openTest(context, 'Nostr DM (sin observador)',
+                  const NostrDmTestScreen());
+            case 'obs':
+              _openTest(
+                  context, 'Nostr con observador', const NostrPeerTestScreen());
+            case 'shamir':
+              _openTest(context, 'Shamir Secret Sharing',
+                  const ShamirTestScreen());
+            case 'kem':
+              _openTest(context, 'KEM post-cuántico', const KemTestScreen());
+            case 'hf':
+              _openTest(context, 'HuggingFace', const HfTestScreen());
+          }
+        }),
+      ),
+    );
+  }
+
+  void _openTest(BuildContext context, String title, Widget child) {
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => Scaffold(
+        appBar: AppBar(title: Text(title)),
+        body: SafeArea(child: child),
+      ),
+    ));
+  }
+
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
@@ -143,9 +186,11 @@ class _HomePageState extends State<HomePage> {
 
             Expanded(
               child: Center(
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
+                child: GestureDetector(
+                  onTap: () => _openRadialMenu(context),
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
                     Container(
                       width: size.width * .70,
                       height: size.width * .70,
@@ -255,10 +300,12 @@ class _HomePageState extends State<HomePage> {
                               color: Color(0xFFB57CFF),
                             ),
                           ),
+                          ),
                         ],
                       ),
                     ),
                   ],
+                ),
                 ),
               ),
             ),

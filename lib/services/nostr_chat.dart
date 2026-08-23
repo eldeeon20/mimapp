@@ -9,16 +9,21 @@ class NostrChat {
 
   bool get connected => _client != null;
 
-  /// nsec vacío = genera identidad nueva.
-  /// [nSeconds]/[nLimit] definen la ventana de búsqueda al suscribirse.
+  /// nsec vacío = genera identidad nueva. Los relays se agregan ANTES de
+  /// suscribirse (requisito del cliente). [nSeconds]/[nLimit] definen la
+  /// ventana de búsqueda al suscribirse.
   Future<void> init({
     String? nsec,
     required String peerNpub,
+    List<String> dmRelays = const [],
     int nSeconds = 3600,
     int nLimit = 10,
   }) async {
     await close();
     final c = await NostrDm(nsec: nsec, peerNpub: peerNpub);
+    if (dmRelays.isNotEmpty) {
+      await c.addRelays(dmRelays: dmRelays);
+    }
     await c.subscribe(nSeconds: nSeconds, nLimit: nLimit);
     _client = c;
   }
