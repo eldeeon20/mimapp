@@ -382,16 +382,17 @@ impl GestionNostrn {
             md.about = Some(about.to_string());
         }
         if !picture.is_empty() {
-            md.picture = Some(
-                Url::parse(picture).map_err(|e| anyhow!("URL de foto inválida: {e:?}"))?,
-            );
+            // validamos que sea URL bien formada; el campo guarda String
+            let _ = Url::parse(picture)
+                .map_err(|e| anyhow!("URL de foto inválida: {e:?}"))?;
+            md.picture = Some(picture.to_string());
         }
         if md == Metadata::new() {
             return Err(anyhow!("todo vacío: no hay nada que publicar"));
         }
         let logs = self.logs.clone();
         self.runtime.block_on(async {
-            self.client.set_metadata(md).await.context("set_metadata")?;
+            self.client.set_metadata(&md).await.context("set_metadata")?;
             logs.push("✓ perfil kind 0 publicado".to_string());
             Ok::<(), anyhow::Error>(())
         })?;
