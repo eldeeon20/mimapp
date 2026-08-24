@@ -10,6 +10,7 @@ import 'gui_rect.dart';
 import 'gui_rect_image.dart';
 import 'gui_scroll.dart';
 import 'gui_spacer.dart';
+import 'gui_style_button.dart';
 import 'gui_text.dart';
 import 'gui_text_edit.dart';
 import 'gui_video.dart';

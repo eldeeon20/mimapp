@@ -17,8 +17,8 @@ class IpfsService {
   bool gatewayEnabled = false;
   String lastError = '';
 
-  /// cid-string -> objeto CID que devolvió addFile (necesario para get/pin).
-  final Map<String, Object> _cidObjects = {};
+  /// cid-string -> cid-string (get/pin del nodo aceptan String).
+  final Map<String, String> _cidObjects = {};
 
   bool get running => _node != null;
   List<String> get localCids => _cidObjects.keys.toList();
@@ -71,7 +71,7 @@ class IpfsService {
     final bytes = await f.readAsBytes();
     final cid = await node.addFile(bytes);
     final s = '$cid'.trim();
-    _cidObjects[s] = cid;
+    _cidObjects[s] = s;
     return s;
   }
 
