@@ -394,6 +394,10 @@ end
     for (var i = 1; i <= count; i++) {
       _lua.getI(-1, i);
       try {
+        if (!_lua.isTable(-1)) {
+          final t = _lua.isNil(-1) ? 'nil' : _lua.typeName2(-1);
+          throw Exception('esperaba tabla, hay $t');
+        }
         body.add(GuiNode.fromMap(_readNodeMap()));
       } catch (e) {
         throw Exception('nodo $i de page.body ilegible: $e');
@@ -442,12 +446,19 @@ end
       return null;
     }
     final lenObj = _field(-1, 'n') as num?;
-    final n = lenObj?.toInt() ?? _tableLength(-1);
+    final n = lenObj?.toInt() ?? _arrayLength(-1);
     final out = <Map<String, Object?>>[];
     for (var i = 1; i <= n; i++) {
       _lua.getI(-1, i);
-      if (_lua.isTable(-1)) {
+      try {
+        if (!_lua.isTable(-1)) {
+          final t = _lua.isNil(-1) ? 'nil' : _lua.typeName2(-1);
+          throw Exception('esperaba tabla, hay $t');
+        }
         out.add(_readNodeMap());
+      } catch (e) {
+        // Contexto exacto del nodo roto: children[i] dentro del padre.
+        throw Exception('children[$i]: $e');
       }
       _lua.pop(1);
     }
@@ -455,17 +466,20 @@ end
     return out;
   }
 
-  int _tableLength(int idx) {
-    // iteración con next() (lua_dardo no expone el operador #).
-    // OJO: hay que resolver el índice ANTES del pushNil — si se pasa un
-    // índice relativo (-1) después de apilar el nil, next() recibe el nil
-    // y lanza "table expected for iteration".
+  int _arrayLength(int idx) {
+    // Conteo SECUENCIAL con getI hasta el primer nil: SIN next().
+    // La iteración con next() lanzaba "table expected for iteration"
+    // ante cualquier hueco/índice mal resuelto y tiraba abajo la carga
+    // de la página entera (crash "nodo 9"). Con getI un nil simplemente
+    // termina el conteo.
     final abs = idx < 0 ? _lua.getTop() + idx + 1 : idx;
     var n = 0;
-    _lua.pushNil();
-    while (_lua.next(abs) != 0) {
-      n++;
+    while (n < 4096) {
+      _lua.getI(abs, n + 1);
+      final fin = _lua.isNil(-1);
       _lua.pop(1);
+      if (fin) break;
+      n++;
     }
     return n;
   }
