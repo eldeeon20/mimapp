@@ -24,16 +24,25 @@ class IpfsService {
   List<String> get localCids => _cidObjects.keys.toList();
 
   /// Inicia el nodo offline; [gateway] habilita el HTTP gateway en :8080.
+  ///
+  /// OJO: blockStorePath/keystorePath tienen defaults RELATIVOS ('blocks',
+  /// './ipfs_keystore') que dart_ipfs resuelve contra el CWD de Android
+  /// (read-only, errno=30). TODOS los paths van anclados absolutos acá.
   Future<String> start({bool gateway = false}) async {
     if (_node != null) return 'ya está corriendo';
     try {
       final dir = await getApplicationSupportDirectory();
-      final dataPath = '${dir.path}/ipfs_data';
-      await Directory(dataPath).create(recursive: true);
+      final base = '${dir.path}/ipfs_data';
+      for (final sub in ['', '/datastore', '/keystore', '/blocks']) {
+        await Directory('$base$sub').create(recursive: true);
+      }
       gatewayEnabled = gateway;
       final config = IPFSConfig(
         offline: true,
-        dataPath: dataPath,
+        dataPath: base,
+        datastorePath: '$base/datastore',
+        keystorePath: '$base/keystore',
+        blockStorePath: '$base/blocks',
         debug: false,
         verboseLogging: false,
         gateway: GatewayConfig(enabled: gateway, port: 8080),

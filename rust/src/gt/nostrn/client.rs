@@ -239,6 +239,12 @@ impl NostrClient {
                         match &notification {
                             RelayPoolNotification::Event { relay_url, event, .. } => {
                                 event_count += 1;
+                                // Gtool anotaba TODOS los eventos; sin esta
+                                // línea el log calla y parece que no consulta.
+                                self.logs.push(format!(
+                                    "ev kind {} vía {}",
+                                    event.kind,
+                                    relay_url.as_str()));
                                 if event.kind == Kind::GiftWrap {
                                     giftwrap_count += 1;
                                     match self.client.unwrap_gift_wrap(&event).await {
@@ -290,12 +296,13 @@ impl NostrClient {
             self.logs.push("✗ poll sin receiver: ¿llamaste a subscribe()?");
             return Err(anyhow!("sin receiver de notificaciones"));
         }
-        if !messages.is_empty() || giftwrap_count > 0 || unwrap_errors > 0 {
-            self.logs.push(format!(
-                "poll: {event_count} eventos · {giftwrap_count} giftwraps ·                  {unwrap_errors} fallos · {} válidos",
-                messages.len()
-            ));
-        }
+        // Resumen SIEMPRE (igual que el [DEBUG] Resumen de Gtool): si solo
+        // logueamos cuando hay algo, un tick vacío es indistinguible de un
+        // cliente muerto.
+        self.logs.push(format!(
+            "poll: {event_count} eventos · {giftwrap_count} giftwraps · {unwrap_errors} fallos · {} válidos",
+            messages.len()
+        ));
 
         Ok(messages)
     }
