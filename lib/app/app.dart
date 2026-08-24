@@ -21,6 +21,7 @@ import '../screens/ring_signatures_test_screen.dart';
 import '../screens/ring_vote_test_screen.dart';
 import '../screens/settings_screen.dart';
 import '../screens/shamir_test_screen.dart';
+import '../screens/nostr_busca_screen.dart';
 import '../screens/unarc_test_screen.dart';
 import '../toolsec/toolsec_dialog.dart';
 import 'widgets/bottom_bar.dart';
@@ -151,6 +152,8 @@ class _HomePageState extends State<HomePage> {
               _openTest(context, 'IPFS', const IpfsTestScreen());
             case 'ua':
               _openTest(context, 'Unarc · RAR/7z/ZIP', const UnarcTestScreen());
+            case 'ub':
+              _openTest(context, 'Nostr Busca', const NostrBuscaScreen());
           }
         }),
       ),
