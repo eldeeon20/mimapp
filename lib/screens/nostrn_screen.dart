@@ -115,20 +115,24 @@ class _NostrnScreenState extends State<NostrnScreen> {
             dmRelays: _csv(_dmRelaysCtrl), readRelays: _csv(_readRelaysCtrl));
         await g.subscribe(nSeconds: 3600, nLimit: 20);
         setState(() => _gestion = g);
-        _logs();
+        await _logs();
         _say('conectado · bandeja escuchando');
       });
 
-  void _logs() {
-    final l = _gestion?.takeLogs() ?? const [];
-    if (l.isNotEmpty) debugPrint('nostrn+: ${l.join(' | ')}');
+  Future<void> _logs() async {
+    try {
+      final l = await _gestion?.takeLogs();
+      if (l != null && l.isNotEmpty) {
+        debugPrint('nostrn+: ${l.join(' | ')}');
+      }
+    } catch (_) {}
   }
 
   Future<void> _poll() => _guard(() async {
         final g = _gestion;
         if (g == null) return _say('conectá primero');
         final items = await g.pollBandeja();
-        _logs();
+        await _logs();
         setState(() => _bandeja.insertAll(0, items));
         _say(items.isEmpty ? 'bandeja vacía' : '${items.length} mensaje(s) nuevo(s)');
       });
