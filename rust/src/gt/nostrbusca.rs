@@ -49,7 +49,7 @@ fn parsear_npub(npub: &str) -> Result<PublicKey> {
 
 fn metadata_a_perfil(ev: &Event) -> Result<Perfil> {
     let md =
-        Metadata::from_json(ev.content).context("kind 0 con JSON ilegible")?;
+        Metadata::from_json(ev.content.clone()).context("kind 0 con JSON ilegible")?;
     Ok(Perfil {
         npub: ev.pubkey.to_bech32().unwrap_or_default(),
         name: md.name.unwrap_or_default(),
