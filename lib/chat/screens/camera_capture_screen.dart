@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../models.dart';
@@ -131,11 +130,9 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
           duracion: Duration(seconds: _segundos),
         ));
       } else {
-        final dir = await getTemporaryDirectory();
-        await ctrl.startVideoRecording(
-          filePath:
-              '${dir.path}/VID_${DateTime.now().millisecondsSinceEpoch}.mp4',
-        );
+        // camera 0.11: graba a un archivo temporal de la plataforma;
+        // la ruta real llega en el XFile de stopVideoRecording().
+        await ctrl.startVideoRecording();
         setState(() {
           _grabando = true;
           _segundos = 0;

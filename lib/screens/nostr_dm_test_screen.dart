@@ -316,7 +316,7 @@ class _DmPaneState extends State<_DmPane> {
           const SizedBox(height: 6),
           Wrap(
             spacing: 4,
-            children: defaultRelays
+            children: [...defaultDmRelays, ...defaultReadRelays]
                 .map((r) => Chip(
                       label: Text(r.replaceAll('wss://', ''),
                           style: const TextStyle(fontSize: 8)),

@@ -12,6 +12,7 @@ import '../screens/filosoia_screen.dart';
 import '../agents/agent_manager.dart';
 import '../screens/gpu_test_screen.dart';
 import '../screens/hf_test_screen.dart';
+import '../screens/ipfs_test_screen.dart';
 import '../screens/kem_test_screen.dart';
 import '../screens/media_screen.dart';
 import '../screens/nostr_dm_test_screen.dart';
@@ -20,6 +21,7 @@ import '../screens/ring_signatures_test_screen.dart';
 import '../screens/ring_vote_test_screen.dart';
 import '../screens/settings_screen.dart';
 import '../screens/shamir_test_screen.dart';
+import '../screens/unarc_test_screen.dart';
 import '../toolsec/toolsec_dialog.dart';
 import 'widgets/bottom_bar.dart';
 import 'widgets/radial_menu.dart';
@@ -145,6 +147,10 @@ class _HomePageState extends State<HomePage> {
                   context, 'Nostringer · Firmas Ring', const RingSignaturesTestScreen());
             case 'rv':
               _openTest(context, 'Voto anónimo BLSAG', const RingVoteTestScreen());
+            case 'ip':
+              _openTest(context, 'IPFS local (offline)', const IpfsTestScreen());
+            case 'ua':
+              _openTest(context, 'Unarc · RAR/7z/ZIP', const UnarcTestScreen());
           }
         }),
       ),

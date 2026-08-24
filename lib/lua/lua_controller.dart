@@ -98,6 +98,9 @@ gui_link = function(p)
   return gui_add("button", { text = p.text or href, on_click = "__nav__ " .. href })
 end
 
+-- botón custom con gradiente + icono (Material por nombre)
+gui_style_button = function(p) return gui_add("style_button", p) end
+
 -- imagen con pinch-zoom
 gui_zoom_image = function(p) return gui_add("zoom_image", p) end
 
@@ -407,7 +410,7 @@ end
     final m = <String, Object?>{};
     for (final k in [
       'type', 'id', 'bind', 'text', 'label', 'value', 'on_click', 'align',
-      'color', 'bg_color', 'border_color', 'src', 'fit', 'href',
+      'color', 'bg_color', 'border_color', 'src', 'fit', 'href', 'icon',
     ]) {
       final v = _field(-1, k);
       if (v != null) m[k] = v;

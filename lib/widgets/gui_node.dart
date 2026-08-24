@@ -6,6 +6,7 @@ import 'gui_rect.dart';
 import 'gui_rect_image.dart';
 import 'gui_scroll.dart';
 import 'gui_spacer.dart';
+import 'gui_style_button.dart';
 import 'gui_text.dart';
 import 'gui_text_edit.dart';
 import 'gui_video.dart';
@@ -42,6 +43,7 @@ abstract class GuiNode {
     final t = (m['type'] as String?) ?? 'text';
     return switch (t) {
       'button' => GuiButton.fromMap(m),
+      'style_button' => GuiStyleButton.fromMap(m),
       'input' || 'text_edit' || 'textfield' => GuiTextEdit.fromMap(m),
       'heading' => GuiText.fromMap(m, heading: true),
       'rect' || 'card' => GuiRect.fromMap(m),

@@ -30,6 +30,8 @@ class GuiRenderer {
       GuiText() => _text(context, node as GuiText, values),
       GuiTextEdit() => _textEdit(node as GuiTextEdit, values, onInput),
       GuiButton() => _button(context, node as GuiButton, onAction),
+      GuiStyleButton() =>
+        _styleButton(context, node as GuiStyleButton, onAction),
       GuiRect() => _rect(context, node as GuiRect,
           values: values,
           onInput: onInput,
@@ -134,6 +136,90 @@ class GuiRenderer {
                   fontWeight: s.font!.bold ? FontWeight.bold : null,
                 )
               : const TextStyle(fontWeight: FontWeight.bold),
+        ),
+      ),
+    );
+    return _applyLayout(n, child);
+  }
+
+  // ---------------------------------------------------------- style button
+
+  /// Iconos Material disponibles por nombre desde Lua.
+  static const _icons = <String, IconData>{
+    'star': Icons.star_rounded,
+    'lock': Icons.lock_rounded,
+    'key': Icons.key_rounded,
+    'bolt': Icons.bolt_rounded,
+    'play': Icons.play_arrow_rounded,
+    'chat': Icons.chat_rounded,
+    'search': Icons.search_rounded,
+    'settings': Icons.settings_rounded,
+    'fingerprint': Icons.fingerprint_rounded,
+    'memory': Icons.memory_rounded,
+    'hub': Icons.hub_rounded,
+    'brain': Icons.psychology_rounded,
+    'eye': Icons.visibility_rounded,
+    'split': Icons.call_split_rounded,
+    'download': Icons.download_rounded,
+    'upload': Icons.upload_rounded,
+    'refresh': Icons.refresh_rounded,
+    'close': Icons.close_rounded,
+    'add': Icons.add_rounded,
+    'delete': Icons.delete_outline_rounded,
+    'home': Icons.home_rounded,
+    'tab': Icons.tab_rounded,
+    'link': Icons.link_rounded,
+    'share': Icons.share_rounded,
+    'copy': Icons.copy_rounded,
+    'send': Icons.send_rounded,
+    'stop': Icons.stop_circle_rounded,
+    'image': Icons.image_rounded,
+    'folder': Icons.folder_open_rounded,
+    'shield': Icons.shield_rounded,
+  };
+
+  static Widget _styleButton(
+    BuildContext context,
+    GuiStyleButton n,
+    void Function(String) onAction,
+  ) {
+    final s = n.style;
+    final t = LuaTheme.instance;
+    final custom = s.color != null ? _color(s.color, Colors.transparent) : null;
+    final icon = n.icon.isEmpty ? null : _icons[n.icon.toLowerCase()];
+    final child = DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: custom == null
+            ? LinearGradient(colors: [
+                _color(t.primary, Colors.deepPurple)!,
+                _color(t.accent, Colors.cyanAccent)!,
+              ])
+            : null,
+        color: custom,
+        borderRadius: BorderRadius.circular(t.radius),
+        boxShadow: const [
+          BoxShadow(color: Colors.black26, blurRadius: 8, offset: Offset(0, 3)),
+        ],
+      ),
+      child: FilledButton.icon(
+        onPressed: s.onClick == null ? null : () => onAction(s.onClick!),
+        style: FilledButton.styleFrom(
+          backgroundColor: Colors.transparent,
+          shadowColor: Colors.transparent,
+          foregroundColor: s.font?.color != null
+              ? _color(s.font!.color, Colors.white)
+              : Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(t.radius),
+          ),
+        ),
+        icon: icon != null ? Icon(icon, size: 18) : const SizedBox.shrink(),
+        label: Text(
+          s.text,
+          style: TextStyle(
+            fontSize: s.font?.size,
+            fontWeight: FontWeight.bold,
+          ),
         ),
       ),
     );

@@ -38,6 +38,10 @@ class _RadialMenuState extends State<RadialMenu>
         color: Colors.lightGreenAccent),
     (key: 'rv', label: 'Voto BLSAG', icon: Icons.how_to_vote_rounded,
         color: Colors.green),
+    (key: 'ip', label: 'IPFS', icon: Icons.hub_rounded,
+        color: Colors.tealAccent),
+    (key: 'ua', label: 'Unarc', icon: Icons.folder_zip_rounded,
+        color: Colors.blueAccent),
   ];
 
   /// Botón central: abre las firmas ring de Nostringer.
