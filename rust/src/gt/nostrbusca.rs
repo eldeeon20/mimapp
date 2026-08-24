@@ -51,7 +51,7 @@ fn metadata_a_perfil(ev: &Event) -> Result<Perfil> {
     let md =
         Metadata::from_json(ev.content).context("kind 0 con JSON ilegible")?;
     Ok(Perfil {
-        npub: ev.author.to_bech32().unwrap_or_default(),
+        npub: ev.pubkey.to_bech32().unwrap_or_default(),
         name: md.name.unwrap_or_default(),
         display_name: md.display_name.unwrap_or_default(),
         about: md.about.unwrap_or_default(),
