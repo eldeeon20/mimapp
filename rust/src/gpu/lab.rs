@@ -76,5 +76,5 @@ pub fn run(
     );
     let raw = super::read_back(&device, &queue, &buffer, bytes.len() as u64)?;
     let ms = start.elapsed().as_secs_f64() * 1000.0;
-    Ok((super::bytes_to_f32(&raw, false), ms))
+    Ok((super::bytes_to_f32(&raw, false), ms, modo))
 }
