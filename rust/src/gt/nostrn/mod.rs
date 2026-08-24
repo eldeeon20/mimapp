@@ -39,7 +39,7 @@
 //! ```
 
 mod client;
-mod gestion;
+pub mod gestion;
 mod relays;
 
 pub use gestion::{
