@@ -145,22 +145,43 @@ pub fn pkarr_has_saved_key(dir: String) -> bool {
     Path::new(&keyfile_path(&dir)).exists()
 }
 
-/// Genera identidad nueva, la guarda CIFRADA con el PIN y devuelve pubkey.
+/// Identidad completa para mostrar en pantalla: pub (compartir) y
+/// secreto hex 64 chars (NUNCA compartir).
 #[flutter_rust_bridge::frb]
-pub fn pkarr_generate_encrypted(pin: String, dir: String) -> Result<String, String> {
+#[derive(Clone)]
+pub struct PkarrIdentidad {
+    pub pubkey: String,
+    pub secreto: String,
+}
+
+fn hex32(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Genera identidad nueva, la guarda CIFRADA con el PIN y devuelve
+/// pubkey + secreto.
+#[flutter_rust_bridge::frb]
+pub fn pkarr_generate_encrypted(pin: String, dir: String) -> Result<PkarrIdentidad, String> {
     let kp = Keypair::random();
     let s = kp.secret_key().to_vec();
     let mut secret = [0u8; 32];
     secret.copy_from_slice(&s);
     save_encrypted_secret(&dir, &pin, &secret)?;
-    Ok(kp.public_key().to_string())
+    Ok(PkarrIdentidad {
+        pubkey: kp.public_key().to_string(),
+        secreto: hex32(&secret),
+    })
 }
 
-/// Descifra la clave guardada con ese PIN; devuelve la pubkey zbase32.
+/// Descifra la clave guardada con ese PIN; devuelve pubkey + secreto.
 #[flutter_rust_bridge::frb]
-pub fn pkarr_load_encrypted(pin: String, dir: String) -> Result<String, String> {
-    let kp = keypair_from_secret(&load_encrypted_secret(&dir, &pin)?)?;
-    Ok(kp.public_key().to_string())
+pub fn pkarr_load_encrypted(pin: String, dir: String) -> Result<PkarrIdentidad, String> {
+    let secret = load_encrypted_secret(&dir, &pin)?;
+    let kp = keypair_from_secret(&secret)?;
+    Ok(PkarrIdentidad {
+        pubkey: kp.public_key().to_string(),
+        secreto: hex32(&secret),
+    })
 }
 
 // ------------------------------------------------------------ API async

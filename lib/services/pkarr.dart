@@ -29,15 +29,18 @@ class Pkarr {
   /// ¿Hay identidad cifrada guardada en [dir]?
   Future<bool> hasSavedKey(String dir) => rust.pkarrHasSavedKey(dir: dir);
 
-  /// Genera identidad, la guarda cifrada con el PIN y devuelve pubkey.
-  Future<String> generateEncrypted({
+  /// Genera identidad, la guarda cifrada con el PIN y devuelve pub+sec.
+  Future<rust.PkarrIdentidad> generateEncrypted({
     required String pin,
     required String dir,
   }) =>
       rust.pkarrGenerateEncrypted(pin: pin, dir: dir);
 
-  /// Descifra la clave con el PIN; devuelve la pubkey zbase32.
-  Future<String> loadEncrypted({required String pin, required String dir}) =>
+  /// Descifra la clave con el PIN; devuelve pub+sec.
+  Future<rust.PkarrIdentidad> loadEncrypted({
+    required String pin,
+    required String dir,
+  }) =>
       rust.pkarrLoadEncrypted(pin: pin, dir: dir);
 
   /// Publica un TXT firmado con la identidad guardada.

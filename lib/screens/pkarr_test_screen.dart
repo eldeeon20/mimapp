@@ -25,6 +25,7 @@ class _PkarrTestScreenState extends State<PkarrTestScreen> {
   final _relaysCtrl = TextEditingController();
 
   String? _pubkey;
+  String? _secreto;
   bool _hasSavedKey = false;
   bool _busy = false;
   String _mode = 'both';
@@ -68,20 +69,24 @@ class _PkarrTestScreenState extends State<PkarrTestScreen> {
       (await getApplicationSupportDirectory()).path;
 
   Future<void> _generate() => _guard(() async {
-        final pk = await rust.pkarrGenerateEncrypted(
+        final id = await rust.pkarrGenerateEncrypted(
             pin: _pinCtrl.text, dir: await _dir);
         setState(() {
-          _pubkey = pk;
+          _pubkey = id.pubkey;
+          _secreto = id.secreto;
           _hasSavedKey = true;
         });
-        _say('generada y guardada CIFRADA · $pk');
+        _say('generada y guardada CIFRADA · pub y sec abajo');
       });
 
   Future<void> _load() => _guard(() async {
-        final pk =
+        final id =
             await rust.pkarrLoadEncrypted(pin: _pinCtrl.text, dir: await _dir);
-        setState(() => _pubkey = pk);
-        _say('clave descifrada OK · $pk');
+        setState(() {
+          _pubkey = id.pubkey;
+          _secreto = id.secreto;
+        });
+        _say('clave descifrada OK · pub y sec abajo');
       });
 
   Future<void> _publish() => _guard(() async {
@@ -160,18 +165,45 @@ class _PkarrTestScreenState extends State<PkarrTestScreen> {
           if (_pubkey != null)
             Padding(
               padding: const EdgeInsets.only(top: 8),
-              child: Row(children: [
-                Expanded(
-                    child: SelectableText(_pubkey!,
-                        style: const TextStyle(
-                            fontSize: 11, fontFamily: 'monospace'))),
-                IconButton(
-                  tooltip: 'Copiar pubkey',
-                  icon: const Icon(Icons.copy_rounded, size: 18),
-                  onPressed: () {
-                    Clipboard.setData(ClipboardData(text: _pubkey!));
-                  },
-                ),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('PUB · podés compartirla',
+                    style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.tealAccent)),
+                Row(children: [
+                  Expanded(
+                      child: SelectableText(_pubkey!,
+                          style: const TextStyle(
+                              fontSize: 11, fontFamily: 'monospace'))),
+                  IconButton(
+                    tooltip: 'Copiar pubkey',
+                    icon: const Icon(Icons.copy_rounded, size: 18),
+                    onPressed: () {
+                      Clipboard.setData(ClipboardData(text: _pubkey!));
+                    },
+                  ),
+                ]),
+                if (_secreto != null) ...[
+                  const Text('SEC · NUNCA compartir',
+                      style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.redAccent)),
+                  Row(children: [
+                    Expanded(
+                        child: SelectableText(_secreto!,
+                            style: const TextStyle(
+                                fontSize: 11, fontFamily: 'monospace'))),
+                    IconButton(
+                      tooltip: 'Copiar secreto',
+                      icon: const Icon(Icons.copy_rounded, size: 18),
+                      onPressed: () {
+                        Clipboard.setData(ClipboardData(text: _secreto!));
+                      },
+                    ),
+                  ]),
+                ],
               ]),
             ),
         ]),

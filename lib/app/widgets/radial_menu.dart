@@ -99,6 +99,9 @@ class _RadialMenuState extends State<RadialMenu>
               center: centro,
               hint: hint,
               onPick: (item) {
+                // ÚNICO pop de todo el flujo: cerrar el overlay del menú.
+                // Antes la capa también popeaba → doble pop → cuando no
+                // quedaba ruta Android cerraba la app entera.
                 Navigator.of(context).pop();
                 widget.onSelect(item.key);
               },

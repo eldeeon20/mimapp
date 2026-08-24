@@ -129,10 +129,7 @@ class RadialLayerView extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               InkWell(
-                onTap: () {
-                  Navigator.of(context).pop();
-                  onPick(item);
-                },
+                onTap: () => onPick(item),
                 customBorder: const CircleBorder(),
                 child: Container(
                   width: 64,
