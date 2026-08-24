@@ -38,3 +38,8 @@ librqbit = { version = "9", default-features = false, features = ["rust-tls", "h
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(frb_expand)'] }
+
+# unrar_sys 0.5.8 linkea -lpthread en todos los no-Windows; Android no tiene
+# libpthread (va dentro de libc) y el link falla. Vendor parchado.
+[patch.crates-io]
+unrar_sys = { path = "vendor/unrar_sys" }
