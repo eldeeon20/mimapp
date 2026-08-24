@@ -28,7 +28,7 @@ class IpfsTestScreen extends StatelessWidget {
             Tab(text: 'P2P online'),
           ]),
         ),
-        body: const TabBarView(children: [
+        body: TabBarView(children: [
           _NodePanel(svc: IpfsService.instance),
           _NodePanel(svc: IpfsService.p2p),
         ]),
@@ -251,7 +251,7 @@ class _NodePanelState extends State<_NodePanel>
           IconButton(
               tooltip: _svc.online ? 'Buscar providers' : 'Leer texto',
               icon: Icon(_svc.online
-                  ? Icons.group_search_rounded
+                  ? Icons.manage_search_rounded
                   : Icons.travel_explore_rounded),
               onPressed: () {
                 final cid = (_cidCtrl.text.trim().isNotEmpty

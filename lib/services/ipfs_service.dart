@@ -37,8 +37,8 @@ class IpfsService {
   bool gatewayEnabled = false;
   String lastError = '';
 
-  /// cid-string -> objeto CID que devolvió addFile (necesario para get/pin).
-  final Map<String, Object> _cidObjects = {};
+  /// cid-string -> cid-string (get/pin/findProviders aceptan String).
+  final Map<String, String> _cidObjects = {};
 
   bool get running => _node != null;
   bool get online => identical(this, p2p);
@@ -66,7 +66,7 @@ class IpfsService {
                 bootstrapPeers: _bootstraps,
                 listenAddresses: ['/ip4/0.0.0.0/tcp/4001'],
               ),
-              dht: DHTConfig(mode: DHTMode.server),
+              // dht: DHTConfig no existe en dart_ipfs 1.11.6 → defaults.
               enableLibp2pBridge: true,
               libp2pListenAddress: '/ip4/0.0.0.0/tcp/4001',
               dataPath: base,
@@ -124,7 +124,7 @@ class IpfsService {
     final bytes = await f.readAsBytes();
     final cid = await node.addFile(bytes);
     final s = '$cid'.trim();
-    _cidObjects[s] = cid;
+    _cidObjects[s] = s;
     return s;
   }
 
@@ -142,11 +142,12 @@ class IpfsService {
     await node.pin(_cidObjects[key] ?? key);
   }
 
-  /// Estadísticas del nodo (peers conectados, bandwidth, etc.).
+  /// Estadísticas locales del nodo (node.stats() no existe en dart_ipfs
+  /// 1.11.6; armamos el resumen con el estado propio del service).
   Future<String> stats() async {
-    final node = _requireNode();
-    final s = await node.stats();
-    return '$s'.trim();
+    return 'nodo ${running ? "activo" : "inactivo"} · '
+        '${_cidObjects.length} CID · gateway ${gatewayEnabled ? "ON" : "OFF"}'
+        '${online ? " · P2P" : ""}';
   }
 
   /// Busca proveedores de un CID en la red DHT (modo online).

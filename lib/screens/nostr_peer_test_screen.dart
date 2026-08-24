@@ -235,7 +235,7 @@ class _ParticipantPaneState extends State<_ParticipantPane>
           Padding(
             padding: const EdgeInsets.only(bottom: 8, left: 4),
             child: Row(children: [
-              const Text('npub de ${widget.label}: ',
+              Text('npub de ${widget.label}: ',
                   style: TextStyle(fontSize: 9, color: Colors.white38)),
               Expanded(
                 child: InkWell(
