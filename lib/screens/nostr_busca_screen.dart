@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../../src/rust/api/nostr_busca.dart' as rust;
 import '../services/nostr_busca.dart';
 import '../widgets/relay_editor.dart';
+import 'posts_screen.dart';
 
 /// Pantalla de búsqueda de usuarios Nostr.
 /// Un solo campo: si pegás un npub/nprofile o hex de 64 → modo B1
@@ -29,6 +30,8 @@ class _NostrBuscaScreenState extends State<NostrBuscaScreen> {
 
   List<String> _relays = [..._kRelaysDefault];
   List<rust.PerfilItem> _resultados = [];
+  List<rust.PostItem> _postsRed = [];
+  bool _modoPosts = false;
   bool _corriendo = false;
   String _estado = '';
 
@@ -48,11 +51,22 @@ class _NostrBuscaScreenState extends State<NostrBuscaScreen> {
     }
     setState(() {
       _corriendo = true;
-      _estado = _esClave ? 'trayendo perfil…' : 'buscando "$q"…';
+      _estado = _modoPosts
+          ? 'buscando posts de la red…'
+          : _esClave
+              ? 'trayendo perfil…'
+              : 'buscando "$q"…';
       _resultados = [];
+      _postsRed = [];
     });
     try {
-      if (_esClave) {
+      if (_modoPosts) {
+        final r = await _busca.buscarPosts(query: q, relays: _relays);
+        setState(() {
+          _postsRed = r;
+          _estado = '${r.length} post(s)';
+        });
+      } else if (_esClave) {
         final p = await _busca.perfil(npub: q, relays: _relays);
         setState(() {
           _resultados = [p];
@@ -153,12 +167,31 @@ class _NostrBuscaScreenState extends State<NostrBuscaScreen> {
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-          child: Row(children: [
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            SegmentedButton<bool>(
+              segments: const [
+                ButtonSegment(
+                    value: false,
+                    icon: Icon(Icons.person_search_rounded, size: 18),
+                    label: Text('Usuarios')),
+                ButtonSegment(
+                    value: true,
+                    icon: Icon(Icons.forum_rounded, size: 18),
+                    label: Text('Posts')),
+              ],
+              selected: {_modoPosts},
+              onSelectionChanged: (v) =>
+                  setState(() => _modoPosts = v.first),
+            ),
+            const SizedBox(height: 8),
+            Row(children: [
             Expanded(
               child: TextField(
                 controller: _qCtrl,
-                decoration: const InputDecoration(
-                  hintText: 'nombre… o pegá un npub / nprofile / hex64',
+                decoration: InputDecoration(
+                  hintText: _modoPosts
+                      ? 'buscar posts en toda la red…'
+                      : 'nombre… o pegá un npub / nprofile / hex64',
                   border: OutlineInputBorder(),
                   isDense: true,
                   prefixIcon: Icon(Icons.search_rounded),
@@ -176,6 +209,7 @@ class _NostrBuscaScreenState extends State<NostrBuscaScreen> {
                       child: CircularProgressIndicator(strokeWidth: 2))
                   : const Icon(Icons.arrow_forward_rounded),
             ),
+            ]),
           ]),
         ),
         Padding(
@@ -192,7 +226,57 @@ class _NostrBuscaScreenState extends State<NostrBuscaScreen> {
         ),
         const Divider(height: 16),
         Expanded(
-          child: _resultados.isEmpty
+          child: _modoPosts && _postsRed.isNotEmpty
+              ? ListView.builder(
+                  itemCount: _postsRed.length,
+                  itemBuilder: (_, i) {
+                    final b = _postsRed[i];
+                    final d = DateTime.fromMillisecondsSinceEpoch(b.fechaMs);
+                    return Container(
+                      margin: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Colors.indigoAccent.withValues(alpha: .07),
+                        border: Border.all(
+                            color:
+                                Colors.indigoAccent.withValues(alpha: .4)),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('${d.day}/${d.month}/${d.year} · ${_npubCorto(b.autorNpub)}',
+                                style: const TextStyle(
+                                    fontSize: 10,
+                                    color: Colors.white38)),
+                            const SizedBox(height: 4),
+                            SelectableText(b.contenido,
+                                style: const TextStyle(fontSize: 13)),
+                            Row(children: [
+                              TextButton(
+                                  onPressed: () => Clipboard.setData(
+                                      ClipboardData(text: b.idHex)),
+                                  child: const Text('copiar ID',
+                                      style: TextStyle(fontSize: 11))),
+                              TextButton(
+                                  onPressed: () async {
+                                    try {
+                                      final per = await _busca.perfil(
+                                          npub: b.autorNpub,
+                                          relays: _relays);
+                                      if (!mounted) return;
+                                      _ficha(per);
+                                    } catch (_) {}
+                                  },
+                                  child: const Text('ver autor',
+                                      style: TextStyle(fontSize: 11))),
+                            ]),
+                          ]),
+                    );
+                  },
+                )
+              : _resultados.isEmpty
               ? Center(
                   child: Text('sin resultados',
                       style: TextStyle(color: Colors.grey[600])))
@@ -232,161 +316,6 @@ class _NostrBuscaScreenState extends State<NostrBuscaScreen> {
   @override
   void dispose() {
     _qCtrl.dispose();
-    super.dispose();
-  }
-}
-
-/// Muro de un npub: sus publicaciones kind 1 con controles de
-/// cantidad (N) y "desde cuándo" (fecha limpiable = sin límite).
-class PostsScreen extends StatefulWidget {
-  final String npub;
-  const PostsScreen({super.key, required this.npub});
-
-  @override
-  State<PostsScreen> createState() => _PostsScreenState();
-}
-
-class _PostsScreenState extends State<PostsScreen> {
-  final _svc = NostrBusca();
-  final _limiteCtrl = TextEditingController(text: '20');
-  final _relaysCtrl = TextEditingController();
-
-  DateTime? _desde;
-  List<rust.PostItem> _posts = [];
-  String _estado = '';
-  bool _busy = false;
-
-  Future<void> _buscar() async {
-    if (_busy) return;
-    setState(() => _busy = true);
-    try {
-      final res = await _svc.posts(
-        npub: widget.npub,
-        relays: _relaysCtrl.text
-            .split(',')
-            .map((s) => s.trim())
-            .where((s) => s.isNotEmpty)
-            .toList(),
-        limite: int.tryParse(_limiteCtrl.text.trim()) ?? 20,
-        desdeMs: _desde?.millisecondsSinceEpoch ?? 0,
-      );
-      setState(() {
-        _posts = res;
-        _estado = '${res.length} publicación(es)';
-      });
-    } catch (e) {
-      setState(() => _estado = 'ERROR: $e');
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  Future<void> _elegirDesde() async {
-    final d = await showDatePicker(
-      context: context,
-      initialDate: _desde ?? DateTime.now(),
-      firstDate: DateTime(2009),
-      lastDate: DateTime.now(),
-    );
-    if (d != null) setState(() => _desde = d);
-  }
-
-  String _fecha(int ms) {
-    final d = DateTime.fromMillisecondsSinceEpoch(ms);
-    return '${d.day}/${d.month}/${d.year} ${d.hour}:${d.minute.toString().padLeft(2, '0')}';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Publicaciones')),
-      body: ListView(padding: const EdgeInsets.all(10), children: [
-        TextField(
-          controller: _relaysCtrl,
-          style: const TextStyle(fontSize: 12),
-          decoration: const InputDecoration(
-              hintText:
-                  'relays separados por coma (vacío = damus/nos.social/band)',
-              isDense: true,
-              border: OutlineInputBorder()),
-        ),
-        const SizedBox(height: 8),
-        Row(children: [
-          SizedBox(
-            width: 80,
-            child: TextField(
-              controller: _limiteCtrl,
-              keyboardType: TextInputType.number,
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 12),
-              decoration: const InputDecoration(
-                  labelText: 'N', border: OutlineInputBorder()),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: InkWell(
-              onTap: _elegirDesde,
-              child: InputDecorator(
-                decoration: const InputDecoration(
-                    labelText: 'Desde', border: OutlineInputBorder()),
-                child: Text(_desde == null
-                    ? 'sin límite'
-                    : '${_desde!.day}/${_desde!.month}/${_desde!.year}'),
-              ),
-            ),
-          ),
-          if (_desde != null)
-            IconButton(
-              tooltip: 'quitar fecha',
-              icon: const Icon(Icons.close_rounded, size: 18),
-              onPressed: () => setState(() => _desde = null),
-            ),
-        ]),
-        const SizedBox(height: 8),
-        FilledButton.icon(
-          onPressed: _busy ? null : _buscar,
-          icon: const Icon(Icons.search_rounded),
-          label: Text(_busy ? 'buscando…' : 'Buscar publicaciones'),
-        ),
-        const SizedBox(height: 4),
-        Center(
-            child: Text('npub: ${widget.npub}',
-                style:
-                    const TextStyle(fontSize: 9, fontFamily: 'monospace'))),
-        if (_estado.isNotEmpty)
-          Padding(
-              padding: const EdgeInsets.all(6),
-              child: Center(child: Text(_estado))),
-        for (final p in _posts)
-          Container(
-            margin: const EdgeInsets.symmetric(vertical: 5),
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: Colors.indigoAccent.withValues(alpha: .08),
-              border: Border.all(
-                  color: Colors.indigoAccent.withValues(alpha: .4)),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(_fecha(p.fechaMs),
-                      style: const TextStyle(
-                          fontSize: 10, color: Colors.white38)),
-                  const SizedBox(height: 4),
-                  SelectableText(p.contenido,
-                      style: const TextStyle(fontSize: 13)),
-                ]),
-          ),
-      ]),
-    );
-  }
-
-  @override
-  void dispose() {
-    _limiteCtrl.dispose();
-    _relaysCtrl.dispose();
     super.dispose();
   }
 }

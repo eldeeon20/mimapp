@@ -1,6 +1,8 @@
 /// Nostr Busca: perfiles y búsqueda de usuarios (B1 npub→kind 0,
 /// B2 NIP-50 por texto). Wrapper FRB fino sobre `gt::nostrbusca`.
-use crate::gt::nostrbusca::{buscar_usuarios, perfil_fetch, posts_fetch, Perfil};
+use crate::gt::nostrbusca::{
+    buscar_posts, buscar_usuarios, notificaciones_fetch, perfil_fetch, posts_fetch, Perfil,
+};
 
 /// Perfil de usuario Nostr serializable a Dart.
 #[flutter_rust_bridge::frb]
@@ -77,6 +79,8 @@ pub fn nostr_buscar_usuarios(
 #[flutter_rust_bridge::frb]
 #[derive(Clone)]
 pub struct PostItem {
+    pub id_hex: String,
+    pub autor_npub: String,
     pub contenido: String,
     pub fecha_ms: i64,
 }
@@ -106,10 +110,59 @@ pub fn nostr_posts_fetch(
     .map(|v| {
         v.into_iter()
             .map(|p| PostItem {
+                id_hex: p.id_hex,
+                autor_npub: p.autor_npub,
                 contenido: p.contenido,
                 fecha_ms: p.fecha_ms as i64,
             })
             .collect()
     })
+    .map_err(|e| format!("{e:#}"))
+}
+
+fn a_post(v: Vec<crate::gt::nostrbusca::Post>) -> Vec<PostItem> {
+    v.into_iter()
+        .map(|p| PostItem {
+            id_hex: p.id_hex,
+            autor_npub: p.autor_npub,
+            contenido: p.contenido,
+            fecha_ms: p.fecha_ms as i64,
+        })
+        .collect()
+}
+
+/// Búsqueda de posts en TODA la red (kind 1 vía NIP-50).
+#[flutter_rust_bridge::frb]
+pub fn nostr_buscar_posts(
+    query: String,
+    relays: Vec<String>,
+    limite: i64,
+    timeout_secs: i64,
+) -> Result<Vec<PostItem>, String> {
+    buscar_posts(
+        &query,
+        &a_relays(relays),
+        limite.max(1) as usize,
+        timeout_secs.max(1) as u64,
+    )
+    .map(a_post)
+    .map_err(|e| format!("{e:#}"))
+}
+
+/// Notificaciones: kind 1 dirigidos a mi npub (respuestas y menciones).
+#[flutter_rust_bridge::frb]
+pub fn nostr_notificaciones(
+    mi_npub: String,
+    relays: Vec<String>,
+    limite: i64,
+    timeout_secs: i64,
+) -> Result<Vec<PostItem>, String> {
+    notificaciones_fetch(
+        &mi_npub,
+        &a_relays(relays),
+        limite.max(1) as usize,
+        timeout_secs.max(1) as u64,
+    )
+    .map(a_post)
     .map_err(|e| format!("{e:#}"))
 }

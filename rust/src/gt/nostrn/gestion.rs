@@ -15,6 +15,7 @@ use nostr::prelude::*;
 use nostr_sdk::prelude::*;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::runtime::Runtime;
 use tokio::sync::{broadcast, Mutex};
 
@@ -422,5 +423,204 @@ impl GestionNostrn {
         }
         self.logs.push("✓ desconectado".to_string());
         Ok(())
+    }
+
+    // ------------------------------------------- social (kind 1/6/7/3/30023)
+
+    fn pk_de(npub: &str) -> Result<PublicKey> {
+        PublicKey::from_bech32(npub)
+            .or_else(|_| npub.parse::<PublicKey>().map_err(|e| anyhow!("{e:?}")))
+            .context("clave pública inválida")
+    }
+
+    /// Publica una nota kind 1 simple. Devuelve el id hex del evento.
+    pub fn postear(&self, texto: &str) -> Result<String> {
+        if texto.trim().is_empty() {
+            return Err(anyhow!("texto vacío"));
+        }
+        let logs = self.logs.clone();
+        let id = self.runtime.block_on(async {
+            let out = self
+                .client
+                .publish_text_note(texto)
+                .await
+                .context("publish_text_note falló")?;
+            logs.push("✓ post publicado".to_string());
+            Ok(out.id().to_hex())
+        })?;
+        Ok(id)
+    }
+
+    /// Responde un evento existente: kind 1 con tags e+p.
+    pub fn responder(
+        &self,
+        texto: &str,
+        id_evento_hex: &str,
+        autor_npub: &str,
+    ) -> Result<String> {
+        let id = EventId::from_hex(id_evento_hex)
+            .map_err(|e| anyhow!("id de evento inválido '{id_evento_hex}': {e:?}"))?;
+        let autor = Self::pk_de(autor_npub)?;
+        let builder =
+            EventBuilder::text_note(texto).tags([Tag::event(id), Tag::public_key(autor)]);
+        let logs = self.logs.clone();
+        let out_id = self.runtime.block_on(async {
+            let out = self
+                .client
+                .send_event_builder(builder)
+                .await
+                .context("send_event_builder falló")?;
+            logs.push("✓ respuesta publicada".to_string());
+            Ok(out.id().to_hex())
+        })?;
+        Ok(out_id)
+    }
+
+    /// Cita un evento: tu comentario + el texto citado como bloque,
+    /// con tags e+p para que aparezca en el hilo del otro usuario.
+    pub fn citar(
+        &self,
+        texto: &str,
+        id_evento_hex: &str,
+        autor_npub: &str,
+        texto_citado: &str,
+    ) -> Result<String> {
+        if texto_citado.trim().is_empty() {
+            return Err(anyhow!("no hay texto citado"));
+        }
+        let clip: String = texto_citado.chars().take(280).collect();
+        let contenido = format!("{texto}\n\n> {clip}");
+        self.responder(&contenido, id_evento_hex, autor_npub)
+    }
+
+    /// Reacción NIP-25: kind 7 con "+" hacia el evento.
+    pub fn reaccionar(&self, id_evento_hex: &str, autor_npub: &str) -> Result<String> {
+        let id = EventId::from_hex(id_evento_hex)
+            .map_err(|e| anyhow!("id inválido: {e:?}"))?;
+        let autor = Self::pk_de(autor_npub)?;
+        let builder = EventBuilder::new(Kind::Reaction, "+")
+            .tags([Tag::event(id), Tag::public_key(autor)]);
+        let out_id = self.runtime.block_on(async {
+            let out = self
+                .client
+                .send_event_builder(builder)
+                .await
+                .context("reacción falló")?;
+            Ok(out.id().to_hex())
+        })?;
+        self.logs.push("✓ +1 enviado".to_string());
+        Ok(out_id)
+    }
+
+    /// Repost NIP-18: kind 6 apuntando al evento original.
+    pub fn repost(&self, id_evento_hex: &str, autor_npub: &str) -> Result<String> {
+        let id = EventId::from_hex(id_evento_hex)
+            .map_err(|e| anyhow!("id inválido: {e:?}"))?;
+        let autor = Self::pk_de(autor_npub)?;
+        let builder = EventBuilder::new(Kind::Repost, "").tags([
+            Tag::event(id),
+            Tag::public_key(autor),
+            Tag::kind(Kind::TextNote),
+        ]);
+        let out_id = self.runtime.block_on(async {
+            let out = self
+                .client
+                .send_event_builder(builder)
+                .await
+                .context("repost falló")?;
+            Ok(out.id().to_hex())
+        })?;
+        self.logs.push("✓ repost enviado".to_string());
+        Ok(out_id)
+    }
+
+    /// Mis contactos actuales (kind 3 más reciente, tags p).
+    pub fn seguidos(&self) -> Result<Vec<String>> {
+        let me = self.keys.public_key();
+        let filtro = Filter::new().author(me).kind(Kind::ContactList).limit(1);
+        let evs = self.runtime.block_on(async {
+            self.client
+                .fetch_events(filtro, Duration::from_secs(8))
+                .await
+                .context("fetch contactos falló")
+        })?;
+        let Some(ev) = evs.iter().max_by_key(|e| e.created_at.as_u64()) else {
+            return Ok(vec![]);
+        };
+        Ok(ev
+            .tags()
+            .public_keys()
+            .map(|pk| pk.to_bech32().unwrap_or_default())
+            .collect())
+    }
+
+    /// Agrega o quita un npub de mi lista kind 3 y la republica.
+    pub fn seguir(&self, npub: &str, seguir: bool) -> Result<Vec<String>> {
+        let target = Self::pk_de(npub)?;
+        let mut lista: Vec<PublicKey> = self
+            .seguidos()?
+            .iter()
+            .filter_map(|s| PublicKey::from_bech32(s).ok())
+            .collect();
+        lista.retain(|p| p != &target);
+        if seguir {
+            lista.push(target);
+        }
+        let tags: Vec<Tag> = lista.iter().map(|p| Tag::public_key(*p)).collect();
+        let builder = EventBuilder::new(Kind::ContactList, "").tags(tags);
+        self.runtime.block_on(async {
+            self.client
+                .send_event_builder(builder)
+                .await
+                .context("contact list falló")?;
+            Ok::<(), anyhow::Error>(())
+        })?;
+        self.logs.push(format!(
+            "✓ contactos actualizados ({})",
+            if seguir { "siguiendo" } else { "dejado" }
+        ));
+        self.seguidos()
+    }
+
+    /// Artículo largo NIP-23 (kind 30023): título/resumen/imagen como
+    /// tags estándar + cuerpo markdown en content.
+    pub fn articulo_publicar(
+        &self,
+        titulo: &str,
+        resumen: &str,
+        imagen_url: &str,
+        cuerpo: &str,
+    ) -> Result<String> {
+        if titulo.trim().is_empty() || cuerpo.trim().is_empty() {
+            return Err(anyhow!("título y cuerpo son obligatorios"));
+        }
+        let mut tags: Vec<Tag> = vec![
+            Tag::custom(TagKind::Custom("title".to_string()), vec![titulo.to_string()]),
+        ];
+        if !resumen.trim().is_empty() {
+            tags.push(Tag::custom(
+                TagKind::Custom("summary".to_string()),
+                vec![resumen.to_string()],
+            ));
+        }
+        if !imagen_url.trim().is_empty() {
+            Url::parse(imagen_url).map_err(|e| anyhow!("URL de imagen inválida: {e:?}"))?;
+            tags.push(Tag::custom(
+                TagKind::Custom("image".to_string()),
+                vec![imagen_url.to_string()],
+            ));
+        }
+        let builder = EventBuilder::new(Kind::LongFormTextNote, cuerpo).tags(tags);
+        let logs = self.logs.clone();
+        let out_id = self.runtime.block_on(async {
+            let out = self
+                .client
+                .send_event_builder(builder)
+                .await
+                .context("artículo falló")?;
+            logs.push("✓ artículo 30023 publicado".to_string());
+            Ok(out.id().to_hex())
+        })?;
+        Ok(out_id)
     }
 }

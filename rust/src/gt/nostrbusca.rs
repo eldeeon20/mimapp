@@ -148,6 +148,8 @@ pub fn buscar_usuarios(
 
 /// Una publicación (nota kind 1) del muro de un usuario.
 pub struct Post {
+    pub id_hex: String,
+    pub autor_npub: String,
     pub contenido: String,
     pub fecha_ms: u64,
 }
@@ -180,6 +182,84 @@ pub fn posts_fetch(
         let mut out: Vec<Post> = events
             .iter()
             .map(|ev| Post {
+                id_hex: ev.id.to_hex(),
+                autor_npub: ev.pubkey.to_bech32().unwrap_or_default(),
+                contenido: ev.content.clone(),
+                fecha_ms: ev.created_at.as_u64() * 1000,
+            })
+            .collect();
+        out.sort_by(|a, b| b.fecha_ms.cmp(&a.fecha_ms));
+        Ok(out)
+    });
+    let _ = rt.block_on(client.disconnect());
+    res
+}
+
+/// Resultado de búsqueda de posts en la red (kind 1 vía NIP-50).
+pub fn buscar_posts(
+    query: &str,
+    relays: &[String],
+    limite: usize,
+    timeout_secs: u64,
+) -> Result<Vec<Post>> {
+    if query.trim().is_empty() {
+        return Ok(vec![]);
+    }
+    let rt = nuevo_runtime()?;
+    let filtro = Filter::new()
+        .kind(Kind::TextNote)
+        .search(query.to_string())
+        .limit(limite.max(1) as _);
+
+    let client = rt.block_on(cliente_readonly(relays));
+    let res: Result<Vec<Post>> = rt.block_on(async {
+        let events = client
+            .fetch_events(filtro, Duration::from_secs(timeout_secs))
+            .await
+            .context("búsqueda de posts falló")?;
+        let mut out: Vec<Post> = events
+            .iter()
+            .map(|ev| Post {
+                id_hex: ev.id.to_hex(),
+                autor_npub: ev.pubkey.to_bech32().unwrap_or_default(),
+                contenido: ev.content.clone(),
+                fecha_ms: ev.created_at.as_u64() * 1000,
+            })
+            .collect();
+        out.sort_by(|a, b| b.fecha_ms.cmp(&a.fecha_ms));
+        Ok(out)
+    });
+    let _ = rt.block_on(client.disconnect());
+    res
+}
+
+/// Notificaciones básicas: kind 1 dirigidos a mí (p tag) → respuestas
+/// y menciones. Read-only con el npub alcanza; no necesita claves.
+pub fn notificaciones_fetch(
+    mi_npub: &str,
+    relays: &[String],
+    limite: usize,
+    timeout_secs: u64,
+) -> Result<Vec<Post>> {
+    let pk = parsear_npub(mi_npub)?;
+    let rt = nuevo_runtime()?;
+    let filtro = Filter::new()
+        .pubkey(pk)
+        .kind(Kind::TextNote)
+        .limit(limite.max(1) as _);
+
+    let client = rt.block_on(cliente_readonly(relays));
+    let res: Result<Vec<Post>> = rt.block_on(async {
+        let events = client
+            .fetch_events(filtro, Duration::from_secs(timeout_secs))
+            .await
+            .context("notificaciones falló")?;
+        let mut out: Vec<Post> = events
+            .iter()
+            .filter(|ev| ev.pubkey != pk) // mis propios posts no cuentan
+            .map(|ev| Post {
+                id_hex: ev.id.to_hex(),
+                autor_npub: ev.pubkey.to_bech32().unwrap_or_default(),
                 contenido: ev.content.clone(),
                 fecha_ms: ev.created_at.as_u64() * 1000,
             })

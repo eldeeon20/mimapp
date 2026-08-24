@@ -183,3 +183,67 @@ pub async fn gestion_perfil_get(
         picture: p.picture,
     })
 }
+
+// ------------------------------------------------- social (escritura)
+
+impl GestionViva {
+    /// Publica una nota kind 1. Devuelve id hex.
+    pub fn postear(&self, texto: String) -> Result<String> {
+        self.inner.postear(&texto).map_err(|e| anyhow!("{e:#}"))
+    }
+
+    /// Responde un evento (tags e+p). Devuelve id hex de tu respuesta.
+    pub fn responder(&self, texto: String, id_evento: String, autor: String) -> Result<String> {
+        self.inner
+            .responder(&texto, &id_evento, &autor)
+            .map_err(|e| anyhow!("{e:#}"))
+    }
+
+    /// Cita un evento (tu texto + bloque citado + tags).
+    pub fn citar(
+        &self,
+        texto: String,
+        id_evento: String,
+        autor: String,
+        texto_citado: String,
+    ) -> Result<String> {
+        self.inner
+            .citar(&texto, &id_evento, &autor, &texto_citado)
+            .map_err(|e| anyhow!("{e:#}"))
+    }
+
+    /// Reacción "+" (NIP-25).
+    pub fn reaccionar(&self, id_evento: String, autor: String) -> Result<String> {
+        self.inner
+            .reaccionar(&id_evento, &autor)
+            .map_err(|e| anyhow!("{e:#}"))
+    }
+
+    /// Repost (NIP-18).
+    pub fn repost(&self, id_evento: String, autor: String) -> Result<String> {
+        self.inner.repost(&id_evento, &autor).map_err(|e| anyhow!("{e:#}"))
+    }
+
+    /// Mi lista de seguidos (kind 3 más reciente, npubs bech32).
+    pub fn seguidos(&self) -> Result<Vec<String>> {
+        self.inner.seguidos().map_err(|e| anyhow!("{e:#}"))
+    }
+
+    /// Sigue o deja de seguir un npub; devuelve la lista actualizada.
+    pub fn seguir(&self, npub: String, seguir: bool) -> Result<Vec<String>> {
+        self.inner.seguir(&npub, seguir).map_err(|e| anyhow!("{e:#}"))
+    }
+
+    /// Publica artículo largo NIP-23 (kind 30023).
+    pub fn articulo_publicar(
+        &self,
+        titulo: String,
+        resumen: String,
+        imagen_url: String,
+        cuerpo: String,
+    ) -> Result<String> {
+        self.inner
+            .articulo_publicar(&titulo, &resumen, &imagen_url, &cuerpo)
+            .map_err(|e| anyhow!("{e:#}"))
+    }
+}

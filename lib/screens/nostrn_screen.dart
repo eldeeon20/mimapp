@@ -10,10 +10,13 @@
 ///    seal firmado con la key real + giftwrap anónimo con key efímera)
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../src/rust/api/nostrn_gestion.dart' as rust;
+import '../services/blossom.dart';
 import '../services/nostrn_gestion.dart';
+import 'nostrn_social.dart';
 
 class NostrnScreen extends StatefulWidget {
   const NostrnScreen({super.key});
@@ -168,8 +171,18 @@ class _NostrnScreenState extends State<NostrnScreen> {
         setState(() => _chatLocal.add('yo: $t'));
       });
 
-  Future<void> _publicarPerfil() => _guard(() async {
-        final g = _gestion;
+  Future<void> _subirImagenPerfil() => _guard(() async {
+        final res = await FilePicker.platform
+            .pickFiles(type: FileType.image, withData: false);
+        final path = res?.files.single.path;
+        if (path == null) return;
+        _say('subiendo imagen a Blossom…');
+        final url = await Blossom().subir(path);
+        setState(() => _perfilPicCtrl.text = url);
+        _say('imagen lista: tocá Publicar perfil');
+      });
+
+  Future<void> _publicarPerfil() => _guard(() async {        final g = _gestion;
         if (g == null) return _say('conectá primero (el perfil se publica en relays)');
         await g.setPerfil(
           name: _perfilNameCtrl.text.trim(),
@@ -279,7 +292,14 @@ class _NostrnScreenState extends State<NostrnScreen> {
           const SizedBox(height: 6),
           _tf(_perfilAboutCtrl, 'about'),
           const SizedBox(height: 6),
-          _tf(_perfilPicCtrl, 'picture URL (https://…)'),
+          Row(children: [
+            Expanded(child: _tf(_perfilPicCtrl, 'picture URL (https://…)')),
+            IconButton(
+              tooltip: 'subir imagen (Blossom)',
+              icon: const Icon(Icons.image_rounded, size: 20),
+              onPressed: _busy ? null : _subirImagenPerfil,
+            ),
+          ]),
           const SizedBox(height: 6),
           FilledButton.icon(
               onPressed: !conectado || _busy ? null : _publicarPerfil,
@@ -343,6 +363,13 @@ class _NostrnScreenState extends State<NostrnScreen> {
                 icon: const Icon(Icons.send_rounded)),
           ]),
         ]),
+        NostrnSocial(
+          gestion: _gestion,
+          onLog: (l) => setState(() {
+            _registro.insert(0, l);
+            if (_registro.length > 60) _registro.removeRange(60, _registro.length);
+          }),
+        ),
         Padding(
           padding: const EdgeInsets.all(10),
           child: Text(_estado,

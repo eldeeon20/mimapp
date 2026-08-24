@@ -4,6 +4,7 @@ import '../agents/agent_manager.dart';
 import '../agents/key_vault.dart';
 import '../agents/provider_registry.dart';
 import '../agents/tools.dart';
+import 'needle_test_screen.dart';
 
 /// FilosoIA en pr_app: gestión de proveedores/keys, agentes con misión
 /// y chats individuales con tool-calling automático.
@@ -49,6 +50,14 @@ class _FilosoiaScreenState extends State<FilosoiaScreen>
     return Scaffold(
       appBar: AppBar(
         title: const Text('Agentes IA'),
+        actions: [
+          IconButton(
+            tooltip: 'Tool-calling local (Needle)',
+            icon: const Icon(Icons.handyman_rounded),
+            onPressed: () => Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const NeedleTestScreen())),
+          ),
+        ],
         bottom: TabBar(controller: _tabs, tabs: const [
           Tab(text: 'Proveedores'),
           Tab(text: 'Agentes'),

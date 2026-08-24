@@ -2,6 +2,7 @@ pub mod gpu;
 pub mod hf;
 pub mod kem;
 pub mod laurelia;
+pub mod needle;
 pub mod nostr_busca;
 pub mod nostr_dm;
 pub mod nostrn_gestion;

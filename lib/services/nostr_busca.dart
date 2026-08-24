@@ -45,4 +45,32 @@ class NostrBusca {
         desdeMs: desdeMs,
         timeoutSecs: timeoutSecs,
       );
+
+  /// Búsqueda de posts en TODA la red (NIP-50 sobre kind 1).
+  Future<List<rust.PostItem>> buscarPosts({
+    required String query,
+    required List<String> relays,
+    int limite = 25,
+    int timeoutSecs = 8,
+  }) =>
+      rust.nostrBuscarPosts(
+        query: query,
+        relays: relays,
+        limite: limite,
+        timeoutSecs: timeoutSecs,
+      );
+
+  /// Notificaciones: kind 1 dirigidos a mi npub (respuestas/menciones).
+  Future<List<rust.PostItem>> notificaciones({
+    required String miNpub,
+    required List<String> relays,
+    int limite = 30,
+    int timeoutSecs = 8,
+  }) =>
+      rust.nostrNotificaciones(
+        miNpub: miNpub,
+        relays: relays,
+        limite: limite,
+        timeoutSecs: timeoutSecs,
+      );
 }
