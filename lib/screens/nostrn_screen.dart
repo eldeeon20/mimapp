@@ -28,6 +28,8 @@ class _NostrnScreenState extends State<NostrnScreen> {
   final _pinCtrl = TextEditingController();
   final _dmRelaysCtrl = TextEditingController(text: 'wss://nos.lol');
   final _readRelaysCtrl = TextEditingController(text: 'wss://relay.primal.net');
+  final _ventanaCtrl = TextEditingController(text: '48');
+  final _limiteCtrl = TextEditingController(text: '50');
   final _perfilNameCtrl = TextEditingController();
   final _perfilDisplayCtrl = TextEditingController();
   final _perfilAboutCtrl = TextEditingController();
@@ -38,6 +40,7 @@ class _NostrnScreenState extends State<NostrnScreen> {
   rust.GestionCuenta? _cuenta;
   rust.GestionViva? _gestion;
   final List<rust.BandejaItem> _bandeja = [];
+  final List<String> _registro = [];
   final List<String> _chatLocal = [];
   String _estado = 'sin cuenta cargada';
   bool _busy = false;
@@ -113,7 +116,10 @@ class _NostrnScreenState extends State<NostrnScreen> {
         final g = await _svc.nuevaSesion(nsec: _cuenta!.nsec);
         await g.addRelays(
             dmRelays: _csv(_dmRelaysCtrl), readRelays: _csv(_readRelaysCtrl));
-        await g.subscribe(nSeconds: 3600, nLimit: 20);
+        await g.subscribe(
+            nSeconds:
+                (int.tryParse(_ventanaCtrl.text.trim()) ?? 48) * 3600,
+            nLimit: int.tryParse(_limiteCtrl.text.trim()) ?? 50);
         setState(() => _gestion = g);
         await _logs();
         _say('conectado · bandeja escuchando');
@@ -122,10 +128,19 @@ class _NostrnScreenState extends State<NostrnScreen> {
   Future<void> _logs() async {
     try {
       final l = await _gestion?.takeLogs();
-      if (l != null && l.isNotEmpty) {
-        debugPrint('nostrn+: ${l.join(' | ')}');
-      }
+      if (l == null || l.isEmpty) return;
+      setState(() {
+        _registro.insertAll(0, l);
+        if (_registro.length > 60) {
+          _registro.removeRange(60, _registro.length);
+        }
+      });
     } catch (_) {}
+  }
+
+  String _fechaCorta(int ms) {
+    final d = DateTime.fromMillisecondsSinceEpoch(ms);
+    return '${d.day}/${d.month} ${d.hour}:${d.minute.toString().padLeft(2, '0')}';
   }
 
   Future<void> _poll() => _guard(() async {
@@ -217,7 +232,6 @@ class _NostrnScreenState extends State<NostrnScreen> {
   Widget build(BuildContext context) {
     final conectado = _gestion != null;
     return Scaffold(
-      appBar: AppBar(title: const Text('Nostrn+ · cuenta y bandeja')),
       body: ListView(children: [
         _card('1 · Cuenta', Colors.indigoAccent, [
           _tf(_nombreCtrl, 'nombre de la cuenta'),
@@ -244,6 +258,14 @@ class _NostrnScreenState extends State<NostrnScreen> {
           _tf(_dmRelaysCtrl, 'relays DM separados por coma'),
           const SizedBox(height: 6),
           _tf(_readRelaysCtrl, 'relays lectura'),
+          const SizedBox(height: 6),
+          Row(children: [
+            Expanded(
+                child: _tf(_ventanaCtrl,
+                    'escuchar desde horas atrás (0 = TODO)')),
+            const SizedBox(width: 6),
+            Expanded(child: _tf(_limiteCtrl, 'límite N')),
+          ]),
           const SizedBox(height: 6),
           FilledButton.icon(
               onPressed: _busy ? null : _conectar,
@@ -280,9 +302,31 @@ class _NostrnScreenState extends State<NostrnScreen> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(fontSize: 9, fontFamily: 'monospace')),
-              trailing: TextButton(
-                  onPressed: () => _fijarPeer(b.senderNpub),
-                  child: const Text('fijar peer')),
+              trailing: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(_fechaCorta(b.timestampMs),
+                        style:
+                            const TextStyle(fontSize: 9, color: Colors.white38)),
+                    TextButton(
+                        onPressed: () => _fijarPeer(b.senderNpub),
+                        child: const Text('fijar peer')),
+                  ]),
+            ),
+        ]),
+        _card('Registro (kinds · relays · fallos)', Colors.blueGrey, [
+          if (_registro.isEmpty)
+            const Text('vacío',
+                style: TextStyle(fontSize: 11, color: Colors.white24)),
+          for (final line in _registro.take(40))
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 1),
+              child: Text(line,
+                  style: const TextStyle(
+                      fontSize: 9,
+                      fontFamily: 'monospace',
+                      color: Colors.white54)),
             ),
         ]),
         _card('5 · Chat con peer', Colors.cyanAccent, [
@@ -319,6 +363,8 @@ class _NostrnScreenState extends State<NostrnScreen> {
       _pinCtrl,
       _dmRelaysCtrl,
       _readRelaysCtrl,
+      _ventanaCtrl,
+      _limiteCtrl,
       _perfilNameCtrl,
       _perfilDisplayCtrl,
       _perfilAboutCtrl,

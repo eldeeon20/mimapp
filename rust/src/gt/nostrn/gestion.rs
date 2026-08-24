@@ -237,13 +237,18 @@ impl GestionNostrn {
 
     /// Se suscribe SOLO a lo dirigido a mí: la bandeja atrapa mensajes de
     /// cualquiera; el remitente real viene dentro del giftwrap.
+    /// n_seconds == 0 → SIN filtro de tiempo: NIP-59 recomienda timestamps
+    /// randomizados en el envoltorio, así que "desde hace 1 hora" puede
+    /// descartar mensajes recién enviados. Con 0 traemos TODO lo nuestro.
     pub fn subscribe(&mut self) -> Result<()> {
-        let filtro = Filter::new()
+        let mut filtro = Filter::new()
             .pubkey(self.keys.public_key())
-            .limit(self.n_limit)
-            .since(Timestamp::from(
+            .limit(self.n_limit);
+        if self.n_seconds > 0 {
+            filtro = filtro.since(Timestamp::from(
                 Timestamp::now().as_u64().saturating_sub(self.n_seconds),
             ));
+        }
 
         let sub_id = self
             .runtime
@@ -325,18 +330,21 @@ impl GestionNostrn {
                         });
                         match res {
                             Ok(UnwrappedGift { sender, rumor }) => {
-                                if rumor.kind == Kind::PrivateDirectMessage {
-                                    messages.push(MsgIn {
-                                        sender,
-                                        content: rumor.content,
-                                        timestamp: rumor.created_at,
-                                    });
-                                    let hex = sender.to_string();
-                                    self.logs.push(format!(
-                                        "✓ bandeja: de {}…",
-                                        &hex[..8.min(hex.len())]
-                                    ));
-                                }
+                                // Aceptamos CUALQUIER kind interno del
+                                // giftwrap: otros clientes pueden envolver
+                                // kinds que no son 14 y antes los tirábamos
+                                // sin rastro.
+                                let hex = sender.to_string();
+                                self.logs.push(format!(
+                                    "✓ bandeja: kind {} de {}…",
+                                    rumor.kind,
+                                    &hex[..8.min(hex.len())]
+                                ));
+                                messages.push(MsgIn {
+                                    sender,
+                                    content: rumor.content,
+                                    timestamp: rumor.created_at,
+                                });
                             }
                             Err(e) => {
                                 self.logs

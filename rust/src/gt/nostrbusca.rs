@@ -145,3 +145,48 @@ pub fn buscar_usuarios(
     let _ = rt.block_on(client.disconnect());
     res
 }
+
+/// Una publicación (nota kind 1) del muro de un usuario.
+pub struct Post {
+    pub contenido: String,
+    pub fecha_ms: u64,
+}
+
+/// Muro de un npub: sus notas kind 1, ordenadas fecha ↓.
+/// [desde_secs] None = sin límite de tiempo; Some(s) = solo posteriores.
+pub fn posts_fetch(
+    npub: &str,
+    relays: &[String],
+    limite: usize,
+    desde_secs: Option<u64>,
+    timeout_secs: u64,
+) -> Result<Vec<Post>> {
+    let pk = parsear_npub(npub)?;
+    let rt = nuevo_runtime()?;
+    let mut filtro = Filter::new()
+        .author(pk)
+        .kind(Kind::TextNote)
+        .limit(limite.max(1) as _);
+    if let Some(d) = desde_secs {
+        filtro = filtro.since(Timestamp::from(d));
+    }
+
+    let client = rt.block_on(cliente_readonly(relays));
+    let res: Result<Vec<Post>> = rt.block_on(async {
+        let events = client
+            .fetch_events(filtro, Duration::from_secs(timeout_secs))
+            .await
+            .context("consulta a relays falló")?;
+        let mut out: Vec<Post> = events
+            .iter()
+            .map(|ev| Post {
+                contenido: ev.content.clone(),
+                fecha_ms: ev.created_at.as_u64() * 1000,
+            })
+            .collect();
+        out.sort_by(|a, b| b.fecha_ms.cmp(&a.fecha_ms));
+        Ok(out)
+    });
+    let _ = rt.block_on(client.disconnect());
+    res
+}

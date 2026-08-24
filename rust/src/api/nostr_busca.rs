@@ -1,6 +1,6 @@
 /// Nostr Busca: perfiles y búsqueda de usuarios (B1 npub→kind 0,
 /// B2 NIP-50 por texto). Wrapper FRB fino sobre `gt::nostrbusca`.
-use crate::gt::nostrbusca::{buscar_usuarios, perfil_fetch, Perfil};
+use crate::gt::nostrbusca::{buscar_usuarios, perfil_fetch, posts_fetch, Perfil};
 
 /// Perfil de usuario Nostr serializable a Dart.
 #[flutter_rust_bridge::frb]
@@ -70,5 +70,46 @@ pub fn nostr_buscar_usuarios(
         timeout_secs.max(1) as u64,
     )
     .map(|v| v.into_iter().map(mapear).collect())
+    .map_err(|e| format!("{e:#}"))
+}
+
+/// Publicación (nota kind 1) del muro de un npub.
+#[flutter_rust_bridge::frb]
+#[derive(Clone)]
+pub struct PostItem {
+    pub contenido: String,
+    pub fecha_ms: i64,
+}
+
+/// Muro de un npub: sus notas kind 1 ordenadas fecha ↓.
+/// [desde_ms] 0 = sin límite de tiempo; otro valor = solo posteriores.
+#[flutter_rust_bridge::frb]
+pub fn nostr_posts_fetch(
+    npub: String,
+    relays: Vec<String>,
+    limite: i64,
+    desde_ms: i64,
+    timeout_secs: i64,
+) -> Result<Vec<PostItem>, String> {
+    let desde = if desde_ms > 0 {
+        Some((desde_ms / 1000).max(0) as u64)
+    } else {
+        None
+    };
+    posts_fetch(
+        &npub,
+        &a_relays(relays),
+        limite.max(1) as usize,
+        desde,
+        timeout_secs.max(1) as u64,
+    )
+    .map(|v| {
+        v.into_iter()
+            .map(|p| PostItem {
+                contenido: p.contenido,
+                fecha_ms: p.fecha_ms as i64,
+            })
+            .collect()
+    })
     .map_err(|e| format!("{e:#}"))
 }

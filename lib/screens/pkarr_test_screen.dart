@@ -134,7 +134,6 @@ class _PkarrTestScreenState extends State<PkarrTestScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Pkarr v8')),
       body: ListView(padding: const EdgeInsets.all(12), children: [
         // ---- identidad
         _card('Identidad (ed25519)', Colors.deepPurpleAccent, [

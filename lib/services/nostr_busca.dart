@@ -28,4 +28,21 @@ class NostrBusca {
         limite: limite,
         timeoutSecs: timeoutSecs,
       );
+
+  /// Muro: publicaciones kind 1 de un npub, ordenadas fecha ↓.
+  /// [desdeMs] 0 = sin límite de tiempo.
+  Future<List<rust.PostItem>> posts({
+    required String npub,
+    required List<String> relays,
+    int limite = 20,
+    int desdeMs = 0,
+    int timeoutSecs = 8,
+  }) =>
+      rust.nostrPostsFetch(
+        npub: npub,
+        relays: relays,
+        limite: limite,
+        desdeMs: desdeMs,
+        timeoutSecs: timeoutSecs,
+      );
 }

@@ -45,9 +45,10 @@ impl GestionViva {
             .map_err(|e| anyhow!("relays: {e:#}"))
     }
 
-    /// Ventana (segundos atrás) y tope, luego suscribe la bandeja.
+    /// Ventana (segundos atrás; 0 = SIN límite de tiempo) y tope, luego
+    /// suscribe la bandeja.
     pub fn subscribe(&mut self, n_seconds: i64, n_limit: i64) -> Result<()> {
-        self.inner.n_seconds = n_seconds.max(1) as u64;
+        self.inner.n_seconds = n_seconds.max(0) as u64;
         self.inner.n_limit = n_limit.max(1) as usize;
         self.inner
             .subscribe()
