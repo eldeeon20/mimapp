@@ -22,7 +22,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 "#;
 
-/// Corre un shader arbitrario. Retorna (datos, ms) o error del compilador.
+/// Corre un shader arbitrario. Retorna (datos, ms, modo) o error del compilador.
+///
+/// AUTOMÁTICO: si el código pide `enable shader-f16` se normaliza a F32 al
+/// vuelo (el contrato del lab sube/lee buffers f32, así que es el camino
+/// correcto en CUALQUIER chip): nunca más pedimos deshabilitar nada.
 pub fn run(
     code: &str,
     input: &[f32],
@@ -30,12 +34,17 @@ pub fn run(
     px: f32,
     py: f32,
     pz: f32,
-) -> Result<(Vec<f32>, f64), String> {
-    // Si el shader pide f16 y el device no lo soporta, fallar CLARO
-    // (no un validation error críptico de wgpu).
-    if code.contains("shader-f16") && !super::has_f16() {
-        return Err("tu GPU no soporta f16: quitá 'enable shader-f16;' y usá f32"
-            .to_string());
+) -> Result<(Vec<f32>, f64, &'static str), String> {
+    let mut code = code.to_string();
+    let mut modo = "F32";
+    if code.contains("shader-f16") {
+        code = code
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("enable shader-f16"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        code = code.replace("<f16>", "<f32>").replace("f16(", "f32(");
+        modo = "AUTO F32";
     }
     let (device, queue) = super::ctx()?;
 
@@ -51,7 +60,7 @@ pub fn run(
     let ubo = super::uniform_buf(&device, &pb);
 
     let (layout, pipeline) =
-        super::build_pipeline(&device, code, &[(0, false), (1, true)])?;
+        super::build_pipeline(&device, &code, &[(0, false, false), (1, true, false)])?;
 
     let start = std::time::Instant::now();
     super::dispatch(

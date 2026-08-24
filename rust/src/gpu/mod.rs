@@ -118,11 +118,13 @@ pub fn uniform_buf(device: &wgpu::Device, bytes: &[u8]) -> wgpu::Buffer {
 }
 
 /// Pipeline compute desde código WGSL con los bindings indicados.
-/// `storage_rw`: índices de bindings storage read_write; el resto storage read.
+/// Cada entrada: (binding, es_uniform, storage_solo_lectura).
+/// El flag tiene que COINCIDIR con la declaración del WGSL (`var<storage,
+/// read>` vs `read_write`): si difiere, wgpu rechaza el pipeline.
 pub fn build_pipeline(
     device: &wgpu::Device,
     code: &str,
-    bindings: &[(u32, bool)], // (binding, is_uniform)
+    bindings: &[(u32, bool, bool)],
 ) -> Result<(wgpu::BindGroupLayout, wgpu::ComputePipeline), String> {
     check_wgsl(code)?;
     let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -131,7 +133,7 @@ pub fn build_pipeline(
     });
     let entries: Vec<wgpu::BindGroupLayoutEntry> = bindings
         .iter()
-        .map(|(i, is_uniform)| wgpu::BindGroupLayoutEntry {
+        .map(|(i, is_uniform, read_only)| wgpu::BindGroupLayoutEntry {
             binding: *i,
             visibility: wgpu::ShaderStages::COMPUTE,
             ty: if *is_uniform {
@@ -142,7 +144,7 @@ pub fn build_pipeline(
                 }
             } else {
                 wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    ty: wgpu::BufferBindingType::Storage { read_only: *read_only },
                     has_dynamic_offset: false,
                     min_binding_size: None,
                 }

@@ -37,7 +37,7 @@ pub fn run(input: &[f32], use_f16: bool) -> Result<(Vec<f32>, f64), String> {
     let buffer = super::storage_buf(&device, &bytes, false);
     let code = if use_f16 { GELU_F16 } else { GELU_F32 };
     let (layout, pipeline) =
-        super::build_pipeline(&device, code, &[(0, false)])?;
+        super::build_pipeline(&device, code, &[(0, false, false)])?;
 
     let start = std::time::Instant::now();
     super::dispatch(

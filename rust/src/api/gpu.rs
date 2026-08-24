@@ -16,6 +16,8 @@ pub struct GpuOpResult {
 pub struct ShaderRunResult {
     pub ok: bool,
     pub error: String,
+    /// Modo efectivo del Lab: "F32" o "AUTO F32" (normalizado en vuelo).
+    pub mode: String,
     pub data: Vec<f32>,
     pub elapsed_ms: f64,
 }
@@ -132,15 +134,17 @@ pub fn gpu_run_wgsl(
         param_y as f32,
         param_z as f32,
     ) {
-        Ok((data, ms)) => ShaderRunResult {
+        Ok((data, ms, modo)) => ShaderRunResult {
             ok: true,
             error: String::new(),
+            mode: modo.to_string(),
             data,
             elapsed_ms: ms,
         },
         Err(e) => ShaderRunResult {
             ok: false,
             error: e,
+            mode: String::new(),
             data: vec![],
             elapsed_ms: 0.0,
         },

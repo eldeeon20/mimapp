@@ -134,8 +134,15 @@ pub fn run(
     );
 
     let code = if use_f16 { ATTN_F16 } else { ATTN_F32 };
-    let (layout, pipeline) =
-        super::build_pipeline(&device, code, &[(0, false), (1, false), (2, true)])?;
+    let (layout, pipeline) = super::build_pipeline(
+        &device,
+        code,
+        &[
+            (0, false, true),  // packed_in: var<storage, read>
+            (1, false, false), // out: var<storage, read_write>
+            (2, true, false),  // p: uniform
+        ],
+    )?;
 
     let start = std::time::Instant::now();
     super::dispatch(

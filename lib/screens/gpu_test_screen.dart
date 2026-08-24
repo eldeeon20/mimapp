@@ -354,7 +354,7 @@ class _LabTabState extends State<_LabTab>
         _ok = r.ok;
         if (r.ok) {
           _resultColor = Colors.greenAccent;
-          _meta = 'OK · ${r.elapsedMs.toStringAsFixed(2)} ms · '
+          _meta = '${r.mode} · ${r.elapsedMs.toStringAsFixed(2)} ms · '
               '${r.data.length} elementos';
           _preview = r.data
               .take(12)
