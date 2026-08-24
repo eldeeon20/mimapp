@@ -121,8 +121,10 @@ impl NostrClient {
 
     /// Inicia la suscripción para recibir mensajes.
     /// Debe llamarse después de add_relays() y antes de poll_messages().
+    ///
+    /// Límites SIEMPRE presentes y configurables desde Dart: n_seconds
+    /// define la ventana (desde cuándo) y n_limit el tope de mensajes.
     pub fn subscribe(&mut self) -> Result<()> {
-        // Fetch messages based on n_seconds
         // Filter 1: Messages sent TO me (any kind)
         let filter_to_me = Filter::new()
             .pubkey(self.keys.public_key())
@@ -227,18 +229,11 @@ impl NostrClient {
                         });
                         match res {
                             Ok(UnwrappedGift { sender, rumor }) => {
-                                if rumor.kind == Kind::PrivateDirectMessage {
-                                    // LISTAR TODO (versión vieja): no se
-                                    // descarta por remitente; el peer
-                                    // configurado solo se marca en el log.
-                                    let hex = sender.to_string();
-                                    let corto = &hex[..8.min(hex.len())];
-                                    if sender == self.peer_pk {
-                                        self.logs.push("✓ DM del peer".to_string());
-                                    } else {
-                                        self.logs.push(format!(
-                                            "✓ DM de otro remitente ({corto}…) incluida"));
-                                    }
+                                if rumor.kind == Kind::PrivateDirectMessage
+                                    && sender == self.peer_pk
+                                {
+                                    self.logs
+                                        .push("✓ DM del peer".to_string());
                                     messages.push(ReceivedMessage {
                                         sender,
                                         content: rumor.content,
@@ -247,7 +242,7 @@ impl NostrClient {
                                 } else {
                                     let hex = sender.to_string();
                                     self.logs.push(format!(
-                                        "giftwrap no-DM ({}…, kind {}) fuera",
+                                        "giftwrap fuera ({}…, kind {})",
                                         &hex[..8.min(hex.len())],
                                         rumor.kind
                                     ));

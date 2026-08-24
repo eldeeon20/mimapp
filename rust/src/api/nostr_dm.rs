@@ -31,6 +31,7 @@ impl NostrDm {
     }
 
     /// Ventana de búsqueda y límite, luego se suscribe.
+    /// Ambos SIEMPRE activos; los setea Dart (campos Desde / Límite).
     pub fn subscribe(&mut self, n_seconds: i64, n_limit: i64) -> Result<()> {
         self.client.n_seconds = n_seconds.max(1) as u64;
         self.client.n_limit = n_limit.max(1) as usize;
