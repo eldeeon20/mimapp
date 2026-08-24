@@ -75,6 +75,11 @@ abstract final class RadialCatalog {
         icon: Icons.search_rounded,
         color: Colors.indigoAccent),
     RadialMenuItem(
+        key: 'nn',
+        label: 'Nostrn+',
+        icon: Icons.mark_email_unread_rounded,
+        color: Colors.orangeAccent),
+    RadialMenuItem(
         key: 'up',
         label: 'Pkarr',
         icon: Icons.dns_rounded,

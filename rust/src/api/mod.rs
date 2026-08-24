@@ -4,6 +4,7 @@ pub mod kem;
 pub mod laurelia;
 pub mod nostr_busca;
 pub mod nostr_dm;
+pub mod nostrn_gestion;
 pub mod nostr_keys;
 pub mod nostr_page;
 pub mod nostr_peer;

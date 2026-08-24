@@ -39,6 +39,11 @@
 //! ```
 
 mod client;
+mod gestion;
 mod relays;
+
+pub use gestion::{
+    cargar_cuenta, crear_cuenta, guardar_cuenta, hay_cuenta, GestionNostrn, MsgIn,
+};
 
 pub use client::{NostrClient, ReceivedMessage};
