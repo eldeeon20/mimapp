@@ -57,7 +57,7 @@ class _NostrBuscaScreenState extends State<NostrBuscaScreen> {
         setState(() {
           _resultados = [p];
           _estado =
-              p.name.isEmpty && p.display_name.isEmpty && p.about.isEmpty
+              p.name.isEmpty && p.displayName.isEmpty && p.about.isEmpty
                   ? 'sin metadata para ese npub'
                   : 'perfil listo';
         });
@@ -89,8 +89,8 @@ class _NostrBuscaScreenState extends State<NostrBuscaScreen> {
                     p.picture.isNotEmpty ? NetworkImage(p.picture) : null,
                 child: p.picture.isEmpty
                     ? Text(
-                        (p.display_name.isNotEmpty
-                                ? p.display_name
+                        (p.displayName.isNotEmpty
+                                ? p.displayName
                                 : p.name)
                             .toUpperCase()
                             .characters
@@ -103,7 +103,7 @@ class _NostrBuscaScreenState extends State<NostrBuscaScreen> {
             const SizedBox(height: 12),
             Center(
               child: Text(
-                p.display_name.isNotEmpty ? p.display_name : p.name,
+                p.displayName.isNotEmpty ? p.displayName : p.name,
                 style: Theme.of(context).textTheme.titleLarge,
               ),
             ),
@@ -133,7 +133,7 @@ class _NostrBuscaScreenState extends State<NostrBuscaScreen> {
   }
 
   String _titulo(rust.PerfilItem p) =>
-      p.display_name.isNotEmpty ? p.display_name : (p.name.isNotEmpty ? p.name : 'sin nombre');
+      p.displayName.isNotEmpty ? p.displayName : (p.name.isNotEmpty ? p.name : 'sin nombre');
 
   String _npubCorto(String npub) => npub.length <= 21
       ? npub

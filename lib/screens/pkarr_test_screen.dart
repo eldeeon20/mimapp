@@ -40,7 +40,7 @@ class _PkarrTestScreenState extends State<PkarrTestScreen> {
 
   Future<void> _init() async {
     final dir = await getApplicationSupportDirectory();
-    final has = rust.pkarrHasSavedKey(dirPath: dir.path);
+    final has = await rust.pkarrHasSavedKey(dir: dir.path);
     setState(() => _hasSavedKey = has);
     _say(has
         ? 'hay clave guardada · ingresá PIN y tocá Cargar'

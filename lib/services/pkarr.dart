@@ -27,7 +27,7 @@ class Pkarr {
       rust.pkarrPublicKey(secret: secret);
 
   /// ¿Hay identidad cifrada guardada en [dir]?
-  bool hasSavedKey(String dir) => rust.pkarrHasSavedKey(dirPath: dir);
+  Future<bool> hasSavedKey(String dir) => rust.pkarrHasSavedKey(dir: dir);
 
   /// Genera identidad, la guarda cifrada con el PIN y devuelve pubkey.
   Future<String> generateEncrypted({
