@@ -22,7 +22,10 @@ android {
 
     defaultConfig {
         applicationId = "com.example.pr_app"
-        minSdk = 21
+        // 26 (Android 8): lutimes() que usa unrar_sys (RAR de unarc-rs) solo
+        // existe en bionic desde API 26; con minSdk menor el sysroot oculta
+        // el símbolo y el build nativo falla en ulinks.cpp.
+        minSdk = 26
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
