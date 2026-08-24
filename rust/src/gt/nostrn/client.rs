@@ -6,6 +6,7 @@ use tokio::runtime::Runtime;
 use tokio::sync::{broadcast, Mutex};
 
 use crate::gt::eventlog::EventLog;
+use crate::gt::nostrn::relays::{compose_write_relays, connect_relays};
 
 /// Estructura que almacena la configuración del cliente Nostr para reutilización.
 /// No usa threads ni channels - todas las operaciones son síncronas desde la perspectiva del llamador.

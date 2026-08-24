@@ -210,7 +210,6 @@ pub fn read_back(
     src: &wgpu::Buffer,
     len: u64,
 ) -> Result<Vec<u8>, String> {
-    use std::sync::mpsc;
     let stage = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("readback"),
         size: len,

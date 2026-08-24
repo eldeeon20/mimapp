@@ -140,7 +140,8 @@ fn es_dir(nombre: &str) -> bool {
 /// infiere su T así nunca nombramos BufReader<File> vs MultiVolumeReader.
 macro_rules! con_archive {
     ($vols:expr, $password:expr, $f:path $(, $arg:expr)*) => {{
-        let vols: Vec<PathBuf> = $vols;
+        // Acepta Vec<PathBuf> o &Vec<PathBuf>: normaliza a dueño clonando.
+        let vols: Vec<PathBuf> = ($vols).clone();
         let opts = opciones($password);
         if vols.is_empty() {
             Err("sin partes para abrir".to_string())
