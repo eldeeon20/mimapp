@@ -49,9 +49,9 @@ fn parsear_npub(npub: &str) -> Result<PublicKey> {
 
 fn metadata_a_perfil(ev: &Event) -> Result<Perfil> {
     let md =
-        Metadata::from_json(ev.content()).context("kind 0 con JSON ilegible")?;
+        Metadata::from_json(ev.content).context("kind 0 con JSON ilegible")?;
     Ok(Perfil {
-        npub: ev.author().to_bech32().unwrap_or_default(),
+        npub: ev.author.to_bech32().unwrap_or_default(),
         name: md.name.unwrap_or_default(),
         display_name: md.display_name.unwrap_or_default(),
         about: md.about.unwrap_or_default(),
@@ -89,12 +89,12 @@ pub fn perfil_fetch(
     let client = rt.block_on(cliente_readonly(relays));
     let res: Result<Option<Perfil>> = rt.block_on(async {
         let events = client
-            .fetch_events(filtro, Some(Duration::from_secs(timeout_secs)))
+            .fetch_events(filtro, Duration::from_secs(timeout_secs))
             .await
             .context("consulta al relays falló")?;
         Ok(events
             .iter()
-            .max_by_key(|ev| ev.created_at().as_u64())
+            .max_by_key(|ev| ev.created_at.as_u64())
             .and_then(|ev| metadata_a_perfil(ev).ok()))
     });
     let _ = rt.block_on(client.disconnect());
@@ -125,7 +125,7 @@ pub fn buscar_usuarios(
     let client = rt.block_on(cliente_readonly(relays));
     let res: Result<Vec<Perfil>> = rt.block_on(async {
         let events = client
-            .fetch_events(filtro, Some(Duration::from_secs(timeout_secs)))
+            .fetch_events(filtro, Duration::from_secs(timeout_secs))
             .await
             .context("consulta a relays falló")?;
         let mut out: Vec<Perfil> = Vec::new();

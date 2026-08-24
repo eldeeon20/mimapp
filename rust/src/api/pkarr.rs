@@ -15,8 +15,6 @@ use pbkdf2::pbkdf2_hmac;
 use pkarr::dns::rdata::TXT;
 use pkarr::dns::Name;
 use pkarr::{Keypair, ResolvePolicy, SignedPacket};
-use rand::rngs::OsRng;
-use rand::RngCore;
 use sha2::{Digest, Sha256};
 
 pub const DEFAULT_RELAYS: &[&str] =
@@ -81,10 +79,8 @@ fn derive_pin_key(pin: &str, salt: &[u8]) -> [u8; 32] {
 
 fn save_encrypted_secret(dir: &str, pin: &str, secret: &[u8; 32]) -> Result<(), String> {
     let path = keyfile_path(dir);
-    let mut salt = [0u8; 16];
-    OsRng.fill_bytes(&mut salt);
-    let mut nonce_bytes = [0u8; 12];
-    OsRng.fill_bytes(&mut nonce_bytes);
+    let salt: [u8; 16] = rand::random();
+    let nonce_bytes: [u8; 12] = rand::random();
 
     let cipher = Aes256Gcm::new_from_slice(&derive_pin_key(pin, &salt)[..])
         .map_err(|e| format!("AES init: {e:?}"))?;
