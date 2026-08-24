@@ -69,6 +69,10 @@ class _ParticipantPaneState extends State<_ParticipantPane>
   final _messages = <_Bubble>[];
   final _scroll = ScrollController();
 
+  // Límites de consulta ajustables (igual que el DM NIP-17).
+  final _desdeCtrl = TextEditingController(text: '24');
+  final _limiteCtrl = TextEditingController(text: '50');
+
   NostrPeerChat? _chat;
   Timer? _timer;
   String? _sharedKey;
@@ -88,6 +92,8 @@ class _ParticipantPaneState extends State<_ParticipantPane>
     _secretCtrl.dispose();
     _peerCtrl.dispose();
     _msgCtrl.dispose();
+    _desdeCtrl.dispose();
+    _limiteCtrl.dispose();
     _scroll.dispose();
     super.dispose();
   }
@@ -115,18 +121,24 @@ class _ParticipantPaneState extends State<_ParticipantPane>
     });
     try {
       final chat = await NostrPeerChat.create();
+      final desdeH = int.tryParse(_desdeCtrl.text.trim()) ?? 24;
+      final limite = int.tryParse(_limiteCtrl.text.trim()) ?? 50;
       final shared = await chat.initParticipant(
         senderSecret: _secretCtrl.text.trim(),
         receiverPubkey: _peerCtrl.text.trim(),
         relays: _relays,
-        nLimit: 10,
+        nLimit: limite.clamp(1, 500),
+        since: desdeH <= 0 ? 0 : desdeH * 3600,
       );
+      // Ventana de frescura del poll alineada con "Desde".
+      await chat.setWindow(desdeH <= 0 ? 86400 * 365 : desdeH * 3600);
       // FIX CRÍTICO: antes el chat nunca se guardaba → poll no hacía nada
       // y send explotaba en silencio con null-check.
       setState(() {
         _chat = chat;
         _sharedKey = shared;
-        _log.add('✓ conectado como participante');
+        _log.add('✓ conectado como participante · '
+            'desde ${desdeH <= 0 ? "TODO" : "${desdeH}h"} · límite ${limite.clamp(1, 500)}');
       });
       await _drainLogs(chat);
       _timer = Timer.periodic(const Duration(seconds: 2), (_) => _poll());
@@ -252,6 +264,36 @@ class _ParticipantPaneState extends State<_ParticipantPane>
           initial: _relays,
           onChanged: (v) => setState(() => _relays = List.of(v)),
         ),
+        const SizedBox(height: 8),
+        Row(children: [
+          Expanded(
+            child: TextField(
+              controller: _desdeCtrl,
+              keyboardType: TextInputType.number,
+              style: const TextStyle(fontSize: 11),
+              decoration: const InputDecoration(
+                labelText: 'Desde (h atrás)',
+                labelStyle: TextStyle(fontSize: 10),
+                isDense: true,
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: TextField(
+              controller: _limiteCtrl,
+              keyboardType: TextInputType.number,
+              style: const TextStyle(fontSize: 11),
+              decoration: const InputDecoration(
+                labelText: 'Límite msgs',
+                labelStyle: TextStyle(fontSize: 10),
+                isDense: true,
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ),
+        ]),
         const SizedBox(height: 8),
         FilledButton.icon(
           onPressed: _busy ? null : _connect,
@@ -407,6 +449,9 @@ class _ObserverPaneState extends State<_ObserverPane>
   final _keyCtrl = TextEditingController();
   final _messages = <String>[];
   List<String> _relays = List.of(_defaultRelays); // editable
+  // Límites del observador también ajustables.
+  final _desdeCtrl = TextEditingController(text: '24');
+  final _limiteCtrl = TextEditingController(text: '50');
   NostrPeerChat? _chat;
   Timer? _timer;
   bool _busy = false;
@@ -421,6 +466,8 @@ class _ObserverPaneState extends State<_ObserverPane>
     _timer?.cancel();
     _chat?.close();
     _keyCtrl.dispose();
+    _desdeCtrl.dispose();
+    _limiteCtrl.dispose();
     super.dispose();
   }
 
@@ -436,10 +483,19 @@ class _ObserverPaneState extends State<_ObserverPane>
     });
     try {
       final chat = await NostrPeerChat.create();
-      await chat.initObserver(sharedKeyHex: _keyCtrl.text.trim(), relays: _relays);
+      final desdeH = int.tryParse(_desdeCtrl.text.trim()) ?? 24;
+      final limite = int.tryParse(_limiteCtrl.text.trim()) ?? 50;
+      await chat.initObserver(
+        sharedKeyHex: _keyCtrl.text.trim(),
+        relays: _relays,
+        nLimit: limite.clamp(1, 500),
+        since: desdeH <= 0 ? 0 : desdeH * 3600,
+      );
+      await chat.setWindow(desdeH <= 0 ? 86400 * 365 : desdeH * 3600);
       setState(() {
         _chat = chat;
-        _log.add('✓ observador conectado (solo lectura)');
+        _log.add('✓ observador conectado (solo lectura) · '
+            'desde ${desdeH <= 0 ? "TODO" : "${desdeH}h"} · límite ${limite.clamp(1, 500)}');
       });
       await _drainLogs(chat);
       _timer = Timer.periodic(const Duration(seconds: 2), (_) => _poll());
@@ -584,6 +640,36 @@ class _ObserverPaneState extends State<_ObserverPane>
                 initial: _relays,
                 onChanged: (v) => setState(() => _relays = List.of(v)),
               ),
+              const SizedBox(height: 8),
+              Row(children: [
+                Expanded(
+                  child: TextField(
+                    controller: _desdeCtrl,
+                    keyboardType: TextInputType.number,
+                    style: const TextStyle(fontSize: 11),
+                    decoration: const InputDecoration(
+                      labelText: 'Desde (h atrás)',
+                      labelStyle: TextStyle(fontSize: 10),
+                      isDense: true,
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: TextField(
+                    controller: _limiteCtrl,
+                    keyboardType: TextInputType.number,
+                    style: const TextStyle(fontSize: 11),
+                    decoration: const InputDecoration(
+                      labelText: 'Límite msgs',
+                      labelStyle: TextStyle(fontSize: 10),
+                      isDense: true,
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ),
+              ]),
               const SizedBox(height: 8),
               FilledButton.icon(
                 onPressed: _busy ? null : _connect,
