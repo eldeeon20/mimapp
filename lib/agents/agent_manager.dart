@@ -15,6 +15,9 @@ import 'tools.dart';
 
 enum AgentStatus { idle, running, waitingPermission, stopped, error }
 
+/// Cómo se poda el historial al superar el presupuesto de contexto.
+enum HistModo { ventana, resumen, hibrido }
+
 class AgentMsg {
   final String role; // user | assistant | tool
   final String content;
@@ -42,6 +45,20 @@ class Agent {
   Map<String, dynamic>? pendingToolArgs;
   int iterations = 0;
   bool stopFlag = false;
+
+  /// Cómo se poda el historial cuando supera el presupuesto de contexto.
+  /// ventana: últimos N mensajes + marcador (menos tokens).
+  /// resumen: cola vieja → llamada corta al modelo que la resume.
+  /// hibrido: como resumen pero refresca el caché solo cuando el
+  /// desborde crece 1.5x desde el último resumen.
+  HistModo histModo = HistModo.ventana;
+
+  /// Resumen vigente de lo podado (modos resumen/hibrido).
+  String histResumenCache = '';
+
+  /// Caracteres evictados que cubre [histResumenCache] (umbral híbrido).
+  int histCubiertoChars = 0;
+
   Completer<bool>? _permissionWaiter;
 
   /// Chat individual del agente (se envía como historial).
@@ -66,6 +83,9 @@ class Agent {
         'provider': providerId,
         'model': model,
         'permissions': permissions.map((p) => p.name).toList(),
+        'histModo': histModo.name,
+        'histResumen': histResumenCache,
+        'histCubierto': histCubiertoChars,
         'log': log.map((m) => m.toJson()).toList(),
       };
 
@@ -80,9 +100,15 @@ class Agent {
                 AgentPermission.values.firstWhere((p) => p.name == s,
                     orElse: () => AgentPermission.readFiles))
             .toSet(),
-      )..log.addAll(((j['log'] as List?) ?? [])
-          .map((e) => AgentMsg.fromJson(e))
-          .toList());
+      )
+        ..histModo = HistModo.values.firstWhere(
+            (m) => m.name == (j['histModo'] ?? 'ventana'),
+            orElse: () => HistModo.ventana)
+        ..histResumenCache = (j['histResumen'] ?? '') as String
+        ..histCubiertoChars = ((j['histCubierto'] as num?) ?? 0).toInt()
+        ..log.addAll(((j['log'] as List?) ?? [])
+            .map((e) => AgentMsg.fromJson(e))
+            .toList());
 }
 
 /// Núcleo estilo FilosoIA portado a Dart puro: agentes con misión que
@@ -96,6 +122,14 @@ class AgentManager extends ChangeNotifier {
 
   static const _fileName = 'filosoia_agents.pr';
   static const _maxIterations = 15;
+
+  /// Presupuesto de historial en caracteres (~6k tokens). Si el log lo
+  /// supera se poda según [HistModo] antes de cada POST.
+  static const int kHistMaxChars = 24000;
+
+  /// Gancho futuro: provider alternativo para resumir (ej. modelo
+  /// local). null = usar el mismo provider del agente.
+  static const String? kProveedorResumenOverride = null;
 
   final List<Agent> agents = [];
   bool _loaded = false;
@@ -226,6 +260,135 @@ class AgentManager extends ChangeNotifier {
     unawaited(_loop(a));
   }
 
+  // ------------------------------------------------ historial con poda
+
+  Map<String, dynamic> _mapMsg(AgentMsg m) => m.role == 'tool'
+      ? {
+          'role': 'tool',
+          'tool_call_id': m.toolName ?? m.content.hashCode,
+          'content': m.content,
+        }
+      : {'role': m.role, 'content': m.content};
+
+  /// Índice de arranque de la ventana: hacia atrás hasta entrar en el
+  /// presupuesto, y si cae sobre un resultado 'tool' lo salta para no
+  /// mandar un tool huérfano (regla fija en todos los modos).
+  int _inicioVentana(List<AgentMsg> log) {
+    var start = log.length;
+    var acc = 0;
+    while (start > 0 && acc + log[start - 1].content.length <= kHistMaxChars) {
+      start--;
+      acc += log[start].content.length;
+    }
+    while (start < log.length && log[start].role == 'tool') {
+      start++;
+    }
+    return start;
+  }
+
+  /// Resumen corto de la cola vieja. null = falló → caller usa ventana.
+  Future<String?> _resumir(Agent a, List<AgentMsg> viejos) async {
+    try {
+      final pid = kProveedorResumenOverride ?? a.providerId;
+      final prov = providerById(pid);
+      if (prov == null) return null;
+      final key = KeyVault.instance.nextKey(pid);
+      if (key == null) return null;
+      final texto =
+          viejos.map((m) => '${m.role}: ${_clip(m.content, 400)}').join('\n');
+      final res = await _http
+          .post(
+            Uri.parse('${KeyVault.instance.baseUrlFor(prov)}/chat/completions'),
+            headers: {
+              'authorization': 'Bearer $key',
+              'content-type': 'application/json',
+            },
+            body: jsonEncode({
+              'model': a.model,
+              'messages': [
+                {
+                  'role': 'system',
+                  'content':
+                      'Resumí en español esta conversación en máximo 300 '
+                          'palabras, conservando datos, decisiones y pendientes.'
+                },
+                {'role': 'user', 'content': texto},
+              ],
+              'max_tokens': 400,
+              'temperature': 0.2,
+            }),
+          )
+          .timeout(const Duration(seconds: 60));
+      if (res.statusCode != 200) return null;
+      final out =
+          ((jsonDecode(res.body)['choices'][0]['message'])['content'] ?? '')
+              .toString();
+      return out.isEmpty ? null : out;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Arma los messages del POST aplicando [HistModo] si el log desborda.
+  /// mission SIEMPRE va completa al frente.
+  Future<List<Map<String, dynamic>>> _mensajesParaEnviar(Agent a) async {
+    final total = a.log.fold<int>(0, (n, m) => n + m.content.length);
+    if (total <= kHistMaxChars) {
+      return [for (final m in a.log) _mapMsg(m)];
+    }
+
+    final start = _inicioVentana(a.log);
+    final evictados = a.log.take(start).toList();
+    final evictChars = total -
+        a.log.skip(start).fold<int>(0, (n, m) => n + m.content.length);
+    final ventana = [
+      for (final m in a.log.skip(start)) _mapMsg(m),
+    ];
+    if (evictados.isEmpty) return ventana;
+
+    String? resumen;
+    switch (a.histModo) {
+      case HistModo.ventana:
+        resumen = null;
+      case HistModo.resumen:
+        resumen = await _resumir(a, evictados);
+      case HistModo.hibrido:
+        if (a.histResumenCache.isEmpty ||
+            evictChars > a.histCubiertoChars * 3 ~/ 2) {
+          final r = await _resumir(a, evictados);
+          if (r != null) {
+            a.histResumenCache = r;
+            a.histCubiertoChars = evictChars;
+            _persist();
+          }
+        }
+        resumen = a.histResumenCache.isEmpty ? null : a.histResumenCache;
+    }
+
+    if (resumen == null) {
+      // fallback silencioso a ventana
+      return [
+        {
+          'role': 'system',
+          'content':
+              '[se omitieron ${evictados.length} mensajes anteriores por límite de contexto]'
+        },
+        ...ventana,
+      ];
+    }
+    return [
+      {'role': 'system', 'content': 'Resumen de lo anterior: $resumen'},
+      ...ventana,
+    ];
+  }
+
+  /// Cambia el modo de historial desde la UI y persiste.
+  Future<void> setHistMode(Agent a, HistModo modo) async {
+    a.histModo = modo;
+    notifyListeners();
+    await _persist();
+  }
+
   Future<void> _loop(Agent a) async {
     a.iterations = 0;
     while (!a.stopFlag && a.iterations < _maxIterations) {
@@ -244,6 +407,10 @@ class AgentManager extends ChangeNotifier {
 
       http.Response res;
       try {
+        final mensajes = [
+          {'role': 'system', 'content': a.mission},
+          ...await _mensajesParaEnviar(a),
+        ];
         res = await _http.post(
           Uri.parse('${KeyVault.instance.baseUrlFor(providerById(a.providerId)!)}'
               '/chat/completions'),
@@ -253,16 +420,7 @@ class AgentManager extends ChangeNotifier {
           },
           body: jsonEncode({
             'model': a.model,
-            'messages': [
-              {'role': 'system', 'content': a.mission},
-              ...a.log.map((m) => m.role == 'tool'
-                  ? {
-                      'role': 'tool',
-                      'tool_call_id': m.toolName ?? m.content.hashCode,
-                      'content': m.content,
-                    }
-                  : {'role': m.role, 'content': m.content}),
-            ],
+            'messages': mensajes,
             'tools': [for (final t in AGENT_TOOLS) t.toSchema()],
             'temperature': 0.4,
           }),

@@ -368,19 +368,35 @@ class _FilosoiaScreenState extends State<FilosoiaScreen>
     final a = mgr.byId(_chatAgentId!) ?? list.first;
 
     return Column(children: [
-      DropdownButton<String>(
-        value: a.id,
-        isExpanded: true,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        items: [
-          for (final ag in list)
-            DropdownMenuItem(
-                value: ag.id,
-                child: Text('${ag.name} · ${ag.status.name}',
-                    overflow: TextOverflow.ellipsis)),
-        ],
-        onChanged: (v) => setState(() => _chatAgentId = v),
-      ),
+      Row(children: [
+        Expanded(
+          child: DropdownButton<String>(
+            value: a.id,
+            isExpanded: true,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            items: [
+              for (final ag in list)
+                DropdownMenuItem(
+                    value: ag.id,
+                    child: Text('${ag.name} · ${ag.status.name}',
+                        overflow: TextOverflow.ellipsis)),
+            ],
+            onChanged: (v) => setState(() => _chatAgentId = v),
+          ),
+        ),
+        IconButton(
+          tooltip: 'historial: ${a.histModo.name}',
+          icon: Icon(
+            switch (a.histModo) {
+              HistModo.ventana => Icons.notes_rounded,
+              HistModo.resumen => Icons.summarize_rounded,
+              HistModo.hibrido => Icons.auto_awesome_rounded,
+            },
+            size: 18,
+          ),
+          onPressed: () => _elegirHistMode(mgr, a),
+        ),
+      ]),
       Expanded(child: ListView.builder(
         reverse: false,
         itemCount: a.log.length,
@@ -433,6 +449,43 @@ class _FilosoiaScreenState extends State<FilosoiaScreen>
   }
 
   final TextEditingController _chatCtrl = TextEditingController();
+
+  void _elegirHistMode(AgentManager mgr, Agent a) {
+    showModalBottomSheet(
+      context: context,
+      builder: (sheetCtx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Padding(
+              padding: EdgeInsets.all(12),
+              child: Text('Historial del agente',
+                  style: TextStyle(fontWeight: FontWeight.bold))),
+          for (final m in HistModo.values)
+            RadioListTile<HistModo>(
+              value: m,
+              groupValue: a.histModo,
+              title: Text(switch (m) {
+                HistModo.ventana => 'Ventana · menos tokens',
+                HistModo.resumen => 'Resumen · máxima continuidad',
+                HistModo.hibrido => 'Híbrido · resumen con refresco',
+              }),
+              subtitle: Text(switch (m) {
+                HistModo.ventana =>
+                  'envía los últimos mensajes que entran en el presupuesto',
+                HistModo.resumen =>
+                  'la parte vieja se resume con una llamada al modelo',
+                HistModo.hibrido =>
+                  'como resumen, pero refresca solo cuando el desborde crece',
+              }),
+              onChanged: (v) {
+                if (v == null) return;
+                mgr.setHistMode(a, v);
+                Navigator.pop(sheetCtx);
+              },
+            ),
+        ]),
+      ),
+    );
+  }
 
   void _sendTask(Agent a) {
     final t = _chatCtrl.text.trim();
