@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../services/nostr_keys.dart';
 import '../services/nostr_peer_chat.dart';
+import '../widgets/relay_editor.dart';
 
 /// Test del chat con observador (patrón Mostro / clave compartida ECDH):
 /// Participante A y Participante B conversan por relays; un Observador con
@@ -44,7 +45,7 @@ class NostrPeerTestScreen extends StatelessWidget {
 // Combo probado de Gtool (589 msgs recibidos): nos.lol + primal.net.
 // nostr.wine es de pago y no entrega gift wraps anónimos; damus a veces
 // filtra kind 1059 sin auth.
-const _relays = [
+const _defaultRelays = [
   'wss://nos.lol',
   'wss://relay.primal.net',
 ];
@@ -71,6 +72,8 @@ class _ParticipantPaneState extends State<_ParticipantPane>
   NostrPeerChat? _chat;
   Timer? _timer;
   String? _sharedKey;
+  String? _generatedNpub; // pub visible al generar keys
+  List<String> _relays = List.of(_defaultRelays); // editable
   bool _busy = false;
   String _error = '';
   final _log = <String>[];
@@ -92,8 +95,10 @@ class _ParticipantPaneState extends State<_ParticipantPane>
   Future<void> _generateKeys() async {
     final secret = await _keys.generate();
     final nsec = await _keys.toNsec(secret);
+    final npub = await _keys.toNpub(secret);
     setState(() {
       _secretCtrl.text = nsec;
+      _generatedNpub = npub;
       _error = '';
     });
   }
@@ -214,6 +219,24 @@ class _ParticipantPaneState extends State<_ParticipantPane>
           ),
         ),
         const SizedBox(height: 8),
+        if (_generatedNpub != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8, left: 4),
+            child: Row(children: [
+              const Text('npub de ${widget.label}: ',
+                  style: TextStyle(fontSize: 9, color: Colors.white38)),
+              Expanded(
+                child: InkWell(
+                  onTap: () => Clipboard.setData(
+                      ClipboardData(text: _generatedNpub!)),
+                  child: Text(_short(_generatedNpub!),
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontSize: 9, color: Colors.greenAccent)),
+                ),
+              ),
+            ]),
+          ),
         TextField(
           controller: _peerCtrl,
           style: const TextStyle(fontSize: 11),
@@ -225,16 +248,9 @@ class _ParticipantPaneState extends State<_ParticipantPane>
           ),
         ),
         const SizedBox(height: 8),
-        Wrap(
-          spacing: 4,
-          children: _relays
-              .map((r) => Chip(
-                    label: Text(r.replaceAll('wss://', ''),
-                        style: const TextStyle(fontSize: 8)),
-                    visualDensity: VisualDensity.compact,
-                    backgroundColor: Colors.white.withValues(alpha: .04),
-                  ))
-              .toList(),
+        RelayEditor(
+          initial: _relays,
+          onChanged: (v) => setState(() => _relays = List.of(v)),
         ),
         const SizedBox(height: 8),
         FilledButton.icon(
@@ -283,8 +299,7 @@ class _ParticipantPaneState extends State<_ParticipantPane>
         ]),
       ),
       Expanded(child: _bubbles()),
-      Row(children: [
-        Expanded(
+      Row(children: [        Expanded(
           child: TextField(
             controller: _msgCtrl,
             style: const TextStyle(fontSize: 12),
@@ -301,8 +316,30 @@ class _ParticipantPaneState extends State<_ParticipantPane>
           onPressed: _send,
         ),
       ]),
+      _ticker(),
       _logPanel(),
     ]);
+  }
+
+  /// Última línea del log siempre visible (heartbeat sin abrir el Registro).
+  Widget _ticker() {
+    return Padding(
+      padding: const EdgeInsets.only(top: 2),
+      child: Text(
+        _log.isEmpty ? '' : _log.last,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          fontSize: 9,
+          fontFamily: 'monospace',
+          color: _log.last.startsWith('✗')
+              ? Colors.redAccent
+              : (_log.last.startsWith('✓')
+                  ? Colors.greenAccent
+                  : Colors.white38),
+        ),
+      ),
+    );
   }
 
   Widget _logPanel() {
@@ -369,6 +406,7 @@ class _ObserverPaneState extends State<_ObserverPane>
     with AutomaticKeepAliveClientMixin {
   final _keyCtrl = TextEditingController();
   final _messages = <String>[];
+  List<String> _relays = List.of(_defaultRelays); // editable
   NostrPeerChat? _chat;
   Timer? _timer;
   bool _busy = false;
@@ -463,6 +501,26 @@ class _ObserverPaneState extends State<_ObserverPane>
     );
   }
 
+  Widget _tickerObs() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Text(
+        _log.isEmpty ? '' : _log.last,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          fontSize: 9,
+          fontFamily: 'monospace',
+          color: _log.last.startsWith('✗')
+              ? Colors.redAccent
+              : (_log.last.startsWith('✓')
+                  ? Colors.greenAccent
+                  : Colors.white38),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
@@ -471,9 +529,10 @@ class _ObserverPaneState extends State<_ObserverPane>
       padding: const EdgeInsets.all(8),
       child: connected
           ? ListView.builder(
-              itemCount: _messages.length + 2,
+              itemCount: _messages.length + 3,
               itemBuilder: (_, i) {
-                if (i == _messages.length + 1) return _logPanel();
+                if (i == _messages.length + 2) return _logPanel();
+                if (i == _messages.length + 1) return _tickerObs();
                 if (i == 0) {
                   return Container(
                     margin: const EdgeInsets.only(bottom: 8),
@@ -521,6 +580,11 @@ class _ObserverPaneState extends State<_ObserverPane>
                 style: TextStyle(fontSize: 10, color: Colors.white38),
               ),
               const SizedBox(height: 12),
+              RelayEditor(
+                initial: _relays,
+                onChanged: (v) => setState(() => _relays = List.of(v)),
+              ),
+              const SizedBox(height: 8),
               FilledButton.icon(
                 onPressed: _busy ? null : _connect,
                 icon: _busy

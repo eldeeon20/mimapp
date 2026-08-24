@@ -220,6 +220,7 @@ impl SharedKeyChat {
         let shared_guard = self.shared_keys.lock().unwrap();
 
         let mut messages = Vec::new();
+        let mut event_count = 0usize;
         let shared_keys = match shared_guard.as_ref() {
             Some(k) => k.clone(),
             None => {
@@ -238,7 +239,14 @@ impl SharedKeyChat {
         loop {
             match notifications.try_recv() {
                 Ok(notification) => {
-                    if let RelayPoolNotification::Event { event, .. } = notification {
+                    if let RelayPoolNotification::Event { relay_url, event, .. } = notification {
+                        // Loguear TODOS los eventos (heartbeat visible).
+                        self.logs.push(format!(
+                            "ev kind {} vía {}",
+                            event.kind,
+                            relay_url.as_str()
+                        ));
+                        event_count += 1;
                         let res = self.runtime.block_on(async {
                             match mostro_unwrap(&shared_keys, *event).await {
                                 Ok(inner_event) => {
@@ -274,10 +282,12 @@ impl SharedKeyChat {
                 }
             }
         }
-        if !messages.is_empty() {
-            self.logs
-                .push(format!("poll: {} mensaje(s) nuevo(s)", messages.len()));
-        }
+        // Resumen SIEMPRE, aunque el tick venga vacío.
+        self.logs.push(format!(
+            "poll: {} evento(s) · {} válido(s)",
+            event_count,
+            messages.len()
+        ));
         Ok(messages)
     }
 

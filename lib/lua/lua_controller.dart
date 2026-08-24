@@ -456,10 +456,14 @@ end
   }
 
   int _tableLength(int idx) {
-    // iteración con next() (lua_dardo no expone el operador #)
+    // iteración con next() (lua_dardo no expone el operador #).
+    // OJO: hay que resolver el índice ANTES del pushNil — si se pasa un
+    // índice relativo (-1) después de apilar el nil, next() recibe el nil
+    // y lanza "table expected for iteration".
+    final abs = idx < 0 ? _lua.getTop() + idx + 1 : idx;
     var n = 0;
     _lua.pushNil();
-    while (_lua.next(idx) != 0) {
+    while (_lua.next(abs) != 0) {
       n++;
       _lua.pop(1);
     }

@@ -148,7 +148,7 @@ class _HomePageState extends State<HomePage> {
             case 'rv':
               _openTest(context, 'Voto anónimo BLSAG', const RingVoteTestScreen());
             case 'ip':
-              _openTest(context, 'IPFS local (offline)', const IpfsTestScreen());
+              _openTest(context, 'IPFS', const IpfsTestScreen());
             case 'ua':
               _openTest(context, 'Unarc · RAR/7z/ZIP', const UnarcTestScreen());
           }

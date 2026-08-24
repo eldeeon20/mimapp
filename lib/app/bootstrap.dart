@@ -28,8 +28,8 @@ Future<void> initApp() async {
   await _initNotifications();
   // SERVICIO EN SEGUNDO PLANO DESACTIVADO (el botón Salir no funcionaba).
   // await _initBackgroundService();
-  // Notificación persistente con botón ✕ para salir (sin servicio de fondo).
-  await NotificationService.showServiceNotification();
+  // Notificación ✕ fuera: queda SOLO "Estado de Secure App" (777).
+  // await NotificationService.showServiceNotification();
   await _initRust();
   await _initColab();
   await Settings.instance.load();
