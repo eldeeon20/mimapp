@@ -40,15 +40,6 @@ Convenciones clave:
   (spawn en runtime propio + canal).
 - Errores siempre en castellano y accionables, nunca crudos.
 
-## Compilar
-
-No hace falta toolchain local: **GitHub Actions compila todo** (`.github/workflows/build.yml`)
-en cada push a `main`: genera bindings Rust↔Dart, analiza Dart, cruza Rust para
-aarch64-android y produce el APK.
-
-Para desarrollo local: Flutter stable + Rust stable + targets android del NDK,
-y regenerar bindings igual que hace CI antes de `flutter analyze`.
-
 ## Probar Iroh entre dos dispositivos
 
 1. En ambos: menú radial → **Iroh** → *Iniciar nodo*.
