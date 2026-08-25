@@ -14,7 +14,8 @@ use iroh::endpoint::presets;
 use iroh::protocol::Router;
 use iroh::Endpoint;
 use iroh_blobs::ticket::BlobTicket;
-use iroh_blobs::{BlobsProtocol, MemStore};
+use iroh_blobs::store::mem::MemStore;
+use iroh_blobs::BlobsProtocol;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -55,21 +56,17 @@ impl IrohPar {
         if g.is_some() {
             return Err(anyhow!("el nodo ya está corriendo"));
         }
-        self.logs.push("conectando a la red iroh…".into());
+        self.logs.push("conectando a la red iroh…");
         let endpoint = self.runtime.block_on(async {
             let ep = Endpoint::bind(presets::N0)
                 .await
                 .context("bind endpoint")?;
-            ep.online()
-                .await
-                .context("esperando relay/online")?;
+            ep.online().await;
             Ok::<_, anyhow::Error>(ep)
         })?;
         let id = endpoint.id().to_string();
 
-        let store = Arc::new(
-            MemStore::new().context("creando almacén de blobs")?,
-        );
+        let store = Arc::new(MemStore::new());
         let blobs = BlobsProtocol::new(&store, None);
         let router = Router::builder(endpoint.clone())
             .accept(iroh_blobs::ALPN, blobs)
@@ -168,7 +165,7 @@ impl IrohPar {
             let _ = vivo.router.shutdown().await;
             vivo.endpoint.close().await;
         });
-        self.logs.push("■ nodo iroh apagado".into());
+        self.logs.push("■ nodo iroh apagado");
         Ok(())
     }
 

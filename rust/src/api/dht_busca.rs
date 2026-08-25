@@ -55,7 +55,7 @@ impl MotorDht {
 
     /// Arranca el nodo servidor + captura. pasivo/activo combinables.
     pub async fn start(&self, pasivo: bool, activo: bool) -> Result<(), String> {
-        self.con(|m| {
+        self.con_mut(|m| {
             m.start(pasivo, activo)
                 .map_err(|e| format!("dht start: {e:#}"))
         })?
@@ -63,7 +63,7 @@ impl MotorDht {
 
     /// Para el spider y guarda índice.
     pub async fn stop(&self) -> Result<(), String> {
-        self.con(|m| m.stop().map_err(|e| format!("dht stop: {e:#}")))?
+        self.con_mut(|m| m.stop().map_err(|e| format!("dht stop: {e:#}")))?
     }
 
     /// Nuevos hallazgos desde el poll anterior.
@@ -121,6 +121,13 @@ impl MotorDht {
     fn con<T>(&self, f: impl FnOnce(&DhtBusca) -> T) -> Result<T, String> {
         let g = self.inner.lock().map_err(|_| "mutex envenenado")?;
         let m = g.as_ref().ok_or_else(|| "motor caído".to_string())?;
+        Ok(f(m))
+    }
+
+    /// Variante mutable para operaciones de ciclo de vida.
+    fn con_mut<T>(&self, f: impl FnOnce(&mut DhtBusca) -> T) -> Result<T, String> {
+        let mut g = self.inner.lock().map_err(|_| "mutex envenenado")?;
+        let m = g.as_mut().ok_or_else(|| "motor caído".to_string())?;
         Ok(f(m))
     }
 }

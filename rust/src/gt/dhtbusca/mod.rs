@@ -14,10 +14,10 @@
 //! local acumulado acá. Mismo enfoque del crawler de referencia.
 
 use anyhow::{anyhow, Context, Result};
-use mainline::{
-    Dht, GetPeersRequestArguments, Id, PutRequest, PutRequestSpecific, RequestFilter,
-    RequestTypeSpecific, ServerSettings,
+use mainline::rpc::{
+    GetPeersRequestArguments, PutRequest, PutRequestSpecific, RequestTypeSpecific,
 };
+use mainline::{Dht, Id, RequestFilter, ServerSettings};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddrV4;
@@ -71,7 +71,7 @@ fn ahora_ms() -> i64 {
 // ----------------------------------------------------------------- filtro
 
 /// Captura TODOS los info_hashes que pasan por nuestro nodo.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct FiltroAtrapador {
     tx: Arc<Sender<String>>,
 }
@@ -167,7 +167,7 @@ impl DhtBusca {
             let dht = match Dht::builder()
                 .server_mode()
                 .server_settings(ServerSettings {
-                    filter,
+                    filter: filtro,
                     ..ServerSettings::default()
                 })
                 .bootstrap(BOOTSTRAP)
@@ -208,7 +208,7 @@ impl DhtBusca {
                     std::thread::sleep(Duration::from_millis(500));
                 }
             }
-            logs.push("■ spider detenido".into());
+            logs.push("■ spider detenido");
         })?;
         self.hilo_spider = Some(handle);
 
@@ -246,7 +246,7 @@ impl DhtBusca {
         }
         self.stop.store(true, Ordering::SeqCst);
         guardar(&self.dir_cache.join("dhtbusca.json"), &self.indice)?;
-        self.logs.push("✓ detenido e índice guardado".into());
+        self.logs.push("✓ detenido e índice guardado");
         self.hilo_spider = None;
         Ok(())
     }
@@ -328,7 +328,7 @@ async fn meta_loop(
         }
     };
     // Misma fachada que api/torrent/list.rs (API estable en rqbit 9).
-    let api = librqbit::Api::from_session(&session);
+    let api = librqbit::Api::new(session.clone(), None);
 
     let mut pendientes: HashMap<String, Instant> = HashMap::new();
 
@@ -428,7 +428,7 @@ async fn meta_loop(
 
         tokio::time::sleep(Duration::from_secs(2)).await;
     }
-    logs.push("■ resolución de metadatos terminada".into());
+    logs.push("■ resolución de metadatos terminada");
 }
 
 // ---------------------------------------------------------------- helpers
