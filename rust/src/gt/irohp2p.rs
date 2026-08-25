@@ -310,11 +310,15 @@ impl IrohPar {
             .map_err(|_| anyhow!("el par se fue"))
     }
 
-    /// Mensajes recibidos desde la última lectura.
-    pub fn chat_leer(&self) -> Vec<LineaChat> {
+    /// Textos recibidos desde la última lectura (todos son del par;
+    /// los propios los agrega la UI al enviarlos).
+    pub fn chat_leer(&self) -> Vec<String> {
         std::mem::take(
             &mut *self.chat_entrantes.lock().unwrap_or_else(|e| e.into_inner()),
         )
+        .into_iter()
+        .map(|l| l.texto)
+        .collect()
     }
 
     pub fn chat_activo(&self) -> bool {

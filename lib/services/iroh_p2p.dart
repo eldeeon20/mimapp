@@ -22,7 +22,7 @@ class IrohP2p {
   Future<String> chatTicket() => _n.chatTicket();
   Future<void> chatConectar(String ticket) => _n.chatConectar(ticket: ticket);
   Future<void> chatMandar(String texto) => _n.chatMandar(texto: texto);
-  Future<List<rust.LineaChatItem>> chatLeer() => _n.chatLeer();
+  Future<List<String>> chatLeer() => _n.chatLeer();
   bool get chatActivo => _n.chatActivo();
 
   String? get nodeId => _n.nodeId();

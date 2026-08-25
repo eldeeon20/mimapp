@@ -3,7 +3,6 @@ import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../services/iroh_p2p.dart';
-import '../src/rust/api/iroh_p2p.dart' as rust;
 
 /// Ejemplo de transferencia de archivos por iroh-blobs:
 ///   ENVIAR:  iniciás nodo → ruta del archivo → ticket (copiá y mandalo
@@ -26,7 +25,7 @@ class _IrohTestScreenState extends State<IrohTestScreen> {
   final _nombreCtrl = TextEditingController(text: 'recibido.bin');
   final _chatTicketCtrl = TextEditingController();
   final _chatMsgCtrl = TextEditingController();
-  final List<rust.LineaChatItem> _chat = [];
+  final List<Map<String, String>> _chat = []; // {'de','texto'}
   String? _miChatTicket;
   String? _miId;
   String? _ticketGenerado;
@@ -106,8 +105,7 @@ class _IrohTestScreenState extends State<IrohTestScreen> {
         final t = _chatMsgCtrl.text.trim();
         if (t.isEmpty) return;
         await _nodo!.chatMandar(t);
-        setState(() =>
-            _chat.add(rust.LineaChatItem(de: 'yo', texto: t)));
+        setState(() => _chat.add({'de': 'yo', 'texto': t}));
         _chatMsgCtrl.clear();
       });
 

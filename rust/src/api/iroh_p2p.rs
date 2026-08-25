@@ -54,23 +54,9 @@ impl IrohViva {
         })?
     }
 
-    /// Línea de chat lista para la UI.
-    #[flutter_rust_bridge::frb]
-    #[derive(Clone)]
-    pub struct LineaChatItem {
-        pub de: String,
-        pub texto: String,
-    }
-
-    /// Mensajes entrantes desde la última lectura.
-    pub async fn chat_leer(&self) -> Vec<LineaChatItem> {
-        self.con(|p| {
-            p.chat_leer()
-                .into_iter()
-                .map(|l| LineaChatItem { de: l.de, texto: l.texto })
-                .collect()
-        })
-        .unwrap_or_default()
+    /// Textos entrantes desde la última lectura (lado del par).
+    pub async fn chat_leer(&self) -> Vec<String> {
+        self.con(|p| p.chat_leer()).unwrap_or_default()
     }
 
     /// Manda una línea por el canal vivo.
