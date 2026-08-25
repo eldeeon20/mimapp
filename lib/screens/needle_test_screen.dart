@@ -224,7 +224,7 @@ class _NeedleTestScreenState extends State<NeedleTestScreen> {
     }
   }
 
-  void _run() {
+  Future<void> _run() async {
     setState(() {
       _busy = true;
       _resultJson = null;
