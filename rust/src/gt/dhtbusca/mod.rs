@@ -14,10 +14,10 @@
 //! local acumulado acá. Mismo enfoque del crawler de referencia.
 
 use anyhow::{anyhow, Context, Result};
-use mainline::rpc::{
-    GetPeersRequestArguments, PutRequest, PutRequestSpecific, RequestTypeSpecific,
+use mainline::{
+    Dht, GetPeersRequestArguments, Id, PutRequest, PutRequestSpecific, RequestFilter,
+    RequestTypeSpecific, ServerSettings,
 };
-use mainline::{Dht, Id, RequestFilter, ServerSettings};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddrV4;
@@ -181,7 +181,7 @@ impl DhtBusca {
                 }
             };
             let _ = dht.bootstrapped();
-            logs.push("✓ nodo DHT servidor en red · ayudando a rutear".into());
+            logs.push("✓ nodo DHT servidor en red · ayudando a rutear");
 
             let mut vistos: HashSet<[u8; 20]> = HashSet::new();
             let mut ultimo_find_node = Instant::now();
@@ -354,9 +354,9 @@ async fn meta_loop(
                     pendientes.insert(hash.clone(), Instant::now());
                     let s = session.clone();
                     tokio::spawn(async move {
-                        let _ = librqbit::AddTorrent::from_url(magnet);
+                        let add = librqbit::AddTorrent::from_url(magnet);
                         let opts = librqbit::AddTorrentOptions::default();
-                        let _ = s.add_torrent(librqbit::AddTorrent::from_url(magnet), Some(opts)).await;
+                        let _ = s.add_torrent(add, Some(opts)).await;
                     });
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => break,

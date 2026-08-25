@@ -104,6 +104,10 @@ class _NostrnSocialState extends State<NostrnSocial> {
         if (t.isEmpty) throw 'texto vacío';
         final idResp = _respIdCtrl.text.trim();
         final autor = _respAutorCtrl.text.trim();
+        if (idResp.isNotEmpty != autor.isNotEmpty) {
+          throw 'para responder necesito id Y autor: usá "copiar ID" '
+              'en un post del muro (precarga ambos)';
+        }
         String id;
         if (idResp.isNotEmpty && autor.isNotEmpty) {
           final cita = _citaCtrl.text.trim();
@@ -182,22 +186,35 @@ class _NostrnSocialState extends State<NostrnSocial> {
       _card('6 · Publicar post', Colors.deepOrangeAccent, [
         _tf(_postCtrl, '¿qué estás pensando?', maxLines: 4),
         const SizedBox(height: 6),
-        Row(children: [
-          Expanded(child: _tf(_respIdCtrl, 'id evento a responder/citar (opcional)', monospace: true)),
-          const SizedBox(width: 6),
-          Expanded(child: _tf(_respAutorCtrl, 'npub del autor', monospace: true)),
-        ]),
-        const SizedBox(height: 6),
-        _tf(_citaCtrl, 'fragmento citado (si es cita)', maxLines: 2),
-        const SizedBox(height: 6),
         FilledButton.icon(
           onPressed: conectado && !_busy ? _publicar : null,
           icon: const Icon(Icons.send_rounded, size: 18),
           label: const Text('Publicar'),
         ),
-        const Text(
-            'para responder/citar: usá "copiar ID" en un post y pegalo acá',
-            style: TextStyle(fontSize: 9, color: Colors.white24)),
+        // responder/citar es OPCIONAL y va plegado: publicar no pide nada más
+        Theme(
+          data: Theme.of(context)
+              .copyWith(dividerColor: Colors.transparent),
+          child: ExpansionTile(
+            tilePadding: EdgeInsets.zero,
+            childrenPadding: const EdgeInsets.only(bottom: 6),
+            title: const Text('responder o citar (opcional)',
+                style: TextStyle(fontSize: 12)),
+            children: [
+              Row(children: [
+                Expanded(child: _tf(_respIdCtrl,
+                    'id evento (botón copiar ID del muro)',
+                    monospace: true)),
+                const SizedBox(width: 6),
+                Expanded(child:
+                    _tf(_respAutorCtrl, 'npub del autor', monospace: true)),
+              ]),
+              const SizedBox(height: 6),
+              _tf(_citaCtrl, 'fragmento a citar (vacío = responder simple)',
+                  maxLines: 2),
+            ],
+          ),
+        ),
       ]),
       _card('7 · Artículo largo (kind 30023)', Colors.pinkAccent, [
         _tf(_artTituloCtrl, 'título *'),

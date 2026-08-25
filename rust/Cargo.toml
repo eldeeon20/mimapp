@@ -41,7 +41,8 @@ reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"
 # --- GPU compute (WebGPU/WGSL nativo, backend Vulkan en Android) ---
 wgpu = "25"
 half = "2"
-mainline = "8"
+serde = { version = "1", features = ["derive"] }
+mainline = { path = "mainline" }
 # --- Iroh P2P (cliente+servidor de blobs, QUIC + relays n0) ---
 iroh = "1"
 iroh-blobs = "0.103"
