@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -30,6 +32,7 @@ class _TorTestScreenState extends State<TorTestScreen> {
   void initState() {
     super.initState();
     TorService.instance.addListener(_bump);
+    TorService.instance.refresh();
   }
 
   void _bump() => mounted ? setState(() {}) : null;

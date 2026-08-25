@@ -11,6 +11,10 @@ import '../src/rust/api/tor.dart' as rust;
 /// cliente y expone el proxy SOCKS5 local para cualquier HttpClient.
 /// Además trae listo el acceso por túnel para páginas comunes, descargas
 /// de CDN con progreso y git smart-http (https sobre socks5h).
+///
+/// Nota FRB: los bindings se generan async aunque el Rust sea sync, así que
+/// [refresh] consulta y cachea running/port para que los getters sean sync
+/// (mismo tratamiento que el otro agente aplicó a Needle).
 class TorService extends ChangeNotifier {
   TorService._();
   static final TorService instance = TorService._();
@@ -19,26 +23,36 @@ class TorService extends ChangeNotifier {
 
   bool _busy = false;
   String _state = 'apagado';
+  bool _running = false;
+  int? _port;
   final _log = <String>[];
 
   bool get busy => _busy;
   String get state => _state;
+  bool get running => _running;
+  int? get port => _port;
   List<String> get log => List.unmodifiable(_log);
-
-  int? get port => rust.torSocksPort();
-  bool get running => rust.torIsRunning();
 
   /// URL de proxy para cualquier cliente que soporte SOCKS5
   /// (reqwest Rust, git smart-http, curl…). Null si Tor está apagado.
   String? get proxyUrl {
-    final p = port;
-    return (p == null) ? null : 'socks5h://$host:$p';
+    final p = _port;
+    return (_running && p != null) ? 'socks5h://$host:$p' : null;
   }
 
   void _say(String m) {
     debugPrint('[tor] $m');
     _log.insert(0, m);
     if (_log.length > 40) _log.removeLast();
+    notifyListeners();
+  }
+
+  /// Consulta el estado real lado Rust y actualiza la caché local.
+  Future<void> refresh() async {
+    try {
+      _running = await rust.torIsRunning();
+      _port = await rust.torSocksPort();
+    } catch (_) {}
     notifyListeners();
   }
 
@@ -51,7 +65,7 @@ class TorService extends ChangeNotifier {
   }
 
   Future<void> start() async {
-    if (_busy || running) return;
+    if (_busy || _running) return;
     _busy = true;
     _state = 'bootstrapeando…';
     notifyListeners();
@@ -64,7 +78,7 @@ class TorService extends ChangeNotifier {
 
       final port = await _freePort();
       // Llamada bloqueante de varios segundos (corre en hilo Rust).
-      final msg = rust.torStart(
+      final msg = await rust.torStart(
           socksPort: port,
           stateDir: stateDir.path,
           cacheDir: cacheDir.path);
@@ -75,20 +89,20 @@ class TorService extends ChangeNotifier {
       _say('ERROR: $e');
     } finally {
       _busy = false;
-      notifyListeners();
+      await refresh();
     }
   }
 
   Future<void> stop() async {
     if (_busy) return;
     try {
-      rust.torStop();
+      await rust.torStop();
       _state = 'apagado';
       _say('detenido');
     } catch (e) {
       _say('ERROR stop: $e');
     }
-    notifyListeners();
+    await refresh();
   }
 
   Future<void> rebootstrap() async {
@@ -97,20 +111,20 @@ class TorService extends ChangeNotifier {
     _state = 're-bootstrapeando…';
     notifyListeners();
     try {
-      rust.torRebootstrap();
+      await rust.torRebootstrap();
       _state = 'en marcha';
       _say('re-bootstrap ok');
     } catch (e) {
       _say('ERROR re-bootstrap: $e');
     } finally {
       _busy = false;
-      notifyListeners();
+      await refresh();
     }
   }
 
   Future<void> setDormant(bool soft) async {
     try {
-      rust.torSetDormant(soft: soft);
+      await rust.torSetDormant(soft: soft);
       _say(soft ? 'modo dormante soft' : 'modo normal');
     } catch (e) {
       _say('ERROR dormant: $e');
@@ -129,9 +143,8 @@ class TorService extends ChangeNotifier {
   /// GET HTTP(S) por el circuito: HttpClient común + SOCKS5 local.
   /// Sirve para páginas comunes (duckduckgo, check.torproject.org) y .onion.
   Future<String> httpGet(String url) async {
-    final p = port;
-    if (p == null) throw 'Tor no está corriendo';
-    final client = _tunnelClient(p);
+    if (!_running || _port == null) throw 'Tor no está corriendo';
+    final client = _tunnelClient(_port!);
     try {
       final req = await client.getUrl(Uri.parse(url));
       final res = await req.close();
@@ -152,9 +165,8 @@ class TorService extends ChangeNotifier {
     required String savePath,
     void Function(int got, int? total)? onProgress,
   }) async {
-    final p = port;
-    if (p == null) throw 'Tor no está corriendo';
-    final client = _tunnelClient(p);
+    if (!_running || _port == null) throw 'Tor no está corriendo';
+    final client = _tunnelClient(_port!);
     try {
       final req = await client.getUrl(Uri.parse(url));
       final res = await req.close();
@@ -162,7 +174,8 @@ class TorService extends ChangeNotifier {
       final total = res.contentLength;
       final sink = File(savePath).openWrite();
       var got = 0;
-      await for (final chunk in res.stream) {
+      // HttpClientResponse implementa Stream<List<int>> directamente.
+      await for (final chunk in res) {
         got += chunk.length;
         sink.add(chunk);
         onProgress?.call(got, total);

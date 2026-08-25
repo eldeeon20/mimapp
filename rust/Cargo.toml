@@ -24,15 +24,10 @@ needle-infer = { version = "0.2.1", features = ["parallel"] }
 # --- Tor embebido (arti, cliente SOCKS5 local en localhost) ---
 # LICENCIA: sin hs-pow-full ni experimental => árbol sin equix/hashx (los
 # únicos LGPL de arti). Sin native-tls => cero OpenSSL; TLS = rustls+ring,
-# el mismo stack que reqwest/librqbit ya usan.
-arti = { version = "=1.7.0", default-features = false,
-         features = ["tokio", "rustls", "compression", "onion-service-client",
-                     "static", "experimental-api"] }
-arti-client = { version = "=0.36.0", default-features = false,
-                features = ["tokio", "rustls", "compression",
-                            "onion-service-client", "static"] }
-tor-rtcompat = { version = "=0.36.0", default-features = false,
-                 features = ["tokio", "rustls"] }
+# el mismo stack que reqwest/librqbit ya usan. (Tablas inline TOML en UNA línea.)
+arti = { version = "=1.7.0", default-features = false, features = ["tokio", "rustls", "compression", "onion-service-client", "static", "experimental-api"] }
+arti-client = { version = "=0.36.0", default-features = false, features = ["tokio", "rustls", "compression", "onion-service-client", "static"] }
+tor-rtcompat = { version = "=0.36.0", default-features = false, features = ["tokio", "rustls"] }
 tor-config = "=0.36.0"
 rlimit = "0.10"
 nostr-sdk = { version = "=0.43.0", features = ["nip44", "nip59"] }
