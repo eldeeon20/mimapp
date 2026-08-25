@@ -20,6 +20,7 @@ use iroh_blobs::BlobsProtocol;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
+use tokio::sync::mpsc as tmpsc;
 
 use crate::gt::eventlog::EventLog;
 
@@ -33,7 +34,7 @@ struct Vivo {
 pub const ALPN_CHAT: &[u8] = b"mimapp/chat/1";
 
 /// Mensaje de chat entrante listo para la UI.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct LineaChat {
     pub de: String,
     pub texto: String,
@@ -41,6 +42,7 @@ pub struct LineaChat {
 
 /// Handler del lado que RECIBE la conexión: canal vivo de líneas.
 /// Ambos lados quedan iguales tras el handshake: cualquiera manda.
+#[derive(Debug)]
 struct ChatNodo {
     entrantes: Arc<Mutex<Vec<LineaChat>>>,
     salidas: Arc<Mutex<Vec<tmpsc::UnboundedSender<String>>>>,
@@ -49,8 +51,8 @@ struct ChatNodo {
 impl ChatNodo {
     fn cablear(
         &self,
-        w: iroh::endpoint::WriteStream,
-        r: iroh::endpoint::ReadStream,
+        mut w: iroh::endpoint::SendStream,
+        mut r: iroh::endpoint::RecvStream,
     ) {
         let (otx, mut orx) = tmpsc::unbounded_channel::<String>();
         self.salidas
@@ -67,7 +69,7 @@ impl ChatNodo {
                     break;
                 }
             }
-            let _ = w.finish();
+            let _ = w.finish().await;
         });
         let entrantes = self.entrantes.clone();
         let mut lector = tokio::spawn(async move {
@@ -105,10 +107,14 @@ impl ProtocolHandler for ChatNodo {
     async fn accept(
         &self,
         connection: iroh::endpoint::Connection,
-    ) -> anyhow::Result<()> {
-        let (w, r) = connection.accept_bi().await?;
-        self.cablear(w, r);
-        connection.closed().await;
+    ) -> Result<(), iroh::protocol::AcceptError> {
+        // best effort: si el par corta antes del stream, igual cerramos bien
+        if let Ok((w, r)) = connection.accept_bi().await {
+            self.cablear(w, r);
+            let _ = connection.closed().await;
+        } else {
+            let _ = connection.closed().await;
+        }
         Ok(())
     }
 }
@@ -271,8 +277,13 @@ impl IrohPar {
 
     /// Conecta como CLIENTE al ticket del otro y queda en modo chat vivo.
     pub fn chat_conectar(&self, ticket_str: &str) -> Result<()> {
-        let g = self.vivo.lock().map_err(|_| anyhow!("mutex"))?;
-        let vivo = g.as_ref().ok_or_else(|| anyhow!("nodo apagado"))?;
+        let endpoint = {
+            let g = self.vivo.lock().map_err(|_| anyhow!("mutex"))?;
+            g.as_ref()
+                .ok_or_else(|| anyhow!("nodo apagado"))?
+                .endpoint
+                .clone()
+        };
         let dueño = ticket_str.trim().to_string();
         let nodo = ChatNodo {
             entrantes: self.chat_entrantes.clone(),
@@ -282,8 +293,7 @@ impl IrohPar {
             let t: EndpointTicket = dueño
                 .parse()
                 .map_err(|e| anyhow!("ticket inválido: {e:?}"))?;
-            let c = vivo
-                .endpoint
+            let c = endpoint
                 .connect(t.endpoint_addr().clone(), ALPN_CHAT)
                 .await
                 .context("conectando al par")?;

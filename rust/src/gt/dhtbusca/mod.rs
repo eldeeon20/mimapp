@@ -219,7 +219,7 @@ impl DhtBusca {
                     }
                     // como el crawler: si el id aleatorio tiene swarm,
                     // también entra al canal (descubrimiento activo real)
-                    if !dht.get_peers(id).is_empty() {
+                    if dht.get_peers(id).next().is_some() {
                         vistos_hilo.fetch_add(1, Ordering::Relaxed);
                         let _ = tx_filtro.send(hex_id(&id));
                     }
