@@ -21,6 +21,20 @@ aes-gcm = "0.10"
 pbkdf2 = "0.12"
 # --- Tool-calling local (Needle v2, 45M params, modelo .cact 13.7 MB) ---
 needle-infer = { version = "0.2.1", features = ["parallel"] }
+# --- Tor embebido (arti, cliente SOCKS5 local en localhost) ---
+# LICENCIA: sin hs-pow-full ni experimental => árbol sin equix/hashx (los
+# únicos LGPL de arti). Sin native-tls => cero OpenSSL; TLS = rustls+ring,
+# el mismo stack que reqwest/librqbit ya usan.
+arti = { version = "=1.7.0", default-features = false,
+         features = ["tokio", "rustls", "compression", "onion-service-client",
+                     "static", "experimental-api"] }
+arti-client = { version = "=0.36.0", default-features = false,
+                features = ["tokio", "rustls", "compression",
+                            "onion-service-client", "static"] }
+tor-rtcompat = { version = "=0.36.0", default-features = false,
+                 features = ["tokio", "rustls"] }
+tor-config = "=0.36.0"
+rlimit = "0.10"
 nostr-sdk = { version = "=0.43.0", features = ["nip44", "nip59"] }
 nostr = "=0.43.1"
 shamirsecretsharing = "0.1"
@@ -28,7 +42,7 @@ rustls = { version = "0.23", features = ["ring"] }
 nostringer = "0.1.8"
 libcrux-kem = "0.0.7"
 hf-hub = { version = "=1.0.0-rc.1", features = ["blocking"] }
-reqwest = { version = "0.11", default-features = false, features = ["rustls-tls", "blocking"] }
+reqwest = { version = "0.11", default-features = false, features = ["rustls-tls", "blocking", "socks"] }
 # --- GPU compute (WebGPU/WGSL nativo, backend Vulkan en Android) ---
 wgpu = "25"
 half = "2"

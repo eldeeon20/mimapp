@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../services/settings.dart';
+import 'tor_test_screen.dart';
 
 /// Menú de Configuración.
 ///
@@ -44,6 +45,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
               setState(() => s.mediaShowUri = v);
               await s.save();
             },
+          ),
+          const Divider(),
+          ListTile(
+            leading: const Icon(Icons.vpn_lock_rounded),
+            title: const Text('Tor (experimental)'),
+            subtitle: const Text(
+                'Cliente arti embebido · proxy SOCKS5 local para la app'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const TorTestScreen())),
           ),
           const Divider(),
           ListTile(

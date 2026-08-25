@@ -13,5 +13,6 @@ pub mod nostringer;
 pub mod pkarr;
 pub mod shamir;
 pub mod simple;
+pub mod tor;
 pub mod torrent;
 pub mod unarc;
