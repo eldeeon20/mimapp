@@ -126,7 +126,9 @@ pub fn tor_start(socks_port: u16, state_dir: String, cache_dir: String) -> Resul
 
     // Proxy SOCKS5 en localhost:puerto, tarea propia del runtime global.
     let handle = {
-        let rt_inner = runtime().map_err(|e| e.clone())?;
+        // as_ref() porque runtime() devuelve &'static Result: map_err consume
+        // al receptor y sobre una referencia compartida hay que pedir préstamo.
+        let rt_inner = runtime().as_ref().map_err(|e| e.clone())?;
         let c = client.clone();
         rt_inner.spawn(proxy::run_proxy(
             client.runtime().clone(),
