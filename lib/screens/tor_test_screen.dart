@@ -109,7 +109,7 @@ class _TorTestScreenState extends State<TorTestScreen> {
             const SizedBox(height: 8),
             Wrap(spacing: 8, runSpacing: 4, children: [
               FilledButton.icon(
-                onPressed: s.busy || on ? null : () => _guard(s.start()),
+                onPressed: s.busy || on ? null : () => _guard(s.start),
                 icon: s.busy
                     ? const SizedBox(
                         width: 14,
@@ -119,12 +119,12 @@ class _TorTestScreenState extends State<TorTestScreen> {
                 label: const Text('Iniciar'),
               ),
               OutlinedButton.icon(
-                onPressed: !on ? null : () => _guard(s.stop()),
+                onPressed: !on ? null : () => _guard(s.stop),
                 icon: const Icon(Icons.stop_rounded, size: 18),
                 label: const Text('Detener'),
               ),
               OutlinedButton.icon(
-                onPressed: !on || s.busy ? null : () => _guard(s.rebootstrap()),
+                onPressed: !on || s.busy ? null : () => _guard(s.rebootstrap),
                 icon: const Icon(Icons.refresh_rounded, size: 18),
                 label: const Text('Re-bootstrap'),
               ),
@@ -139,7 +139,7 @@ class _TorTestScreenState extends State<TorTestScreen> {
                   ? null
                   : (v) {
                       setState(() => _dormant = v);
-                      _guard(s.setDormant(v));
+                      _guard(() => s.setDormant(v));
                     },
             ),
           ]),
