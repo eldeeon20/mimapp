@@ -17,7 +17,9 @@ use arti_client::{DormantMode, TorClient, TorClientConfig};
 use tokio::runtime::{Builder, Runtime};
 use tokio::task::JoinHandle;
 use tor_config::Listen;
-use tor_rtcompat::rustls::TokioRustlsRuntime;
+// OJO: el tipo vive en el módulo tokio (no "rustls"); la feature rustls de
+// tor-rtcompat es la que hace que este runtime use TLS puro Rust.
+use tor_rtcompat::tokio::TokioRustlsRuntime;
 use tor_rtcompat::ToplevelBlockOn;
 
 type Client = Arc<TorClient<TokioRustlsRuntime>>;
