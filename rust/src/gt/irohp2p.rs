@@ -11,8 +11,9 @@
 
 use anyhow::{anyhow, Context, Result};
 use iroh::endpoint::presets;
-use iroh::protocol::Router;
+use iroh::protocol::{ProtocolHandler, Router};
 use iroh::Endpoint;
+use iroh_tickets::endpoint::EndpointTicket;
 use iroh_blobs::ticket::BlobTicket;
 use iroh_blobs::store::mem::MemStore;
 use iroh_blobs::BlobsProtocol;
@@ -25,6 +26,33 @@ struct Vivo {
     endpoint: Endpoint,
     router: Router,
     _store: Arc<MemStore>,
+}
+
+/// ALPN del chat de prueba: eco bidireccional simple.
+pub const ALPN_CHAT: &[u8] = b"mimapp/chat/1";
+
+/// Handler mínimo: recibe bytes por stream bidi y responde "eco: …".
+struct EcoChat;
+
+impl ProtocolHandler for EcoChat {
+    async fn accept(
+        &self,
+        connection: iroh::endpoint::Connection,
+    ) -> anyhow::Result<()> {
+        loop {
+            let (mut tx, mut rx) = connection.accept_bi().await?;
+            let msg = rx.read_to_end(64 * 1024).await?;
+            if msg.is_empty() {
+                break;
+            }
+            let texto = String::from_utf8_lossy(&msg);
+            tx.write_all(format!("eco: {texto}").as_bytes())
+                .await?;
+            tx.finish()?;
+        }
+        connection.closed().await;
+        Ok(())
+    }
 }
 
 /// Nodo iroh completo: servidor de blobs + cliente de descarga.
@@ -85,6 +113,7 @@ impl IrohPar {
         let blobs = BlobsProtocol::new(&store, None);
         let router = Router::builder(endpoint.clone())
             .accept(iroh_blobs::ALPN, blobs)
+            .accept(ALPN_CHAT, EcoChat)
             .spawn();
         *g = Some(Vivo { endpoint, router, _store: store });
         self.logs
@@ -160,6 +189,45 @@ impl IrohPar {
         let out = destino.to_string_lossy().into_owned();
         self.logs.push(format!("✓ guardado en {out}"));
         Ok(out)
+    }
+
+    /// Ticket de CONEXIÓN (no de blob): con esto otro nodo abre un canal
+    /// directo de chat contra este dispositivo.
+    pub fn chat_ticket(&self) -> Result<String> {
+        let g = self.vivo.lock().map_err(|_| anyhow!("mutex"))?;
+        let vivo = g.as_ref().ok_or_else(|| anyhow!("nodo apagado"))?;
+        Ok(EndpointTicket::new(vivo.endpoint.addr()).to_string())
+    }
+
+    /// Manda UN mensaje por el canal de chat del ticket y devuelve la
+    /// respuesta de eco. Prueba la conectividad P2P cruda (sin blobs).
+    pub fn chat_enviar(&self, ticket_str: &str, mensaje: &str) -> Result<String> {
+        let g = self.vivo.lock().map_err(|_| anyhow!("mutex"))?;
+        let vivo = g.as_ref().ok_or_else(|| anyhow!("nodo apagado"))?;
+        if mensaje.is_empty() {
+            return Err(anyhow!("mensaje vacío"));
+        }
+        let dueño = ticket_str.trim().to_string();
+        let texto = mensaje.to_string();
+        self.bloquea(async move {
+            let t: EndpointTicket = dueño
+                .parse()
+                .map_err(|e| anyhow!("ticket de conexión inválido: {e:?}"))?;
+            let conn = vivo
+                .endpoint
+                .connect(t.endpoint_addr().clone(), ALPN_CHAT)
+                .await
+                .context("conectando al par")?;
+            let (mut tx, mut rx) = conn.open_bi().await.context("abriendo stream")?;
+            tx.write_all(texto.as_bytes()).await.context("escribiendo")?;
+            tx.finish()?;
+            let resp = rx
+                .read_to_end(64 * 1024)
+                .await
+                .context("esperando eco")?;
+            conn.close(0u32.into(), b"chau");
+            Ok::<_, anyhow::Error>(String::from_utf8_lossy(&resp).into_owned())
+        })
     }
 
     /// Id del endpoint si está corriendo.

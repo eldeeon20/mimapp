@@ -23,6 +23,10 @@ class _IrohTestScreenState extends State<IrohTestScreen> {
       text: '/storage/emulated/0/Download/foto.jpg');
   final _ticketCtrl = TextEditingController();
   final _nombreCtrl = TextEditingController(text: 'recibido.bin');
+  final _chatTicketCtrl = TextEditingController();
+  final _chatMsgCtrl = TextEditingController(text: 'hola desde mimapp');
+  String? _miChatTicket;
+  String? _eco;
   String? _miId;
   String? _ticketGenerado;
   String? _resultado;
@@ -69,7 +73,13 @@ class _IrohTestScreenState extends State<IrohTestScreen> {
   // ---- ENVIAR ----------------------------------------------------------
   Future<void> _iniciar() => _guard(() async {
         final id = await _nodo!.startServidor();
-        setState(() => _miId = id);
+        setState(() {
+          _miId = id;
+        });
+        try {
+          final t = await _nodo!.chatTicket();
+          if (mounted) setState(() => _miChatTicket = t);
+        } catch (_) {}
       });
 
   Future<void> _ofrecer() => _guard(() async {
@@ -78,6 +88,12 @@ class _IrohTestScreenState extends State<IrohTestScreen> {
         }
         final t = await _nodo!.ofrecer(_rutaCtrl.text.trim());
         setState(() => _ticketGenerado = t);
+      });
+
+  Future<void> _chatEnviar() => _guard(() async {
+        final resp =
+            await _nodo!.chatEnviar(_chatTicketCtrl.text.trim(), _chatMsgCtrl.text);
+        setState(() => _eco = resp);
       });
 
   // ---- RECIBIR ---------------------------------------------------------
@@ -129,6 +145,19 @@ class _IrohTestScreenState extends State<IrohTestScreen> {
                 onPressed: _busy || on ? null : _iniciar,
                 icon: const Icon(Icons.play_arrow_rounded, size: 18),
                 label: const Text('Iniciar nodo')),
+            if (_miChatTicket != null) ...[
+              const SizedBox(height: 6),
+              Row(children: [
+                Expanded(
+                    child: SelectableText('ticket chat: $_miChatTicket',
+                        style: const TextStyle(
+                            fontSize: 9, fontFamily: 'monospace'))),
+                IconButton(
+                    icon: const Icon(Icons.copy_rounded, size: 16),
+                    onPressed: () =>
+                        _copiar(_miChatTicket!, 'ticket de chat copiado')),
+              ]),
+            ],
           ]),
         ),
         const SizedBox(height: 10),
@@ -174,6 +203,48 @@ class _IrohTestScreenState extends State<IrohTestScreen> {
                       label: const Text('copiar ticket')),
                 ),
               ],
+            ]),
+          ),
+        ),
+        // ---- CHAT / CONEXIÓN por ticket (P2P crudo, sin blobs)
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('CHAT · conexión directa',
+                  style:
+                      TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+              const Text(
+                  'pegá el "ticket chat" del otro dispositivo y mandale algo; responde con eco',
+                  style: TextStyle(fontSize: 10, color: Colors.white38)),
+              const SizedBox(height: 6),
+              TextField(
+                controller: _chatTicketCtrl,
+                maxLines: 2,
+                decoration: const InputDecoration(
+                    labelText: 'ticket de conexión del par',
+                    hintText: 'endpointaq…'),
+              ),
+              const SizedBox(height: 6),
+              Row(children: [
+                Expanded(child: TextField(
+                  controller: _chatMsgCtrl,
+                  decoration: const InputDecoration(
+                      labelText: 'mensaje'),
+                  onSubmitted: (_) => _chatEnviar(),
+                )),
+                IconButton.filled(
+                    onPressed: _busy ? null : _chatEnviar,
+                    icon: const Icon(Icons.send_rounded)),
+              ]),
+              if (_eco != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: SelectableText('← $_eco',
+                      style: const TextStyle(
+                          fontFamily: 'monospace',
+                          color: Colors.lightGreenAccent)),
+                ),
             ]),
           ),
         ),

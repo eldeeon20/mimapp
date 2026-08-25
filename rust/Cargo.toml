@@ -46,6 +46,7 @@ mainline = { path = "mainline" }
 # --- Iroh P2P (cliente+servidor de blobs, QUIC + relays n0) ---
 iroh = "1"
 iroh-blobs = "0.103"
+iroh-tickets = "1"
 # --- BitTorrent (rqbit embebido, TLS rustls para Android) ---
 serde_json = "1"
 # --- Archives (RAR5/7z/ZIP/tar/gz/arj/lha/zoo... unificado) ---

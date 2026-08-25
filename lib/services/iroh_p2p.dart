@@ -18,6 +18,11 @@ class IrohP2p {
   Future<String> bajar(String ticket, String dir, String nombre) =>
       _n.bajar(ticket: ticket, dirDestino: dir, nombre: nombre);
 
+  /// Ticket de conexión para chat directo (distinto del ticket de blob).
+  Future<String> chatTicket() => _n.chatTicket();
+  Future<String> chatEnviar(String ticket, String mensaje) =>
+      _n.chatEnviar(ticket: ticket, mensaje: mensaje);
+
   String? get nodeId => _n.nodeId();
   bool get corriendo => _n.corriendo();
 

@@ -41,6 +41,23 @@ impl IrohViva {
         })?
     }
 
+    /// Ticket de conexión para el chat directo.
+    pub async fn chat_ticket(&self) -> Result<String, String> {
+        self.con(|p| p.chat_ticket().map_err(|e| format!("chat ticket: {e:#}")))?
+    }
+
+    /// Envía un mensaje al ticket y devuelve su eco (prueba P2P cruda).
+    pub async fn chat_enviar(
+        &self,
+        ticket: String,
+        mensaje: String,
+    ) -> Result<String, String> {
+        self.con(|p| {
+            p.chat_enviar(&ticket, &mensaje)
+                .map_err(|e| format!("chat enviar: {e:#}"))
+        })?
+    }
+
     /// Id del endpoint si está arriba (null si no).
     #[flutter_rust_bridge::frb(sync)]
     pub fn node_id(&self) -> Option<String> {
