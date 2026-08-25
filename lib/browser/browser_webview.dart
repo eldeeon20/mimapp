@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
 import '../services/browser_downloads.dart';
+import 'browser_tab.dart';
 import 'browser_tabs.dart';
 
 /// Envuelve UN InAppWebView (una pestaña): registra su controlador en el
@@ -18,13 +19,6 @@ class BrowserWebview extends StatefulWidget {
 
   @override
   State<BrowserWebview> createState() => _BrowserWebviewState();
-}
-
-/// Contrato mínimo de pestaña para no acoplar este archivo a la clase concreta.
-abstract class BrowserTabLike {
-  int get id;
-  String get url;
-  bool get jsEnabled;
 }
 
 class _BrowserWebviewState extends State<BrowserWebview> {

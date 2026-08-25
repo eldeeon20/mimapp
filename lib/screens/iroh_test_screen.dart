@@ -154,8 +154,8 @@ class _IrohTestScreenState extends State<IrohTestScreen> {
                             fontSize: 9, fontFamily: 'monospace'))),
                 IconButton(
                     icon: const Icon(Icons.copy_rounded, size: 16),
-                    onPressed: () =>
-                        _copiar(_miChatTicket!, 'ticket de chat copiado')),
+                    onPressed: () => _copiar(_miChatTicket!,
+                        'tu dirección copiada · pasasela al otro')),
               ]),
             ],
           ]),
@@ -198,9 +198,9 @@ class _IrohTestScreenState extends State<IrohTestScreen> {
                   alignment: Alignment.centerRight,
                   child: TextButton.icon(
                       onPressed: () =>
-                          _copiar(_ticketGenerado!, 'ticket copiado'),
+                          _copiar(_ticketGenerado!, 'ticket del ARCHIVO copiado'),
                       icon: const Icon(Icons.copy_rounded, size: 16),
-                      label: const Text('copiar ticket')),
+                      label: const Text('copiar ticket del archivo')),
                 ),
               ],
             ]),
@@ -215,15 +215,17 @@ class _IrohTestScreenState extends State<IrohTestScreen> {
                   style:
                       TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
               const Text(
-                  'pegá el "ticket chat" del otro dispositivo y mandale algo; responde con eco',
-                  style: TextStyle(fontSize: 10, color: Colors.white38)),
+                  '2 tickets distintos: el DE ARRIBA lleva un archivo concreto '
+                  '(hash); este solo dice DÓNDE estás. Pegá el de conexión del '
+                  'OTRO y mandale algo — responde con eco.',
+                  style: TextStyle(fontSize: 9.5, color: Colors.white38)),
               const SizedBox(height: 6),
               TextField(
                 controller: _chatTicketCtrl,
                 maxLines: 2,
                 decoration: const InputDecoration(
-                    labelText: 'ticket de conexión del par',
-                    hintText: 'endpointaq…'),
+                    labelText: 'ticket de CONEXIÓN del par (no es el de archivo)',
+                    hintText: 'pegá el que te compartieron'),
               ),
               const SizedBox(height: 6),
               Row(children: [
