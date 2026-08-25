@@ -41,21 +41,47 @@ impl IrohViva {
         })?
     }
 
-    /// Ticket de conexión para el chat directo.
+    /// Ticket de conexión: el otro lo pega y queda en chat vivo.
     pub async fn chat_ticket(&self) -> Result<String, String> {
         self.con(|p| p.chat_ticket().map_err(|e| format!("chat ticket: {e:#}")))?
     }
 
-    /// Envía un mensaje al ticket y devuelve su eco (prueba P2P cruda).
-    pub async fn chat_enviar(
-        &self,
-        ticket: String,
-        mensaje: String,
-    ) -> Result<String, String> {
+    /// Conecta al ticket del par (rol cliente del chat).
+    pub async fn chat_conectar(&self, ticket: String) -> Result<(), String> {
         self.con(|p| {
-            p.chat_enviar(&ticket, &mensaje)
-                .map_err(|e| format!("chat enviar: {e:#}"))
+            p.chat_conectar(&ticket)
+                .map_err(|e| format!("conectar: {e:#}"))
         })?
+    }
+
+    /// Línea de chat lista para la UI.
+    #[flutter_rust_bridge::frb]
+    #[derive(Clone)]
+    pub struct LineaChatItem {
+        pub de: String,
+        pub texto: String,
+    }
+
+    /// Mensajes entrantes desde la última lectura.
+    pub async fn chat_leer(&self) -> Vec<LineaChatItem> {
+        self.con(|p| {
+            p.chat_leer()
+                .into_iter()
+                .map(|l| LineaChatItem { de: l.de, texto: l.texto })
+                .collect()
+        })
+        .unwrap_or_default()
+    }
+
+    /// Manda una línea por el canal vivo.
+    pub async fn chat_mandar(&self, texto: String) -> Result<(), String> {
+        self.con(|p| p.chat_mandar(&texto).map_err(|e| format!("mandar: {e:#}")))?
+    }
+
+    /// ¿Hay canal de chat vivo?
+    #[flutter_rust_bridge::frb(sync)]
+    pub fn chat_activo(&self) -> bool {
+        self.con(|p| p.chat_activo()).unwrap_or(false)
     }
 
     /// Id del endpoint si está arriba (null si no).

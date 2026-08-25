@@ -18,10 +18,12 @@ class IrohP2p {
   Future<String> bajar(String ticket, String dir, String nombre) =>
       _n.bajar(ticket: ticket, dirDestino: dir, nombre: nombre);
 
-  /// Ticket de conexión para chat directo (distinto del ticket de blob).
+  /// Ticket de conexión: el otro lo pega y abre el chat.
   Future<String> chatTicket() => _n.chatTicket();
-  Future<String> chatEnviar(String ticket, String mensaje) =>
-      _n.chatEnviar(ticket: ticket, mensaje: mensaje);
+  Future<void> chatConectar(String ticket) => _n.chatConectar(ticket: ticket);
+  Future<void> chatMandar(String texto) => _n.chatMandar(texto: texto);
+  Future<List<rust.LineaChatItem>> chatLeer() => _n.chatLeer();
+  bool get chatActivo => _n.chatActivo();
 
   String? get nodeId => _n.nodeId();
   bool get corriendo => _n.corriendo();

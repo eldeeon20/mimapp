@@ -3,10 +3,10 @@ import 'package:flutter/material.dart';
 import '../ai/laurelia_chat.dart';
 import '../chat/screens/chat_list_screen.dart';
 import '../colab_cli/colab_dialog.dart';
-import '../lua/lua_page.dart';
 import '../media/media_player.dart';
 import '../screens/ai_screen.dart';
 import '../screens/downloads_test_screen.dart';
+import '../screens/inapp_web_screen.dart';
 import '../screens/torrent_screen.dart';
 import '../screens/filosoia_screen.dart';
 import '../agents/agent_manager.dart';
@@ -104,12 +104,11 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _openWeb(BuildContext context) {
-    Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => LuaPage(
-        mediaPlayer: _mediaPlayer,
-        laurelia: _laurelia,
-      ),
-    ));
+    // Lua quedó suelto (código intacto en lib/lua/, sin invocar): el botón
+    // Web ahora abre el browser inappwebview.
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const InAppWebScreen()),
+    );
   }
 
   void _openSettings(BuildContext context) {

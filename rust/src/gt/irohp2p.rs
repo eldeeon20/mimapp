@@ -19,6 +19,7 @@ use iroh_blobs::store::mem::MemStore;
 use iroh_blobs::BlobsProtocol;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::gt::eventlog::EventLog;
 
@@ -31,25 +32,82 @@ struct Vivo {
 /// ALPN del chat de prueba: eco bidireccional simple.
 pub const ALPN_CHAT: &[u8] = b"mimapp/chat/1";
 
-/// Handler mínimo: recibe bytes por stream bidi y responde "eco: …".
-struct EcoChat;
+/// Mensaje de chat entrante listo para la UI.
+#[derive(Clone)]
+pub struct LineaChat {
+    pub de: String,
+    pub texto: String,
+}
 
-impl ProtocolHandler for EcoChat {
+/// Handler del lado que RECIBE la conexión: canal vivo de líneas.
+/// Ambos lados quedan iguales tras el handshake: cualquiera manda.
+struct ChatNodo {
+    entrantes: Arc<Mutex<Vec<LineaChat>>>,
+    salidas: Arc<Mutex<Vec<tmpsc::UnboundedSender<String>>>>,
+}
+
+impl ChatNodo {
+    fn cablear(
+        &self,
+        w: iroh::endpoint::WriteStream,
+        r: iroh::endpoint::ReadStream,
+    ) {
+        let (otx, mut orx) = tmpsc::unbounded_channel::<String>();
+        self.salidas
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(otx);
+        let salidas = self.salidas.clone();
+        let mut escritor = tokio::spawn(async move {
+            while let Some(txt) = orx.recv().await {
+                if w.write_all(format!("{txt}\n").as_bytes())
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+            }
+            let _ = w.finish();
+        });
+        let entrantes = self.entrantes.clone();
+        let mut lector = tokio::spawn(async move {
+            let mut buf = vec![0u8; 4096];
+            loop {
+                match r.read(&mut buf).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => {
+                        let trozo = String::from_utf8_lossy(&buf[..n]);
+                        for linea in trozo.split('\n').filter(|l| !l.is_empty()) {
+                            entrantes
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .push(LineaChat {
+                                    de: "par".into(),
+                                    texto: linea.to_string(),
+                                });
+                        }
+                    }
+                }
+            }
+        });
+        // al cerrar el par limpiamos nuestra salida
+        let salidas2 = self.salidas.clone();
+        tokio::spawn(async move {
+            let _ = &mut escritor;
+            let _ = &mut lector;
+            tokio::time::sleep(std::time::Duration::from_secs(3600 * 6)).await;
+            salidas2.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        });
+    }
+}
+
+impl ProtocolHandler for ChatNodo {
     async fn accept(
         &self,
         connection: iroh::endpoint::Connection,
     ) -> anyhow::Result<()> {
-        loop {
-            let (mut tx, mut rx) = connection.accept_bi().await?;
-            let msg = rx.read_to_end(64 * 1024).await?;
-            if msg.is_empty() {
-                break;
-            }
-            let texto = String::from_utf8_lossy(&msg);
-            tx.write_all(format!("eco: {texto}").as_bytes())
-                .await?;
-            tx.finish()?;
-        }
+        let (w, r) = connection.accept_bi().await?;
+        self.cablear(w, r);
         connection.closed().await;
         Ok(())
     }
@@ -59,6 +117,9 @@ impl ProtocolHandler for EcoChat {
 pub struct IrohPar {
     runtime: Arc<tokio::runtime::Runtime>,
     vivo: Arc<Mutex<Option<Vivo>>>,
+    chat_salidas: Arc<Mutex<Vec<tmpsc::UnboundedSender<String>>>>,
+    chat_entrantes: Arc<Mutex<Vec<LineaChat>>>,
+    chat_conn: Mutex<Option<iroh::endpoint::Connection>>,
     logs: EventLog,
 }
 
@@ -73,6 +134,9 @@ impl IrohPar {
                     .context("runtime tokio")?,
             ),
             vivo: Arc::new(Mutex::new(None)),
+            chat_salidas: Arc::new(Mutex::new(Vec::new())),
+            chat_entrantes: Arc::new(Mutex::new(Vec::new())),
+            chat_conn: Mutex::new(None),
             logs: EventLog::new(),
         })
     }
@@ -113,7 +177,13 @@ impl IrohPar {
         let blobs = BlobsProtocol::new(&store, None);
         let router = Router::builder(endpoint.clone())
             .accept(iroh_blobs::ALPN, blobs)
-            .accept(ALPN_CHAT, EcoChat)
+            .accept(
+                ALPN_CHAT,
+                ChatNodo {
+                    entrantes: self.chat_entrantes.clone(),
+                    salidas: self.chat_salidas.clone(),
+                },
+            )
             .spawn();
         *g = Some(Vivo { endpoint, router, _store: store });
         self.logs
@@ -199,35 +269,60 @@ impl IrohPar {
         Ok(EndpointTicket::new(vivo.endpoint.addr()).to_string())
     }
 
-    /// Manda UN mensaje por el canal de chat del ticket y devuelve la
-    /// respuesta de eco. Prueba la conectividad P2P cruda (sin blobs).
-    pub fn chat_enviar(&self, ticket_str: &str, mensaje: &str) -> Result<String> {
+    /// Conecta como CLIENTE al ticket del otro y queda en modo chat vivo.
+    pub fn chat_conectar(&self, ticket_str: &str) -> Result<()> {
         let g = self.vivo.lock().map_err(|_| anyhow!("mutex"))?;
         let vivo = g.as_ref().ok_or_else(|| anyhow!("nodo apagado"))?;
-        if mensaje.is_empty() {
-            return Err(anyhow!("mensaje vacío"));
-        }
         let dueño = ticket_str.trim().to_string();
-        let texto = mensaje.to_string();
-        self.bloquea(async move {
+        let nodo = ChatNodo {
+            entrantes: self.chat_entrantes.clone(),
+            salidas: self.chat_salidas.clone(),
+        };
+        let conn = self.bloquea(async move {
             let t: EndpointTicket = dueño
                 .parse()
-                .map_err(|e| anyhow!("ticket de conexión inválido: {e:?}"))?;
-            let conn = vivo
+                .map_err(|e| anyhow!("ticket inválido: {e:?}"))?;
+            let c = vivo
                 .endpoint
                 .connect(t.endpoint_addr().clone(), ALPN_CHAT)
                 .await
                 .context("conectando al par")?;
-            let (mut tx, mut rx) = conn.open_bi().await.context("abriendo stream")?;
-            tx.write_all(texto.as_bytes()).await.context("escribiendo")?;
-            tx.finish()?;
-            let resp = rx
-                .read_to_end(64 * 1024)
-                .await
-                .context("esperando eco")?;
-            conn.close(0u32.into(), b"chau");
-            Ok::<_, anyhow::Error>(String::from_utf8_lossy(&resp).into_owned())
-        })
+            let (w, r) = c.open_bi().await.context("abriendo stream")?;
+            nodo.cablear(w, r);
+            Ok::<_, anyhow::Error>(c)
+        })?;
+        *self.chat_conn.lock().unwrap_or_else(|e| e.into_inner()) = Some(conn);
+        self.logs.push("✓ chat conectado".into());
+        Ok(())
+    }
+
+    /// Manda una línea por el canal vivo.
+    pub fn chat_mandar(&self, texto: &str) -> Result<()> {
+        if texto.trim().is_empty() {
+            return Err(anyhow!("mensaje vacío"));
+        }
+        let salidas = self.chat_salidas.lock().unwrap_or_else(|e| e.into_inner());
+        let primera = salidas
+            .first()
+            .ok_or_else(|| anyhow!("sin chat activo: conectate primero"))?;
+        primera
+            .send(texto.to_string())
+            .map_err(|_| anyhow!("el par se fue"))
+    }
+
+    /// Mensajes recibidos desde la última lectura.
+    pub fn chat_leer(&self) -> Vec<LineaChat> {
+        std::mem::take(
+            &mut *self.chat_entrantes.lock().unwrap_or_else(|e| e.into_inner()),
+        )
+    }
+
+    pub fn chat_activo(&self) -> bool {
+        !self
+            .chat_salidas
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_empty()
     }
 
     /// Id del endpoint si está corriendo.
