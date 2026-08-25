@@ -191,30 +191,22 @@ class _NostrnSocialState extends State<NostrnSocial> {
           icon: const Icon(Icons.send_rounded, size: 18),
           label: const Text('Publicar'),
         ),
-        // responder/citar es OPCIONAL y va plegado: publicar no pide nada más
-        Theme(
-          data: Theme.of(context)
-              .copyWith(dividerColor: Colors.transparent),
-          child: ExpansionTile(
-            tilePadding: EdgeInsets.zero,
-            childrenPadding: const EdgeInsets.only(bottom: 6),
-            title: const Text('responder o citar (opcional)',
-                style: TextStyle(fontSize: 12)),
-            children: [
-              Row(children: [
-                Expanded(child: _tf(_respIdCtrl,
-                    'id evento (botón copiar ID del muro)',
-                    monospace: true)),
-                const SizedBox(width: 6),
-                Expanded(child:
-                    _tf(_respAutorCtrl, 'npub del autor', monospace: true)),
-              ]),
-              const SizedBox(height: 6),
-              _tf(_citaCtrl, 'fragmento a citar (vacío = responder simple)',
-                  maxLines: 2),
-            ],
-          ),
-        ),
+        const SizedBox(height: 8),
+        // opcionales SIEMPRE visibles: solo se usan si los llenás
+        Row(children: [
+          Expanded(child: _tf(_respIdCtrl,
+              'id evento a responder (opcional)', monospace: true)),
+          const SizedBox(width: 6),
+          Expanded(child:
+              _tf(_respAutorCtrl, 'npub del autor (opcional)',
+                  monospace: true)),
+        ]),
+        const SizedBox(height: 6),
+        _tf(_citaCtrl, 'fragmento a citar (opcional, vacío = responder)',
+            maxLines: 2),
+        const Text(
+            'con solo texto = post normal · id+npub = responder/citar',
+            style: TextStyle(fontSize: 9, color: Colors.white24)),
       ]),
       _card('7 · Artículo largo (kind 30023)', Colors.pinkAccent, [
         _tf(_artTituloCtrl, 'título *'),
