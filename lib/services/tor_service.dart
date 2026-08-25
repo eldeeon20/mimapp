@@ -152,9 +152,25 @@ class TorService extends ChangeNotifier {
       if (body.length > 4000) body = '${body.substring(0, 4000)}…';
       _say('GET $url → HTTP ${res.statusCode} (${body.length} B)');
       return 'HTTP ${res.statusCode}\n\n$body';
+    } catch (e) {
+      throw _traducirSocks(e, 'GET $url');
     } finally {
       client.close();
     }
+  }
+
+  /// Los errores crudos del túnel (socket cortado a mitad del handshake
+  /// SOCKS5) son ilegibles: los traducimos a qué hacer.
+  static Object _traducirSocks(Object e, String que) {
+    final s = e.toString();
+    if (s.contains('fewer bytes') || s.contains('Size: 0')) {
+      return 'circuito Tor cortado o bootstrap sin terminar; '
+          'esperá ~10s y reintentá ($que)';
+    }
+    if (s.contains('Connection refused') || s.contains('refused')) {
+      return 'Tor no acepta conexiones en este momento; tocá Re-bootstrap ($que)';
+    }
+    return e;
   }
 
   /// Descarga streaming a archivo POR EL CIRCUITO (CDN/HF/git smart-http),
@@ -184,6 +200,8 @@ class TorService extends ChangeNotifier {
       await sink.close();
       _say('descargado $url → $savePath ($got B)');
       return savePath;
+    } catch (e) {
+      throw _traducirSocks(e, 'descarga $url');
     } finally {
       client.close();
     }

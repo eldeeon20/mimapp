@@ -49,6 +49,21 @@ impl IrohPar {
         })
     }
 
+    /// Ejecuta [fut] en NUESTRO runtime y espera el resultado por canal.
+    /// NUNCA usamos block_on: si el hilo llamador ya es un worker tokio
+    /// (FRB), block_on entra en pánico con "Cannot start a runtime from
+    /// within a runtime". El canal evita eso por completo.
+    fn bloquea<T: Send + 'static>(
+        &self,
+        fut: impl std::future::Future<Output = Result<T>> + Send + 'static,
+    ) -> Result<T> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.runtime.spawn(async move {
+            let _ = tx.send(fut.await);
+        });
+        rx.recv().map_err(|_| anyhow!("runtime interno caído"))?
+    }
+
     /// Arranca el nodo (servidor de blobs listo para ofrecer).
     /// Devuelve el id del endpoint (hex 64) para compartir.
     pub fn start_servidor(&self) -> Result<String> {
@@ -57,7 +72,7 @@ impl IrohPar {
             return Err(anyhow!("el nodo ya está corriendo"));
         }
         self.logs.push("conectando a la red iroh…");
-        let endpoint = self.runtime.block_on(async {
+        let endpoint = self.bloquea(async {
             let ep = Endpoint::bind(presets::N0)
                 .await
                 .context("bind endpoint")?;
@@ -95,7 +110,7 @@ impl IrohPar {
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let ticket = self.runtime.block_on(async {
+        let ticket = self.bloquea(async {
             let tag = vivo
                 ._store
                 .blobs()
@@ -124,11 +139,11 @@ impl IrohPar {
             .parse()
             .map_err(|e| anyhow!("ticket inválido: {e:?}"))?;
         self.logs.push(format!(
-            "bajando {} bytes-desde {:?}…",
+            "bajando {} desde {:?}…",
             ticket.hash(),
             ticket.addr().id
         ));
-        self.runtime.block_on(async {
+        self.bloquea(async {
             let downloader = vivo._store.downloader(&vivo.endpoint);
             downloader
                 .download(ticket.hash(), Some(ticket.addr().id))
@@ -161,10 +176,12 @@ impl IrohPar {
     pub fn stop(&self) -> Result<()> {
         let mut g = self.vivo.lock().map_err(|_| anyhow!("mutex"))?;
         let vivo = g.take().ok_or_else(|| anyhow!("no está corriendo"))?;
-        self.runtime.block_on(async {
+        drop(g); // soltar el lock antes de esperar el shutdown
+        self.bloquea(async {
             let _ = vivo.router.shutdown().await;
             vivo.endpoint.close().await;
-        });
+            Ok::<_, anyhow::Error>(())
+        })?;
         self.logs.push("■ nodo iroh apagado");
         Ok(())
     }
