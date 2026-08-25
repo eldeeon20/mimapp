@@ -235,7 +235,7 @@ class _NeedleTestScreenState extends State<NeedleTestScreen> {
     });
     try {
       final sw = Stopwatch()..start();
-      final out = _engine == 'v2'
+      final out = await (_engine == 'v2'
           ? NeedleService.instance.run(
               query: _queryCtrl.text.trim(),
               toolsJson: _toolsCtrl.text,
@@ -247,7 +247,7 @@ class _NeedleTestScreenState extends State<NeedleTestScreen> {
           : NeedleService.instance.runV1(
               query: _queryCtrl.text.trim(),
               toolsJson: _toolsCtrl.text,
-            );
+            ));
       sw.stop();
       setState(() {
         _ms = sw.elapsedMilliseconds;

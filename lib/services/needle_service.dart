@@ -167,15 +167,15 @@ class NeedleService extends ChangeNotifier {
     return r;
   }
 
-  NeedleOut run({
+  Future<NeedleOut> run({
     required String query,
     required String toolsJson,
     bool constrain = true,
     int maxNewTokens = 128,
     double temperature = 0.0,
     int seed = 0,
-  }) {
-    final r = rust.needleRun(
+  }) async {
+    final r = await rust.needleRun(
       query: query,
       toolsJson: toolsJson,
       constrain: constrain,
@@ -196,11 +196,11 @@ class NeedleService extends ChangeNotifier {
           query: query, toolsJson: toolsJson, completion: completion);
 
   /// Corre el motor v1: greedy, siempre restringido; devuelve el JSON.
-  NeedleOut runV1({
+  Future<NeedleOut> runV1({
     required String query,
     required String toolsJson,
-  }) {
-    final r = rust.needleRunV1(query: query, toolsJson: toolsJson);
+  }) async {
+    final r = await rust.needleRunV1(query: query, toolsJson: toolsJson);
     return NeedleOut._fromRust(r);
   }
 
