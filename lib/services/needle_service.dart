@@ -23,7 +23,7 @@ class NeedleOut {
     required this.promptTokens,
   });
 
-  factory _fromRust(rust.NeedleOut o) => NeedleOut(
+  static NeedleOut _fromRust(rust.NeedleOut o) => NeedleOut(
         text: o.text,
         toolCall: o.toolCall,
         thinking: o.thinking,
@@ -50,14 +50,19 @@ class NeedleService extends ChangeNotifier {
   String? _weightsV1;
   String? _vocabV1;
   bool _busy = false;
+  bool _loadedV2 = false;
+  bool _loadedV1Flag = false;
   double _progress = 0;
 
   bool get busy => _busy;
   double get progress => _progress;
   bool get downloaded => _modelPath != null;
   bool get downloadedV1 => _weightsV1 != null && _vocabV1 != null;
-  bool get loaded => rust.needleIsLoaded();
-  bool get loadedV1 => rust.needleIsLoadedV1();
+
+  /// El motor Rust arranca sin modelo tras cada reinicio de la app,
+  /// así que el estado real vive acá y se actualiza con load/unload.
+  bool get loaded => _loadedV2;
+  bool get loadedV1 => _loadedV1Flag;
   String? get modelPath => _modelPath;
 
   Future<String> get dirPath async {
@@ -143,7 +148,10 @@ class NeedleService extends ChangeNotifier {
     await refresh();
     final p = _modelPath;
     if (p == null) throw 'primero descargá el modelo (13.7 MB)';
-    return rust.needleLoad(path: p);
+    final r = await rust.needleLoad(path: p);
+    _loadedV2 = true;
+    notifyListeners();
+    return r;
   }
 
   /// Carga v1 (safetensors + vocab).
@@ -152,7 +160,11 @@ class NeedleService extends ChangeNotifier {
     if (_weightsV1 == null || _vocabV1 == null) {
       throw 'primero descargá el modelo v1 (22 MB + vocab)';
     }
-    return rust.needleLoadV1(weightsPath: _weightsV1!, vocabPath: _vocabV1!);
+    final r = await rust.needleLoadV1(
+        weightsPath: _weightsV1!, vocabPath: _vocabV1!);
+    _loadedV1Flag = true;
+    notifyListeners();
+    return r;
   }
 
   NeedleOut run({
@@ -169,13 +181,13 @@ class NeedleService extends ChangeNotifier {
       constrain: constrain,
       maxNewTokens: maxNewTokens,
       temperature: temperature,
-      seed: seed,
+      seed: BigInt.from(seed),
     );
     return NeedleOut._fromRust(r);
   }
 
   /// Confianza del head propio para la última respuesta.
-  double confidence({
+  Future<double> confidence({
     required String query,
     required String toolsJson,
     required String completion,
@@ -194,11 +206,13 @@ class NeedleService extends ChangeNotifier {
 
   void unload() {
     rust.needleUnload();
+    _loadedV2 = false;
     notifyListeners();
   }
 
   void unloadV1() {
     rust.needleUnloadV1();
+    _loadedV1Flag = false;
     notifyListeners();
   }
 

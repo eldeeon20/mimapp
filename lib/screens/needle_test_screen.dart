@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 
 import '../services/needle_service.dart';
@@ -263,10 +265,10 @@ class _NeedleTestScreenState extends State<NeedleTestScreen> {
     }
   }
 
-  void _confide() {
+  Future<void> _confide() async {
     try {
       final raw = _resultJson ?? '';
-      final c = NeedleService.instance.confidence(
+      final c = await NeedleService.instance.confidence(
         query: _queryCtrl.text.trim(),
         toolsJson: _toolsCtrl.text,
         completion: raw,
