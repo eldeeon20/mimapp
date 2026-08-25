@@ -22,6 +22,7 @@ class DhtBuscaScreen extends StatefulWidget {
 class _DhtBuscaScreenState extends State<DhtBuscaScreen> {
   DhtBusca? _motor;
   final _buscaCtrl = TextEditingController();
+  final _pruebaCtrl = TextEditingController();
   List<rust.HalladoItem> _resultados = [];
   rust.DhtStats? _stats;
   bool _busy = false;
@@ -99,6 +100,16 @@ class _DhtBuscaScreenState extends State<DhtBuscaScreen> {
         setState(() => _estado = 'detenido · índice guardado');
       });
 
+  Future<void> _probar() => _guard(() async {
+        await _motor!.probar(_pruebaCtrl.text);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text('inyectado: mirá CAPTURADOS/resueltos en unos segundos',
+                  style: const TextStyle(color: Colors.greenAccent)),
+              backgroundColor: Colors.black));
+        }
+      });
+
   Future<void> _buscar() => _guard(() async {
         final r = await _motor!.buscar(_buscaCtrl.text);
         setState(() => _resultados = r);
@@ -153,8 +164,12 @@ class _DhtBuscaScreenState extends State<DhtBuscaScreen> {
             const SizedBox(height: 4),
             if (_stats != null)
               Text(
-                  'índice:${_stats!.totalIndice} · resueltos:${_stats!.resueltos} · pendientes:${_stats!.pendientes}',
-                  style: const TextStyle(fontSize: 10.5, fontFamily: 'monospace')),
+                  'CAPTURADOS ${_stats!.capturados} · índice ${_stats!.totalIndice} · resueltos ${_stats!.resueltos} · pendientes ${_stats!.pendientes}',
+                  style: const TextStyle(
+                      fontSize: 11,
+                      fontFamily: 'monospace',
+                      color: Colors.amberAccent)),
+
             const SizedBox(height: 8),
             Wrap(spacing: 8, runSpacing: 4, children: [
               FilledButton.icon(

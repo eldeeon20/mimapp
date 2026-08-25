@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddrV4;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -74,6 +74,14 @@ fn ahora_ms() -> i64 {
 #[derive(Clone, Debug)]
 struct FiltroAtrapador {
     tx: Arc<Sender<String>>,
+    vistos: Arc<AtomicU64>,
+}
+
+impl FiltroAtrapador {
+    fn captura(&self, hash: String) {
+        self.vistos.fetch_add(1, Ordering::Relaxed);
+        let _ = self.tx.send(hash);
+    }
 }
 
 impl RequestFilter for FiltroAtrapador {
@@ -88,7 +96,7 @@ impl RequestFilter for FiltroAtrapador {
             }) => hex_id(&args.info_hash),
             _ => return true,
         };
-        let _ = self.tx.send(hash);
+        self.captura(hash);
         true
     }
 }
@@ -105,6 +113,8 @@ pub struct DhtBusca {
     indice: Arc<Mutex<Estado>>,
     nuevos_desde_poll: Arc<Mutex<Vec<String>>>,
     stats: Arc<Mutex<Stats>>,
+    vistos: Arc<AtomicU64>,
+    canal: Mutex<Option<Arc<Sender<String>>>>,
     logs: EventLog,
     dir_cache: PathBuf,
     runtime: Arc<tokio::runtime::Runtime>,
@@ -114,7 +124,7 @@ pub struct DhtBusca {
 #[derive(Clone, Default, serde::Serialize)]
 pub struct Stats {
     pub nodos_tabla: usize,
-    pub vistos: usize,
+    pub capturados: u64,
     pub resueltos: usize,
     pub pendientes: usize,
 }
@@ -131,6 +141,8 @@ impl DhtBusca {
             indice: Arc::new(Mutex::new(indice)),
             nuevos_desde_poll: Arc::new(Mutex::new(Vec::new())),
             stats: Arc::new(Mutex::new(Stats::default())),
+            vistos: Arc::new(AtomicU64::new(0)),
+            canal: Mutex::new(None),
             logs: EventLog::new(),
             dir_cache: dir,
             runtime: Arc::new(
@@ -157,13 +169,17 @@ impl DhtBusca {
 
         let (tx_hash, rx_hash): (_, Receiver<String>) = channel();
         let tx_filtro: Arc<Sender<String>> = Arc::new(tx_hash.clone());
+        *self.canal.lock().unwrap_or_else(|e| e.into_inner()) =
+            Some(tx_filtro.clone());
+        let vistos_hilo = self.vistos.clone();
         let stop = self.stop.clone();
         let logs = self.logs.clone();
 
         // El DHT vive en su propio hilo (API sync de mainline).
         let builder_thread = std::thread::Builder::new().name("dhtbusca-spider".into());
         let handle = builder_thread.spawn(move || {
-            let filtro: Box<dyn RequestFilter> = Box::new(FiltroAtrapador { tx: tx_filtro });
+            let filtro: Box<dyn RequestFilter> =
+                Box::new(FiltroAtrapador { tx: tx_filtro, vistos: vistos_hilo });
             let dht = match Dht::builder()
                 .server_mode()
                 .server_settings(ServerSettings {
@@ -201,7 +217,12 @@ impl DhtBusca {
                     if vistos.len() > 50_000 {
                         vistos.clear();
                     }
-                    let _ = dht.get_peers(id);
+                    // como el crawler: si el id aleatorio tiene swarm,
+                    // también entra al canal (descubrimiento activo real)
+                    if !dht.get_peers(id).is_empty() {
+                        vistos_hilo.fetch_add(1, Ordering::Relaxed);
+                        let _ = tx_filtro.send(hex_id(&id));
+                    }
                     std::thread::sleep(TICK_ACTIVO);
                 } else {
                     // solo pasivo: dormir largo, el filter sigue alimentando
@@ -216,6 +237,7 @@ impl DhtBusca {
         let indice = self.indice.clone();
         let nuevos = self.nuevos_desde_poll.clone();
         let stats = self.stats.clone();
+        let vistos_meta = self.vistos.clone();
         let logs_meta = self.logs.clone();
         let dir_tmp = self.dir_cache.join("_meta");
         let stop2 = self.stop.clone();
@@ -227,6 +249,7 @@ impl DhtBusca {
                 indice,
                 nuevos,
                 stats,
+                vistos_meta,
                 logs_meta,
                 dir_tmp,
                 max_meta,
@@ -245,6 +268,7 @@ impl DhtBusca {
             return Err(anyhow!("no está corriendo"));
         }
         self.stop.store(true, Ordering::SeqCst);
+        *self.canal.lock().unwrap_or_else(|e| e.into_inner()) = None;
         guardar(&self.dir_cache.join("dhtbusca.json"), &self.indice)?;
         self.logs.push("✓ detenido e índice guardado");
         self.hilo_spider = None;
@@ -285,7 +309,38 @@ impl DhtBusca {
     }
 
     pub fn stats(&self) -> Stats {
-        self.stats.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        let mut st = self.stats.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        st.capturados = self.vistos.load(Ordering::Relaxed);
+        st
+    }
+
+    /// Prueba manual: acepta magnet completo o info_hash hex de 40.
+    /// Sirve para diagnosticar si el pipeline funciona en esta red.
+    pub fn probar(&self, texto: &str) -> Result<()> {
+        let t = texto.trim();
+        let hash = if t.starts_with("magnet:") {
+            t.split("xt=urn:btih:")
+                .nth(1)
+                .and_then(|resto| {
+                    Some(resto[..40.min(resto.len())].to_string())
+                })
+                .ok_or_else(|| anyhow!("magnet sin xt=urn:btih:"))?
+        } else {
+            t.to_string()
+        };
+        if hash.len() != 40 || !hash.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(anyhow!(
+                "esperaba un info_hash hex de 40 o magnet; got '{}'",
+                &hash
+            ));
+        }
+        let canal = self.canal.lock().unwrap_or_else(|e| e.into_inner());
+        let tx = canal
+            .as_ref()
+            .ok_or_else(|| anyhow!("el spider no está corriendo"))?;
+        let _ = tx.send(hash.to_lowercase());
+        self.logs.push(format!("✓ magnet de prueba inyectado"));
+        Ok(())
     }
 
     /// Guarda el índice a disco sin parar el spider.
@@ -307,12 +362,14 @@ impl Drop for DhtBusca {
 
 // ------------------------------------------------------------- metadatos
 
+#[allow(clippy::too_many_arguments)]
 async fn meta_loop(
     rx: Receiver<String>,
     stop: Arc<AtomicBool>,
     indice: Arc<Mutex<Estado>>,
     nuevos: Arc<Mutex<Vec<String>>>,
     stats: Arc<Mutex<Stats>>,
+    vistos_meta: Arc<AtomicU64>,
     logs: EventLog,
     dir_tmp: PathBuf,
     max_meta: usize,
@@ -424,6 +481,7 @@ async fn meta_loop(
             st.nodos_tabla = nodos;
             st.resueltos = indice.lock().unwrap_or_else(|e| e.into_inner()).hallados.len();
             st.pendientes = pendientes.len();
+            st.capturados = vistos_meta.load(Ordering::Relaxed);
         }
 
         tokio::time::sleep(Duration::from_secs(2)).await;

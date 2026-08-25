@@ -21,6 +21,7 @@ class DhtBusca {
   Future<List<rust.HalladoItem>> pollNuevos() => _m.pollNuevos();
   Future<List<rust.HalladoItem>> buscar(String texto) => _m.buscar(texto: texto);
   Future<rust.DhtStats> stats() => _m.stats();
+  Future<void> probar(String texto) => _m.probar(texto: texto);
   Future<void> guardar() => _m.guardar();
   Future<List<String>> logs() => _m.takeLogs();
 

@@ -19,6 +19,7 @@ pub struct HalladoItem {
 #[derive(Clone)]
 pub struct DhtStats {
     pub nodos_tabla: usize,
+    pub capturados: u64,
     pub resueltos: usize,
     pub pendientes: usize,
     pub total_indice: usize,
@@ -81,11 +82,17 @@ impl MotorDht {
             let s: StatsInt = m.stats();
             Ok(DhtStats {
                 nodos_tabla: s.nodos_tabla,
+                capturados: s.capturados,
                 resueltos: s.resueltos,
                 pendientes: s.pendientes,
                 total_indice: m.total(),
             })
         })?
+    }
+
+    /// Prueba manual: magnet completo o info_hash hex de 40.
+    pub async fn probar(&self, texto: String) -> Result<(), String> {
+        self.con(|m| m.probar(&texto).map_err(|e| format!("probar: {e:#}")))?
     }
 
     /// Guarda índice sin parar el spider.
