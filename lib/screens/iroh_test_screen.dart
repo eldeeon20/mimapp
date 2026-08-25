@@ -73,13 +73,7 @@ class _IrohTestScreenState extends State<IrohTestScreen> {
   // ---- ENVIAR ----------------------------------------------------------
   Future<void> _iniciar() => _guard(() async {
         final id = await _nodo!.startServidor();
-        setState(() {
-          _miId = id;
-        });
-        try {
-          final t = await _nodo!.chatTicket();
-          if (mounted) setState(() => _miChatTicket = t);
-        } catch (_) {}
+        setState(() => _miId = id);
       });
 
   Future<void> _ofrecer() => _guard(() async {
@@ -88,6 +82,11 @@ class _IrohTestScreenState extends State<IrohTestScreen> {
         }
         final t = await _nodo!.ofrecer(_rutaCtrl.text.trim());
         setState(() => _ticketGenerado = t);
+      });
+
+  Future<void> _miTicket() => _guard(() async {
+        final t = await _nodo!.chatTicket();
+        setState(() => _miChatTicket = t);
       });
 
   Future<void> _chatEnviar() => _guard(() async {
@@ -145,6 +144,13 @@ class _IrohTestScreenState extends State<IrohTestScreen> {
                 onPressed: _busy || on ? null : _iniciar,
                 icon: const Icon(Icons.play_arrow_rounded, size: 18),
                 label: const Text('Iniciar nodo')),
+            if (_miChatTicket == null)
+              TextButton.icon(
+                  onPressed: _busy ? null : _miTicket,
+                  icon: const Icon(Icons.qr_code_rounded, size: 16),
+                  label: const Text('generar MI ticket de conexión '
+                      '(solo si querés que te escriban)',
+                      style: TextStyle(fontSize: 11))),
             if (_miChatTicket != null) ...[
               const SizedBox(height: 6),
               Row(children: [
@@ -211,13 +217,13 @@ class _IrohTestScreenState extends State<IrohTestScreen> {
           child: Padding(
             padding: const EdgeInsets.all(10),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('CHAT · conexión directa',
+              const Text('CONECTAR con un par',
                   style:
                       TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
               const Text(
-                  '2 tickets distintos: el DE ARRIBA lleva un archivo concreto '
-                  '(hash); este solo dice DÓNDE estás. Pegá el de conexión del '
-                  'OTRO y mandale algo — responde con eco.',
+                  'rol receptor: pegá el ticket del otro y listo, conecta. '
+                  '(el ticket de ARCHIVO de arriba es otro protocolo: baja '
+                  'un contenido concreto)',
                   style: TextStyle(fontSize: 9.5, color: Colors.white38)),
               const SizedBox(height: 6),
               TextField(
