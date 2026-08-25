@@ -69,15 +69,15 @@ impl ChatNodo {
                     break;
                 }
             }
-            let _ = w.finish().await;
+            let _ = w.finish();
         });
         let entrantes = self.entrantes.clone();
         let mut lector = tokio::spawn(async move {
             let mut buf = vec![0u8; 4096];
             loop {
                 match r.read(&mut buf).await {
-                    Ok(0) | Err(_) => break,
-                    Ok(n) => {
+                    Err(_) | Ok(None) | Ok(Some(0)) => break,
+                    Ok(Some(n)) => {
                         let trozo = String::from_utf8_lossy(&buf[..n]);
                         for linea in trozo.split('\n').filter(|l| !l.is_empty()) {
                             entrantes
@@ -200,8 +200,6 @@ impl IrohPar {
     /// Ofrece un archivo: lo agrega al almacén y devuelve el ticket
     /// copiable. Quien tenga el ticket puede bajarlo de este nodo.
     pub fn ofrecer(&self, ruta: &str) -> Result<String> {
-        let g = self.vivo.lock().map_err(|_| anyhow!("mutex"))?;
-        let vivo = g.as_ref().ok_or_else(|| anyhow!("nodo apagado"))?;
         let abs = PathBuf::from(ruta);
         let abs = if abs.is_absolute() {
             abs
@@ -215,14 +213,18 @@ impl IrohPar {
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let ticket = self.bloquea(async {
-            let tag = vivo
-                ._store
+        let (store, endpoint) = {
+            let g = self.vivo.lock().map_err(|_| anyhow!("mutex"))?;
+            let v = g.as_ref().ok_or_else(|| anyhow!("nodo apagado"))?;
+            (v._store.clone(), v.endpoint.clone())
+        };
+        let ticket = self.bloquea(async move {
+            let tag = store
                 .blobs()
                 .add_path(abs.clone())
                 .await
                 .context("hasheando archivo")?;
-            let t = BlobTicket::new(vivo.endpoint.addr(), tag.hash, tag.format);
+            let t = BlobTicket::new(endpoint.addr(), tag.hash, tag.format);
             Ok::<_, anyhow::Error>(t.to_string())
         })?;
         self.logs
@@ -233,12 +235,16 @@ impl IrohPar {
     /// Baja un blob desde el ticket a [dir_destino]/[nombre].
     /// Devuelve la ruta final escrita.
     pub fn bajar(&self, ticket_str: &str, dir_destino: &str, nombre: &str) -> Result<String> {
-        let g = self.vivo.lock().map_err(|_| anyhow!("mutex"))?;
-        let vivo = g.as_ref().ok_or_else(|| anyhow!("nodo apagado"))?;
         if nombre.trim().is_empty() {
             return Err(anyhow!("poné un nombre de destino"));
         }
-        let destino = Path::new(dir_destino).join(nombre.trim());
+        let (store, endpoint) = {
+            let g = self.vivo.lock().map_err(|_| anyhow!("mutex"))?;
+            let v = g.as_ref().ok_or_else(|| anyhow!("nodo apagado"))?;
+            (v._store.clone(), v.endpoint.clone())
+        };
+        let dir = std::path::PathBuf::from(dir_destino);
+        let destino = dir.join(nombre.trim());
         let ticket: BlobTicket = ticket_str
             .trim()
             .parse()
@@ -248,14 +254,14 @@ impl IrohPar {
             ticket.hash(),
             ticket.addr().id
         ));
-        self.bloquea(async {
-            let downloader = vivo._store.downloader(&vivo.endpoint);
+        self.bloquea(async move {
+            let downloader = store.downloader(&endpoint);
             downloader
                 .download(ticket.hash(), Some(ticket.addr().id))
                 .await
                 .context("descarga del blob")?;
-            std::fs::create_dir_all(dir_destino).context("creando destino")?;
-            vivo._store
+            std::fs::create_dir_all(&dir).context("creando destino")?;
+            store
                 .blobs()
                 .export(ticket.hash(), &destino)
                 .await
@@ -302,7 +308,7 @@ impl IrohPar {
             Ok::<_, anyhow::Error>(c)
         })?;
         *self.chat_conn.lock().unwrap_or_else(|e| e.into_inner()) = Some(conn);
-        self.logs.push("✓ chat conectado".into());
+        self.logs.push("✓ chat conectado");
         Ok(())
     }
 

@@ -179,7 +179,10 @@ impl DhtBusca {
         let builder_thread = std::thread::Builder::new().name("dhtbusca-spider".into());
         let handle = builder_thread.spawn(move || {
             let filtro: Box<dyn RequestFilter> =
-                Box::new(FiltroAtrapador { tx: tx_filtro, vistos: vistos_hilo });
+                Box::new(FiltroAtrapador {
+                tx: tx_filtro.clone(),
+                vistos: vistos_hilo.clone(),
+            });
             let dht = match Dht::builder()
                 .server_mode()
                 .server_settings(ServerSettings {
