@@ -261,7 +261,7 @@ class _IrohTestScreenState extends State<IrohTestScreen> {
                         itemCount: _chat.length,
                         itemBuilder: (_, i) {
                           final m = _chat[_chat.length - 1 - i];
-                          final mio = m.de == 'yo';
+                          final mio = m['de'] == 'yo';
                           return Align(
                             alignment: mio
                                 ? Alignment.centerRight
@@ -276,7 +276,7 @@ class _IrohTestScreenState extends State<IrohTestScreen> {
                                       ? Colors.cyan.withValues(alpha: .18)
                                       : Colors.greenAccent.withValues(alpha: .12),
                                   borderRadius: BorderRadius.circular(10)),
-                              child: SelectableText(m.texto,
+                              child: SelectableText(m['texto'] ?? '',
                                   style: const TextStyle(fontSize: 12.5)),
                             ),
                           );
