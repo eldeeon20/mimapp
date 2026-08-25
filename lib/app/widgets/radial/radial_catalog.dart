@@ -85,6 +85,21 @@ abstract final class RadialCatalog {
         icon: Icons.dns_rounded,
         color: Colors.purpleAccent),
     RadialMenuItem(
+        key: 'tr',
+        label: 'Tor',
+        icon: Icons.vpn_lock_rounded,
+        color: Color(0xFFAB47BC)),
+    RadialMenuItem(
+        key: 'dh',
+        label: 'DHT Busca',
+        icon: Icons.radar_rounded,
+        color: Colors.deepOrangeAccent),
+    RadialMenuItem(
+        key: 'ir',
+        label: 'Iroh P2P',
+        icon: Icons.lan_rounded,
+        color: Colors.lightBlueAccent),
+    RadialMenuItem(
         key: 'ring',
         label: 'Nostringer',
         icon: Icons.fingerprint_rounded,

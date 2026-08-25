@@ -50,13 +50,9 @@ class _RadialMenuState extends State<RadialMenu>
   }
 
   void _afuera() {
-    // Tocar afuera: en capas profundas vuelve una; en la primera cierra.
-    if (_page > 0) {
-      setState(() => _page--);
-      _ctrl.forward(from: 0);
-    } else {
-      Navigator.of(context).pop();
-    }
+    // Tocar afuera cierra TODO el menú de una: rápido. El [+] central
+    // cicla los anillos; no hay gesto de "volver una capa".
+    Navigator.of(context).pop();
   }
 
   @override
@@ -81,9 +77,9 @@ class _RadialMenuState extends State<RadialMenu>
             color: Colors.white70,
             onTap: () => Navigator.of(context).pop(),
           );
-    final hint = hayMas && _page > 0
-        ? 'tocá afuera para volver · + cambia de anillo'
-        : 'tocá afuera para cerrar${hayMas ? ' · + cambia de anillo' : ''}';
+    final hint = hayMas
+        ? 'tocá afuera para cerrar · + cambia de anillo'
+        : 'tocá afuera para cerrar';
 
     return Material(
       color: Colors.black.withValues(alpha: .82),

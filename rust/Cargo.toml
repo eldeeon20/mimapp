@@ -41,6 +41,10 @@ reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"
 # --- GPU compute (WebGPU/WGSL nativo, backend Vulkan en Android) ---
 wgpu = "25"
 half = "2"
+mainline = "8"
+# --- Iroh P2P (cliente+servidor de blobs, QUIC + relays n0) ---
+iroh = "1"
+iroh-blobs = "0.103"
 # --- BitTorrent (rqbit embebido, TLS rustls para Android) ---
 serde_json = "1"
 # --- Archives (RAR5/7z/ZIP/tar/gz/arj/lha/zoo... unificado) ---

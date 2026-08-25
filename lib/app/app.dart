@@ -24,6 +24,9 @@ import '../screens/shamir_test_screen.dart';
 import '../screens/nostr_busca_screen.dart';
 import '../screens/nostrn_screen.dart';
 import '../screens/pkarr_test_screen.dart';
+import '../screens/dht_busca_screen.dart';
+import '../screens/iroh_test_screen.dart';
+import '../screens/tor_test_screen.dart';
 import '../screens/unarc_test_screen.dart';
 import '../toolsec/toolsec_dialog.dart';
 import 'widgets/bottom_bar.dart';
@@ -161,6 +164,14 @@ class _HomePageState extends State<HomePage> {
                   const NostrnScreen());
             case 'up':
               _openTest(context, 'Pkarr v8', const PkarrTestScreen());
+            case 'tr':
+              _openTest(context, 'Tor embebido (arti)', const TorTestScreen());
+            case 'dh':
+              _openTest(
+                  context, 'DHT Busca · spider Mainline', const DhtBuscaScreen());
+            case 'ir':
+              _openTest(
+                  context, 'Iroh P2P · transferir archivos', const IrohTestScreen());
           }
         }),
       ),

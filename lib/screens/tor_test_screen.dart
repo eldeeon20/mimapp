@@ -91,7 +91,6 @@ class _TorTestScreenState extends State<TorTestScreen> {
     final s = TorService.instance;
     final on = s.running;
     return Scaffold(
-      appBar: AppBar(title: const Text('Tor embebido (arti)')),
       body: ListView(padding: const EdgeInsets.all(12), children: [
         // ---- estado + control
         Container(
