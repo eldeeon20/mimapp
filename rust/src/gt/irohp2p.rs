@@ -245,6 +245,7 @@ impl IrohPar {
         };
         let dir = std::path::PathBuf::from(dir_destino);
         let destino = dir.join(nombre.trim());
+        let destino_en_hilo = destino.clone();
         let ticket: BlobTicket = ticket_str
             .trim()
             .parse()
@@ -263,7 +264,7 @@ impl IrohPar {
             std::fs::create_dir_all(&dir).context("creando destino")?;
             store
                 .blobs()
-                .export(ticket.hash(), &destino)
+                .export(ticket.hash(), &destino_en_hilo)
                 .await
                 .context("exportando archivo")?;
             Ok::<_, anyhow::Error>(())
@@ -360,7 +361,7 @@ impl IrohPar {
         let mut g = self.vivo.lock().map_err(|_| anyhow!("mutex"))?;
         let vivo = g.take().ok_or_else(|| anyhow!("no está corriendo"))?;
         drop(g); // soltar el lock antes de esperar el shutdown
-        self.bloquea(async {
+        self.bloquea(async move {
             let _ = vivo.router.shutdown().await;
             vivo.endpoint.close().await;
             Ok::<_, anyhow::Error>(())
