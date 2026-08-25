@@ -1,164 +1,58 @@
-# pr_app
+# mimapp
 
-App **multiplataforma** (Android / Windows / Linux / iOS / macOS / web) hecha con **Flutter + Rust + Lua**, con **IA de chat local (Candle)** en el dispositivo y una **GUI controlada por Lua**: muy dinámica y totalmente programable, capaz de re-renderizarse en caliente y de reproducir **audio y video**.
+App **multiplataforma** (Android primero) hecha con **Flutter + Rust**, unida por
+[flutter_rust_bridge](https://cjycode.com/flutter_rust_bridge/). Todo lo pesado vive en Rust:
+redes P2P, IA local, cifrado, spiders. La UI es Flutter puro, navegable desde un **menú radial**.
 
-## Qué es
+## Qué hay adentro
 
-- **GUI programable en Lua.** Cada pantalla es un script Lua (`assets/pages/*.lua`) que define widgets y comportamiento. Cambias el `.lua` y la interfaz cambia por completo **sin recompilar la app**. Las páginas se pueden bajar desde una URL y renderizarse al instante.
-- **IA local en Rust (Candle).** Chat LLM embebido que corre **en el dispositivo** (sin servidor): la app descarga el modelo desde HuggingFace por HTTP (por streaming, con progreso), Rust lo lee del disco y lo carga en RAM, y genera texto directamente en el teléfono. Dos modelos: `base` y `fine`.
-- **Multimedia integrada.** Reproducción de audio y video desde Lua (media_kit): abrir archivo, play/pausa, seek, status.
+| Módulo | Qué hace |
+|---|---|
+| **Needle** | IA de chat local en el dispositivo (Candle/Mistral 7B cuantizado), sin nube |
+| **Nostrn+** | red social sobre Nostr: posts, likes, replies, perfiles, DMs, subida de imágenes Blossom |
+| **Tor** | tráfico onion para las funciones de red sensibles (arti + socks) |
+| **DHT Busca** | spider Kademlia BitTorrent: descubre y lista torrents en vivo (fork mainline vendido) |
+| **Iroh P2P** | transferencia directa de archivos por ticket BLAKE3 + **chat directo estilo DM** entre dos peers, sin servidor |
+| **Navegador in-app** | webview con pestañas, cookies y modo I2P planificado |
 
 ## Arquitectura
 
 ```
-[Página Lua]  <- define la GUI (widgets + handlers) + control multimedia + IA
-      ↓  lua_dardo_plus (VM Lua 5.3, 100% Dart, sin nativo)
-[Dart / Flutter]  <- hub: renderiza widgets, gestiona media y conecta todo
-      ↓  flutter_rust_bridge
-[Rust]  <- IA (Candle: tokenizer + LLM) y lógica pesada
+lib/                    Flutter (pantallas + servicios Dart)
+├─ app/                 app raíz, menú radial, rutas
+├─ screens/             una pantalla por función (needle, nostrn, iroh_test, dht_busca…)
+├─ services/            puentes finos hacia los APIs generados por FRB
+└─ src/rust/api/        bindings generados (no editar a mano)
+
+rust/
+├─ src/api/             API pública por módulo (wrappers legibles, errores traducidos)
+├─ src/gt/              motor real: needle/, gestion.rs (social), dhtbusca/, irohp2p.rs, tor…
+├─ mainline/            fork de mainline vendido (el upstream borró los tipos que necesitábamos)
+└─ Cargo.toml           workspace único; iroh 1.x, librqbit 9, arti, candle…
+
+web_inapp_i2p.md        plan del navegador in-app con I2P
 ```
 
-- **Lua = páginas + comportamiento.** Un script define `page.body` (lista de widgets) y `page.handlers` (funciones). También puede llamar a `engine_set` para re-renderizar un widget en vivo, al reproductor multimedia y a la IA.
-- **Flutter = render.** Un motor en Dart (`lib/gui/`, `lib/widgets/`) ejecuta el script y pinta los widgets.
-- **Rust = IA y motor lógico.** Con `flutter_rust_bridge`, Rust expone funciones a Dart y Lua las llama: `laurelia_generate`, `laurelia_load_model`, `rust_greet`, `rust_sum`, `rust_fibonacci`, etc.
+Convenciones clave:
+- **Constructores top-level** (`motorDhtNew`, `irohNuevo`) porque FRB no soporta ctors sync con Result.
+- **Objetos opacos** (`IrohViva`, `MotorDht`) con helper interno `con()/con_mut()`.
+- Los métodos async corren en workers tokio de FRB → **nunca `block_on` dentro**; se usa `bloquea()`
+  (spawn en runtime propio + canal).
+- Errores siempre en castellano y accionables, nunca crudos.
 
-## Funciones expuestas a Lua
+## Compilar
 
-### Motor de GUI
+No hace falta toolchain local: **GitHub Actions compila todo** (`.github/workflows/build.yml`)
+en cada push a `main`: genera bindings Rust↔Dart, analiza Dart, cruza Rust para
+aarch64-android y produce el APK.
 
-| Función Lua | Qué hace |
-|---|---|
-| `engine_get(id)` | Lee el valor actual de un widget |
-| `engine_set(id, valor)` | Actualiza un widget y re-renderiza |
-| `navigate("página")` | Cambia de página |
-| `gui_*` (`gui_button`, `gui_text`, `gui_input`, `gui_rect`, ...) | Construye la GUI llamando funciones (estilo Godot) |
-| `handler("nombre", fn)` | Registra un manejador de evento para los `on_click` |
+Para desarrollo local: Flutter stable + Rust stable + targets android del NDK,
+y regenerar bindings igual que hace CI antes de `flutter analyze`.
 
-### IA Laurelia (chat local en Rust/Candle)
+## Probar Iroh entre dos dispositivos
 
-| Función Lua | Qué hace |
-|---|---|
-| `laurelia_set_model("base"\|"fine")` | Selecciona el modelo |
-| `laurelia_download()` | Descarga por streaming lo que falte (progreso en vivo) |
-| `laurelia_download_and_load()` | Descarga y carga en Rust en una sola acción |
-| `laurelia_load()` | Carga el modelo del disco a RAM |
-| `laurelia_unload()` | Libera el modelo de RAM |
-| `laurelia_delete_model("base"\|"fine")` | Borra el modelo del disco |
-| `laurelia_generate(prompt, max_tokens)` | Genera texto; el resultado va a `laurelia_out` |
-| `laurelia_count_tokens(texto)` | Cuenta tokens (necesita tokenizer) |
-| `laurelia_is_loaded()` / `laurelia_status()` / `laurelia_info()` | Estado: cargado, progreso, ruta, MB, completo |
-| `laurelia_vocab()` | Tamaño del vocabulario |
-
-### Multimedia
-
-| Función Lua | Qué hace |
-|---|---|
-| `player_pick()` | Abre selector de archivo |
-| `player_open(url)` | Abre una URL o ruta |
-| `player_play()` / `player_pause()` / `player_toggle()` / `player_stop()` | Control del reproductor |
-| `player_status()` | Estado actual (playing/paused/... ) |
-
-### Widgets soportados en una página
-
-| type | campos |
-|---|---|
-| `heading` | `text` |
-| `text` | `id`, `text`, `multiline` (texto largo), `font`, `color`, `align` |
-| `input` | `id`, `label`, `value` |
-| `button` | `text`, `on_click` (nombre del handler) |
-| `rect` | `text`, `bg_color`, `radius`, `padding`, `align`, `font` |
-| `rect_image` / `image` | `src` (URL), `fit` |
-| `video` | — (reproduce con el reproductor compartido) |
-| `divider` | `height` |
-| `spacer` | `space` |
-
-## Estructura
-
-```
-pr_app/
-├── lib/
-│   ├── main.dart                    # shell de la app (barra URL + render)
-│   ├── ai/laurelia_chat.dart        # IA: descarga por streaming + carga + generar
-│   ├── gui/engine_shell.dart        # shell Flutter (media + laurelia + páginas)
-│   ├── lua/lua_controller.dart      # VM Lua + parseo + puente a Rust/media/IA
-│   ├── media/media_player.dart      # reproductor audio/video (media_kit)
-│   ├── widgets/                     # nodo Lua -> widget Flutter
-│   └── src/rust/                    # GENERADO por flutter_rust_bridge (no se commitea)
-├── rust/
-│   ├── src/api/simple.rs            # motor Rust (greet, sum, fibonacci)
-│   └── src/api/laurelia.rs          # IA Candle: carga modelo + generar texto
-├── rust_builder/                    # plugin que compila el crate (cargokit)
-├── assets/pages/
-│   ├── demo.lua                     # página demo (Rust)
-│   ├── player.lua                   # página multimedia (audio/video)
-│   └── laurelia.lua                 # página chat IA (base/fine, descargar/eliminar)
-├── android/                         # Kotlin (MainActivity + lo que quieras por plataforma)
-└── .github/workflows/build.yml      # CI: Windows, Linux y Android
-```
-
-## Requisitos locales (solo para desarrollo)
-
-- Flutter SDK estable
-- Rust (rustup)
-- Android build: JDK 17 + Android SDK/NDK
-
-### Generar los bindings Rust <-> Dart
-
-Los archivos `lib/src/rust/` y `rust/src/frb_generated.rs` se generan (no se commitean):
-
-```bash
-cargo install flutter_rust_bridge_codegen --version 2.12.0
-flutter pub get
-flutter_rust_bridge_codegen generate
-```
-
-Luego:
-
-```bash
-flutter run                 # Android / escritorio
-flutter build apk --release # APK
-```
-
-## Descargar páginas desde la web
-
-En la barra superior de la app pega la URL de un `.lua` (p. ej. alojado en un servidor estático o GitHub raw). La app lo descarga, lo ejecuta y re-renderiza la GUI. Sin tocar el binario.
-
-Ejemplo de página:
-
-```lua
-page.title = "Mi página"
-
-gui_button({ text = "Calcular", on_click = "calc" })
-gui_text({ id = "out", text = "Listo" })
-
-handler("calc", function()
-  engine_set("out", "Suma = " .. tostring(rust_sum(2, 3)))
-end)
-```
-
-## Chat IA en el dispositivo (Laurelia)
-
-1. **Descargar** el modelo (base o fine, ~650 MB) por HTTP con progreso en vivo → se guarda en disco (`hf_models/laurelia/<modelo>/`).
-2. **Cargar en Rust**: Rust lee el checkpoint del disco y lo pone en RAM.
-3. **Generar**: el texto se genera localmente y aparece en `laurelia_out` (multilinea, scrolleable).
-4. **Eliminar** un modelo borra solo su carpeta; **Liberar** libera la RAM.
-
-## CI (GitHub Actions)
-
-El workflow `.github/workflows/build.yml` compila automáticamente para:
-
-- **Linux** (bundle portable)
-- **Windows** (carpeta Release)
-- **Android** (APK)
-
-Los artefactos quedan disponibles en la pestaña Actions del repo. En CI se instala Rust, se genera el código con `flutter_rust_bridge_codegen`, se aceptan licencias de Android y se instala el NDK. El APK de Android incluye `libc++_shared.so` para que las dependencias C++ de Candle (tokenizer) funcionen en el dispositivo.
-
-## Parte Android (Kotlin)
-
-Solo Android usa Kotlin: `android/app/src/main/kotlin/com/example/pr_app/MainActivity.kt`. Puedes añadir ahí cualquier lógica específica de Android (platform channels, notificaciones, etc.) sin tocar las demás plataformas.
-
-## Notas
-
-- `lua_dardo_plus` es un VM de Lua 5.3 **100% Dart**: corre en Android, iOS, Windows, Linux, macOS y web sin código nativo (~sin peso extra).
-- La IA usa **Candle** (Rust) para tokenizar y generar: todo local, sin conexión tras descargar el modelo.
-- Los bindings se regeneran en CI, así que el repo queda limpio de archivos generados.
+1. En ambos: menú radial → **Iroh** → *Iniciar nodo*.
+2. Peer 1 copia su **ticket de conexión** (o el ticket de un archivo ofrecido).
+3. Peer 2 lo pega:
+   - ticket de conexión → abre **chat directo** (burbujas yo/par, sin servidor);
+   - ticket de archivo → baja el contenido verificado por BLAKE3.
