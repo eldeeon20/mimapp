@@ -439,14 +439,15 @@ impl GestionNostrn {
             return Err(anyhow!("texto vacío"));
         }
         let logs = self.logs.clone();
+        let builder = EventBuilder::text_note(texto);
         let id = self.runtime.block_on(async {
             let out = self
                 .client
-                .publish_text_note(texto)
+                .send_event_builder(builder)
                 .await
-                .context("publish_text_note falló")?;
+                .context("post falló")?;
             logs.push("✓ post publicado".to_string());
-            Ok(out.id().to_hex())
+            Ok::<String, anyhow::Error>(out.id().to_hex())
         })?;
         Ok(id)
     }
@@ -471,7 +472,7 @@ impl GestionNostrn {
                 .await
                 .context("send_event_builder falló")?;
             logs.push("✓ respuesta publicada".to_string());
-            Ok(out.id().to_hex())
+            Ok::<String, anyhow::Error>(out.id().to_hex())
         })?;
         Ok(out_id)
     }
@@ -506,7 +507,7 @@ impl GestionNostrn {
                 .send_event_builder(builder)
                 .await
                 .context("reacción falló")?;
-            Ok(out.id().to_hex())
+            Ok::<String, anyhow::Error>(out.id().to_hex())
         })?;
         self.logs.push("✓ +1 enviado".to_string());
         Ok(out_id)
@@ -520,7 +521,7 @@ impl GestionNostrn {
         let builder = EventBuilder::new(Kind::Repost, "").tags([
             Tag::event(id),
             Tag::public_key(autor),
-            Tag::kind(Kind::TextNote),
+            Tag::custom(TagKind::Custom(std::borrow::Cow::Borrowed("k")), vec!["1".to_string()]),
         ]);
         let out_id = self.runtime.block_on(async {
             let out = self
@@ -528,7 +529,7 @@ impl GestionNostrn {
                 .send_event_builder(builder)
                 .await
                 .context("repost falló")?;
-            Ok(out.id().to_hex())
+            Ok::<String, anyhow::Error>(out.id().to_hex())
         })?;
         self.logs.push("✓ repost enviado".to_string());
         Ok(out_id)
@@ -548,7 +549,7 @@ impl GestionNostrn {
             return Ok(vec![]);
         };
         Ok(ev
-            .tags()
+            .tags
             .public_keys()
             .map(|pk| pk.to_bech32().unwrap_or_default())
             .collect())
@@ -594,19 +595,20 @@ impl GestionNostrn {
         if titulo.trim().is_empty() || cuerpo.trim().is_empty() {
             return Err(anyhow!("título y cuerpo son obligatorios"));
         }
-        let mut tags: Vec<Tag> = vec![
-            Tag::custom(TagKind::Custom("title".to_string()), vec![titulo.to_string()]),
-        ];
+        let mut tags: Vec<Tag> = vec![Tag::custom(
+            TagKind::Custom(std::borrow::Cow::Borrowed("title")),
+            vec![titulo.to_string()],
+        )];
         if !resumen.trim().is_empty() {
             tags.push(Tag::custom(
-                TagKind::Custom("summary".to_string()),
+                TagKind::Custom(std::borrow::Cow::Borrowed("summary")),
                 vec![resumen.to_string()],
             ));
         }
         if !imagen_url.trim().is_empty() {
             Url::parse(imagen_url).map_err(|e| anyhow!("URL de imagen inválida: {e:?}"))?;
             tags.push(Tag::custom(
-                TagKind::Custom("image".to_string()),
+                TagKind::Custom(std::borrow::Cow::Borrowed("image")),
                 vec![imagen_url.to_string()],
             ));
         }
@@ -619,7 +621,7 @@ impl GestionNostrn {
                 .await
                 .context("artículo falló")?;
             logs.push("✓ artículo 30023 publicado".to_string());
-            Ok(out.id().to_hex())
+            Ok::<String, anyhow::Error>(out.id().to_hex())
         })?;
         Ok(out_id)
     }
