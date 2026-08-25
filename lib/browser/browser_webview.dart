@@ -36,7 +36,7 @@ class _BrowserWebviewState extends State<BrowserWebview> {
               transparentBackground: true,
               supportZoom: true,
             ),
-            onWebViewControllerCreated: (c) =>
+            onWebViewCreated: (c) =>
                 widget.tabs.registerController(widget.tab.id, c),
             onProgressChanged: (_, p) {
               if (mounted) setState(() => _progress = p / 100);

@@ -18,7 +18,7 @@ class CookieStore {
   /// Borra TODAS las cookies manejadas por el WebView. Devuelve si pudo.
   Future<bool> clearAll() async {
     try {
-      return await CookieManager.instance().clearCookies();
+      return await CookieManager.instance().deleteAllCookies();
     } catch (_) {
       return false;
     }

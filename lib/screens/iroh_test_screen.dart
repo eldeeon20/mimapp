@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../services/iroh_p2p.dart';
+import '../src/rust/api/iroh_p2p.dart' as rust;
 
 /// Ejemplo de transferencia de archivos por iroh-blobs:
 ///   ENVIAR:  iniciás nodo → ruta del archivo → ticket (copiá y mandalo
