@@ -73,7 +73,14 @@ class _IrohTestScreenState extends State<IrohTestScreen> {
   // ---- ENVIAR ----------------------------------------------------------
   Future<void> _iniciar() => _guard(() async {
         final id = await _nodo!.startServidor();
-        setState(() => _miId = id);
+        String? chat;
+        try {
+          chat = await _nodo!.chatTicket();
+        } catch (_) {}
+        setState(() {
+          _miId = id;
+          _miChatTicket = chat;
+        });
       });
 
   Future<void> _ofrecer() => _guard(() async {
@@ -144,13 +151,6 @@ class _IrohTestScreenState extends State<IrohTestScreen> {
                 onPressed: _busy || on ? null : _iniciar,
                 icon: const Icon(Icons.play_arrow_rounded, size: 18),
                 label: const Text('Iniciar nodo')),
-            if (_miChatTicket == null)
-              TextButton.icon(
-                  onPressed: _busy ? null : _miTicket,
-                  icon: const Icon(Icons.qr_code_rounded, size: 16),
-                  label: const Text('generar MI ticket de conexión '
-                      '(solo si querés que te escriban)',
-                      style: TextStyle(fontSize: 11))),
             if (_miChatTicket != null) ...[
               const SizedBox(height: 6),
               Row(children: [
