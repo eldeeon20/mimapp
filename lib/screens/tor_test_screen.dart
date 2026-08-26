@@ -203,7 +203,7 @@ class _TorTestScreenState extends State<TorTestScreen> {
                       decoration: const InputDecoration(
                           labelText: 'host:puerto'))),
                   FilledButton.tonal(
-                      onPressed: _busy ? null : _electrum,
+                      onPressed: s.busy ? null : _electrum,
                       child: const Text('PING')),
                 ]),
                 if (_eleResp != null)

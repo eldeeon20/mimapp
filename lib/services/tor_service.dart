@@ -287,8 +287,8 @@ extension TunelCrudoTor on TorService {
       sec.writeln(
           '{"jsonrpc":"2.0","id":"0","method":"server.version",'
           '"params":["mimapp","1.0"]}');
-      final linea = await sec
-          .transform(utf8.decoder)
+      final linea = await utf8.decoder
+          .bind(sec)
           .transform(const LineSplitter())
           .first
           .timeout(const Duration(seconds: 10));
