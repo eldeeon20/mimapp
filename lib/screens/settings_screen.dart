@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../services/settings.dart';
+import 'i2p_test_screen.dart';
 import 'tor_test_screen.dart';
 
 /// Menú de Configuración.
@@ -55,6 +56,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
             trailing: const Icon(Icons.chevron_right),
             onTap: () => Navigator.push(context,
                 MaterialPageRoute(builder: (_) => const TorTestScreen())),
+          ),
+          ListTile(
+            leading: const Icon(Icons.hub),
+            title: const Text('I2P (experimental)'),
+            subtitle: const Text(
+                'Router emissary embebido · eepsites y descargas directas'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const I2pTestScreen())),
           ),
           const Divider(),
           ListTile(

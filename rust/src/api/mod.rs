@@ -1,6 +1,7 @@
 pub mod dht_busca;
 pub mod gpu;
 pub mod hf;
+pub mod i2p;
 pub mod iroh_p2p;
 pub mod kem;
 pub mod laurelia;

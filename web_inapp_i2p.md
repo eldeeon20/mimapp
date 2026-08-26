@@ -1,74 +1,73 @@
-# web_inapp_i2p.md — Browser inappwebview + plan I2P
+# web_inapp_i2p.md — Browser inappwebview + I2P embebido
 
-Estado: IMPLEMENTADO fase 1 (browser) · I2P: REFERENCIA futura · Fecha: 2026-08-25
+Estado: browser IMPLEMENTADO · I2P embebido (emissary) IMPLEMENTADO (Rust+Dart, sin enchufe al
+browser todavía) · Fecha: 2026-08-26
 
-## 1. Qué se implementó (browser)
+## 1. Browser (fase 1, ya en la app)
 
-El botón **Web** de abajo ya no abre la web Lua: ahora abre un mini browser
-sobre `flutter_inappwebview` (plugin puro, NO la app completa de referencia
-[pichillilorenzo/flutter_browser_app](https://github.com/pichillilorenzo/flutter_browser_app),
-que queda solo como inspiración). El código Lua quedó **intacto pero suelto**
-en `lib/lua/` sin invocar.
-
-### Estructura modular
+El botón **Web** abre un mini browser sobre `flutter_inappwebview` (plugin puro, NO la app de
+referencia [pichillilorenzo/flutter_browser_app](https://github.com/pichillilorenzo/flutter_browser_app),
+solo inspiración). El código Lua quedó **intacto pero suelto** en `lib/lua/` sin invocar.
 
 ```
 lib/browser/
 ├── browser_tab.dart        # modelo de pestaña + contrato BrowserTabLike
-├── browser_tabs.dart       # BrowserTabs (ChangeNotifier): lista/activa/
-│                           #   add/close cap 8, registro de controladores,
-│                           #   toggle global JS aplicado en vivo
-├── browser_webview.dart    # BrowserWebview: envuelve UN InAppWebView;
-│                           #   progreso, url/título → gestor; descargas →
-│                           #   DownloadManager global
+├── browser_tabs.dart       # BrowserTabs (ChangeNotifier): lista/activa/add/close cap 8,
+│                           #   registro de controladores, toggle global JS en vivo
+├── browser_webview.dart    # BrowserWebview: envuelve UN InAppWebView; progreso/url/título;
+│                           #   descargas → DownloadManager global
 └── browser_cookies.dart    # CookieStore singleton: get/set/clearAll/dump
 
-lib/services/
-└── browser_downloads.dart  # DownloadManager singleton: streaming a archivo
-                            #   en <appSupport>/browser_downloads con progreso
-
-lib/screens/
-└── inapp_web_screen.dart   # pantalla fina: URL bar + Go/Atrás, chips de
-                            #   pestañas (+/✕), IndexedStack (conserva estado),
-                            #   switch JavaScript ON/OFF
+lib/services/browser_downloads.dart  # DownloadManager singleton: streaming con progreso
+lib/screens/inapp_web_screen.dart    # URL bar + chips pestañas + IndexedStack + switch JS
 ```
 
-### Alcance actual
-- Barra URL (agrega https:// si falta esquema), Go/recargar, Atrás
-- Pestañas múltiples con estado preservado (IndexedStack), tope 8
-- **Único toggle: JavaScript** (global, aplicado en vivo a todos los tabs)
-- Descargas del WebView derivadas a `DownloadManager` (directas por ahora)
+Alcance actual: barra URL, pestañas (tope 8), **único toggle JavaScript**, descargas directas.
+Pendiente declarado: selector de red (Directo/Tor/I2P), sha256-verify, cargo-deny CI.
 
-### Pendientes declarados (fases siguientes)
-| Pendiente | Dónde entra |
+## 2. I2P embebido — emissary (IMPLEMENTADO)
+
+Router I2P **dentro de la app**: [eepnet/emissary](https://github.com/eepnet/emissary)
+(Rust puro, **MIT**, crates.io `emissary-core`/`emissary-util` 0.4.0). Porte del ejemplo
+oficial `examples/rust-tutorial`. Sin puente local: Rust habla DIRECTO por SAMv3.
+
+### Estructura (archivos chicos por funcionalidad)
+
+```
+rust/src/api/i2p/
+├── mod.rs      # declara + re-exporta fns FRB (prefijo i2p_)
+├── state.rs    # estáticos compartidos: ROUTER_TASK, SAM_PORT, ESTADO, runtime()
+├── router.rs   # i2p_start(data_dir,sam_port,transport_port,publicar)/stop/is_running
+│               #   Storage→load→reseed solo si vacío→Config→Router::new→spawn
+├── status.rs   # i2p_estado/i2p_sam_port/i2p_probe_sam (hitos propios + sonda TCP)
+├── sam.rs      # cliente SAMv3 mínimo: HELLO/SESSION TRANSIENT/STREAM CONNECT
+├── tunnel.rs   # i2p_http_get(url)/i2p_download(url,dest)->u64 — HTTP/1.1 sobre el stream
+└── hosts.rs    # resolución nombre.i2p→destino base64 (hosts.txt mirrors + caché 7d)
+
+lib/services/i2p_service.dart   # singleton espejo TorService (refresh cachea estado)
+lib/screens/i2p_test_screen.dart# panel opciones: estado/iniciar/detener/sonda +
+                                #   publicar switch + campos libres GET y descarga
+settings_screen.dart            # ListTile "I2P (experimental)" debajo de Tor
+```
+
+### Decisiones
+| Tema | Valor |
 |---|---|
-| Clase **Proxy** (Tor/I2P/directo) | `BrowserTabs`/`DownloadManager`: método setProxy; hoy NO hay selector |
-| sha256-verify en descargas | `DownloadManager.start(..., expectedSha256)` |
-| cargo-deny en CI | workflow Android, allowlist permissive-only |
-| Wire extra del browser (favoritos, incógnito) | ideas del repo de referencia |
+| Puertos | TODOS elegidos libres al azar por Dart (`_freePort()`): SAMv3 TCP, transports. Nada fijo, nada pisa a Tor SOCKS5 |
+| Publicar direcciones | `publish_ipv4/6 = publicar` param, default OFF (tras CGNAT nadie alcanza el puerto); switch en el panel, solo cambia con router apagado |
+| IPv6 | ACTIVO siempre (`ipv4:true, ipv6:true`) |
+| PQ | ML-KEM-768 activo (como ejemplo oficial) |
+| Transit tunnels | Como el ejemplo oficial (max 1000) |
+| Reseed | Solo primer boot (después usa NetDb + disco) |
+| Nombres `.i2p` | hosts.txt de mirrors claros con caché 7d; `xxx.b32.i2p` y destinos base64 funcionan sin hosts.txt |
+| Ciclo | Router vive a nivel app hasta stop explícito; is_finished() detecta muertes silenciosas |
 
-## 2. I2P — de dónde sale (referencia)
-
-Un cliente I2P necesita SIEMPRE un router corriendo. Dos fuentes:
-
-| Fuente | Qué es | Licencia | Esfuerzo |
-|---|---|---|---|
-| App oficial I2P Android (router EXTERNO) | El usuario instala el router; expone puertos localhost | Router fuera de nuestra APK → sin impacto para nosotros | Bajo |
-| i2pd embebido (PurpleI2P/i2pd) | Router C++ compilado con NDK dentro de la app | Apache-2.0 ✓ | Alto (NDK, reseed, ciclo de vida) |
-
-**Recomendado**: empezar con router externo. Puertos que expone y que
-consumiríamos:
-
-| Puerto | Protocolo | Uso |
-|---|---|---|
-| 4444 | HTTP proxy | eepsites (.i2p) desde HttpClient/WebView |
-| 4447 | SOCKS5 | mismo patrón que Tor (socks5h) |
-| 7656 | SAM v3 | API para P2P/mensajería futura |
-
-Integración prevista (cuando toque): clase `Proxy` con selección por destino,
-regla extra en `ProxyController` del WebView para `.i2p`, y primer bootstrap
-lento (reseed de floodfills, minutos).
+### Pendiente
+- **Enchufe al browser** (botón/opciones web): ProxyController del WebView apuntando a… decisión
+  futura — hoy NO hay puente local; si el WebView necesita proxy se evaluará entonces
+- Persistencia del switch "publicar" (hoy es por sesión)
+- cargo-deny en CI (allowlist permissive-only)
 
 ## 3. Riesgos CI conocidos
-- Versión exacta del plugin vs Flutter/Kotlin del CI (fix-push si gradle protesta)
-- Nombres de callbacks v6 (`onWebViewControllerCreated`, `WebUri`) tomados de docs 6.x
+- API emissary 0.4.0 tomada VERBATIM del ejemplo oficial del repo (imports exactos)
+- Crate nuevo grande (~93k líneas core): compile time sube; fix-push si algo
