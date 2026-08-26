@@ -25,6 +25,7 @@ import '../screens/nostr_busca_screen.dart';
 import '../screens/nostrn_screen.dart';
 import '../screens/pkarr_test_screen.dart';
 import '../screens/dht_busca_screen.dart';
+import '../screens/i2p_ejemplo_screen.dart';
 import '../screens/iroh_chat_screen.dart';
 import '../screens/iroh_test_screen.dart';
 import '../screens/tor_test_screen.dart';
@@ -174,6 +175,8 @@ class _HomePageState extends State<HomePage> {
             case 'ir':
               _openTest(
                   context, 'Iroh P2P · transferir archivos', const IrohTestScreen());
+            case 'i2':
+              _openTest(context, 'I2P · ejemplo eepsite', const I2pEjemploScreen());
           }
         }),
       ),

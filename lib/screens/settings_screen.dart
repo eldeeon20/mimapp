@@ -61,7 +61,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             leading: const Icon(Icons.hub),
             title: const Text('I2P (experimental)'),
             subtitle: const Text(
-                'Router emissary embebido · eepsites y descargas directas'),
+                'Router emissary embebido · opciones del router'),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => Navigator.push(context,
                 MaterialPageRoute(builder: (_) => const I2pTestScreen())),

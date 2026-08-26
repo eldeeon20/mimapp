@@ -158,6 +158,26 @@ class _I2pTestScreenState extends State<I2pTestScreen> {
               style: TextStyle(fontSize: 11, color: Colors.grey),
             ),
             const Divider(height: 24),
+            // ---------- EJEMPLO (separado de las opciones)
+            Card(
+              color: Colors.blueGrey.shade900,
+              margin: EdgeInsets.zero,
+              child: ListTile(
+                dense: true,
+                leading: const Icon(Icons.science_outlined),
+                title: const Text('Ejemplo',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+                subtitle: const Text(
+                    'GET $_urlEjemplo · eepsite estable para verificar '
+                    'que los túneles funcionan',
+                    style: TextStyle(fontSize: 11)),
+                trailing: OutlinedButton(
+                  onPressed: _s.running ? _ejemplo : null,
+                  child: const Text('Correr'),
+                ),
+              ),
+            ),
+            const Divider(height: 24),
             // ---------- GET libre
             TextField(
               controller: _urlCtrl,
