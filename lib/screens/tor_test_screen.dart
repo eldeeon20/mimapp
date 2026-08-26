@@ -118,11 +118,11 @@ class _TorTestScreenState extends State<TorTestScreen> {
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text('estado: ${s.state}',
                 style: const TextStyle(fontSize: 11)),
-            Text('fase: ${tor.fase}',
+            Text('fase: ${s.fase}',
                 style: TextStyle(
                     fontSize: 11,
                     fontFamily: 'monospace',
-                    color: tor.fase == 'listo'
+                    color: s.fase == 'listo'
                         ? Colors.greenAccent
                         : Colors.orangeAccent)),
             Text('build $kSha',
