@@ -13,6 +13,8 @@ pub struct HalladoItem {
     pub tamano: u64,
     pub archivos: usize,
     pub fecha_ms: i64,
+    pub creation_date: String,
+    pub comment: String,
 }
 
 #[flutter_rust_bridge::frb]
@@ -35,6 +37,8 @@ fn mapear(h: HalladoInt) -> HalladoItem {
         tamano: h.tamano,
         archivos: h.archivos,
         fecha_ms: h.fecha_ms,
+        creation_date: h.creation_date,
+        comment: h.comment,
     }
 }
 

@@ -48,6 +48,7 @@ reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"
 wgpu = "25"
 half = "2"
 serde = { version = "1", features = ["derive"] }
+chrono = "0.4"
 mainline = { path = "mainline" }
 # --- Iroh P2P (cliente+servidor de blobs, QUIC + relays n0) ---
 iroh = "1"

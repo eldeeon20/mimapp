@@ -251,7 +251,9 @@ class _DhtBuscaScreenState extends State<DhtBuscaScreen> {
                 title: Text(h.nombre,
                     maxLines: 2, overflow: TextOverflow.ellipsis),
                 subtitle: Text(
-                    '${_tamano(h.tamano.toInt())} · ${h.archivos} arch · ${h.infoHash.substring(0, 16)}…',
+                    '${_tamano(h.tamano.toInt())} · ${h.archivos} arch'
+                    '${h.creationDate.isNotEmpty ? " · ${h.creationDate}" : ""}'
+                    '${h.comment.isNotEmpty ? " · ${h.comment}" : ""}',
                     style: const TextStyle(fontFamily: 'monospace', fontSize: 10)),
                 trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                   IconButton(

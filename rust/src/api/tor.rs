@@ -51,8 +51,6 @@ fn agente() -> Result<ureq::Agent, String> {
     let c = c.as_ref().ok_or("Tor no está corriendo")?;
     Ok(arti_ureq::Connector::with_tor_client((**c).clone()).agent())
 }
-    })
-}
 
 #[flutter_rust_bridge::frb]
 pub fn tor_is_running() -> bool {
@@ -136,9 +134,6 @@ pub fn tor_start(state_dir: String, cache_dir: String) -> Result<String, String>
 #[flutter_rust_bridge::frb]
 pub fn tor_stop() -> Result<(), String> {
     estado_set(0);
-    if let Ok(mut g) = AGENTE.lock() {
-        *g = None;
-    }
     if let Ok(mut g) = CLIENT.lock() {
         *g = None;
     }
@@ -170,14 +165,10 @@ pub fn tor_set_dormant(soft: bool) -> Result<(), String> {
 /// "HTTP <status>\n\n<cuerpo>".
 #[flutter_rust_bridge::frb]
 pub fn tor_http_get(url: String) -> Result<String, String> {
-    let c = tor_http_client()?;
-    let r = c
-        .get(&url)
-        .send()
-        .and_then(|r| r.error_for_status())
-        .map_err(|e| format!("GET {url}: {e}"))?;
+    let c = agente()?;
+    let r = c.get(&url).call().map_err(|e| format!("GET {url}: {e}"))?;
     let status = r.status();
-    let body = r.text().map_err(|e| format!("cuerpo: {e}"))?;
+    let body = r.into_string().map_err(|e| format!("cuerpo: {e}"))?;
     Ok(format!("HTTP {status}\n\n{body}"))
 }
 
@@ -186,16 +177,15 @@ pub fn tor_http_get(url: String) -> Result<String, String> {
 /// siempre con https:// (TLS extremo a extremo sobre el túnel).
 #[flutter_rust_bridge::frb]
 pub fn tor_download(url: String, dest_path: String) -> Result<u64, String> {
-    use std::io::{copy, Write};
-    let c = tor_http_client()?;
-    let mut r = c
-        .get(&url)
-        .send()
-        .and_then(|r| r.error_for_status())
-        .map_err(|e| format!("GET {url}: {e}"))?;
+    use std::io::{Read, Write};
+    let c = agente()?;
+    let r = c.get(&url).call().map_err(|e| format!("GET {url}: {e}"))?;
+    let mut reader = r.into_reader();
     let mut f = std::fs::File::create(&dest_path)
         .map_err(|e| format!("crear {dest_path}: {e}"))?;
-    let n = copy(&mut r, &mut f).map_err(|e| format!("descarga: {e}"))?;
+    let mut buf = Vec::new();
+    reader.read_to_end(&mut buf).map_err(|e| format!("descarga: {e}"))?;
+    f.write_all(&buf).map_err(|e| format!("escribir: {e}"))?;
     f.flush().map_err(|e| format!("flush: {e}"))?;
-    Ok(n)
+    Ok(buf.len() as u64)
 }

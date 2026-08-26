@@ -43,6 +43,7 @@ const BOOTSTRAP: &[&str] = &[
     "dht.transmissionbt.com:6881",
     "router.bitcomet.com:6881",
     "dht.libtorrent.org:25401",
+    "dht.aelitis.com:6881",
 ];
 
 // ------------------------------------------------------------------ datos
@@ -54,6 +55,10 @@ pub struct Hallado {
     pub tamano: u64,
     pub archivos: usize,
     pub fecha_ms: i64,
+    #[serde(default)]
+    pub creation_date: String,
+    #[serde(default)]
+    pub comment: String,
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
@@ -169,6 +174,29 @@ impl RequestFilter for FiltroAtrapador {
 
 fn hex_id(id: &Id) -> String {
     id.as_bytes().iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Parse root-level creation date and comment from full torrent bytes (when present).
+/// `torrent_bytes` es `Bytes` (siempre presente) en librqbit 9.
+fn parse_root_metadata(torrent_bytes: &[u8]) -> (String, String) {
+    let root = match librqbit::torrent_from_bytes::<librqbit::ByteBufOwned>(torrent_bytes) {
+        Ok(r) => r,
+        Err(_) => return (String::new(), String::new()),
+    };
+    let creation_date = root
+        .creation_date
+        .map(|ts| {
+            chrono::DateTime::from_timestamp(ts as i64, 0)
+                .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+                .unwrap_or_else(|| ts.to_string())
+        })
+        .unwrap_or_default();
+    let comment = root
+        .comment
+        .as_ref()
+        .map(|c| String::from_utf8_lossy(c.as_ref()).into_owned())
+        .unwrap_or_default();
+    (creation_date, comment)
 }
 
 // -------------------------------------------------------------- el motor
@@ -474,8 +502,6 @@ async fn meta_loop(
     dir_tmp: PathBuf,
     max_meta: usize,
 ) {
-    use librqbit::api::ApiTorrentListOpts;
-
     let _ = std::fs::create_dir_all(&dir_tmp);
     let session = match librqbit::Session::new(dir_tmp).await {
         Ok(s) => s,
@@ -484,8 +510,6 @@ async fn meta_loop(
             return;
         }
     };
-    // Misma fachada que api/torrent/list.rs (API estable en rqbit 9).
-    let api = librqbit::Api::new(session.clone(), None);
 
     let mut pendientes: HashMap<String, Instant> = HashMap::new();
 
@@ -525,31 +549,45 @@ async fn meta_loop(
         let ahora = Instant::now();
         pendientes.retain(|_, t| ahora.duration_since(*t) < PENDING_TIMEOUT);
 
-        // 3) cosechar metadatos listos: la lista trae name solo cuando
-        // ya resolvió metadatos; total_bytes viene en stats.
-        let mut cosechados: Vec<Hallado> = Vec::new();
-        let list = api.api_torrent_list_ext(ApiTorrentListOpts { with_stats: true });
-        for t in list.torrents {
-            if !pendientes.contains_key(&t.info_hash) {
-                continue;
+        // 3) cosechar metadatos listos con with_torrents (API estable 9.x):
+        // name/archivos/tamaño + torrent_bytes (creation_date/comentario).
+        let cosechados_celd: std::cell::RefCell<Vec<Hallado>> = std::cell::RefCell::new(Vec::new());
+        session.with_torrents(|iter| {
+            for (_idx, tor) in iter {
+                let hash = tor.info_hash().as_string();
+                if !pendientes.contains_key(&hash) {
+                    continue;
+                }
+                let got: Option<Hallado> = tor
+                    .with_metadata(|meta| {
+                        let nombre = meta.info.name().unwrap_or_default().to_string();
+                        if nombre.is_empty() {
+                            return None;
+                        }
+                        let tamano = meta.info.iter_file_lengths().sum::<u64>();
+                        let archivos = meta.info.iter_file_lengths().count();
+                        let (creation_date, comment) =
+                            parse_root_metadata(meta.torrent_bytes.as_ref());
+                        Some(Hallado {
+                            info_hash: hash.clone(),
+                            nombre: nombre.chars().take(200).collect(),
+                            tamano,
+                            archivos,
+                            fecha_ms: ahora_ms(),
+                            creation_date,
+                            comment,
+                        })
+                    })
+                    .ok()
+                    .flatten();
+                if let Some(h) = got {
+                    cosechados_celd.borrow_mut().push(h);
+                }
             }
-            let nombre = t.name.clone().unwrap_or_default();
-            if nombre.is_empty() {
-                continue;
-            }
-            let tamano = t
-                .stats
-                .as_ref()
-                .map(|st| st.total_bytes)
-                .unwrap_or_default();
-            cosechados.push(Hallado {
-                info_hash: t.info_hash.clone(),
-                nombre: nombre.chars().take(200).collect(),
-                tamano,
-                archivos: 0,
-                fecha_ms: ahora_ms(),
-            });
-            pendientes.remove(&t.info_hash);
+        });
+        let cosechados = cosechados_celd.into_inner();
+        for h in &cosechados {
+            pendientes.remove(&h.info_hash);
         }
 
         if !cosechados.is_empty() {
