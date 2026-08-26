@@ -76,7 +76,7 @@ class _TorTestScreenState extends State<TorTestScreen> {
         final puerto = int.tryParse(t.split(':').last.split('/').first);
         if (host.isEmpty || puerto == null) throw 'formato: host:puerto';
         setState(() => _eleResp = 'conectando por el circuito…');
-        final r = await TorService.instance.pingElectrum(host, puerto);
+        final r = await TorService.instance.tcpPing(host, puerto);
         setState(() => _eleResp = r);
       });
 
@@ -128,7 +128,7 @@ class _TorTestScreenState extends State<TorTestScreen> {
             Text('build $kSha',
                 style: const TextStyle(fontSize: 8, color: Colors.white24)),
             if (on && s.port != null)
-              SelectableText('SOCKS5: ${TorService.host}:${s.port} · proxy ${s.proxyUrl}',
+              SelectableText('salida: HTTP directo por arti (sin puente local)',
                   style:
                       const TextStyle(fontSize: 10.5, fontFamily: 'monospace')),
             const SizedBox(height: 8),
@@ -186,10 +186,10 @@ class _TorTestScreenState extends State<TorTestScreen> {
           child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('SOCKET SSL por el circuito · Electrum',
+                const Text('CONEXIÓN cruda por el circuito',
                     style:
                         TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-                Text('server.version real a través de SOCKS5+TLS',
+                Text('¿abre TCP host:puerto a través del circuito?',
                     style:
                         const TextStyle(fontSize: 10, color: Colors.white38)),
                 const SizedBox(height: 6),

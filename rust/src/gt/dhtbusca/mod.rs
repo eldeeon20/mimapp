@@ -20,7 +20,7 @@ use mainline::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::net::SocketAddrV4;
+use std::net::{SocketAddrV4, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -67,6 +67,67 @@ fn ahora_ms() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
+}
+
+/// Ping KRPC find_node a cada semilla bootstrap: distingue en segundos
+/// entre "red bloquea UDP", "semillas mudas" y "nodo vivo".
+fn ping_semillas(
+    logs: crate::gt::eventlog::EventLog,
+    ok: Arc<AtomicU64>,
+    tot: Arc<AtomicU64>,
+) {
+    for semilla in BOOTSTRAP {
+        tot.fetch_add(1, Ordering::Relaxed);
+        // 1 · DNS
+        let addrs: Vec<_> = match semilla.to_socket_addrs() {
+            Ok(a) => a.collect(),
+            Err(e) => {
+                logs.push(format!("seed {semilla}: DNS ✗ ({e})"));
+                continue;
+            }
+        };
+        let Some(destino) = addrs.into_iter().next() else {
+            logs.push(format!("seed {semilla}: DNS sin direcciones"));
+            continue;
+        };
+        // 2 · paquete KRPC find_node mínimo
+        let id = [0x07u8; 20];
+        let target = [0x03u8; 20];
+        let mut pkt = Vec::with_capacity(98);
+        pkt.extend_from_slice(b"d1:ad2:id20:");
+        pkt.extend_from_slice(&id);
+        pkt.extend_from_slice(b"6:target20:");
+        pkt.extend_from_slice(&target);
+        pkt.extend_from_slice(b"e1:q9:find_node1:t2:aa1:y1:qe");
+        // 3 · enviar y esperar respuesta corta
+        let sock = std::net::UdpSocket::bind("0.0.0.0:0");
+        let sock = match sock {
+            Ok(s) => s,
+            Err(e) => {
+                logs.push(format!("seed {semilla}: UDP local ✗ ({e})"));
+                continue;
+            }
+        };
+        let _ = sock.set_read_timeout(Some(Duration::from_secs(3)));
+        if sock.send_to(&pkt, destino).is_err() {
+            logs.push(format!("seed {semilla}: envío ✗"));
+            continue;
+        }
+        let mut buf = [0u8; 1400];
+        match sock.recv_from(&mut buf) {
+            Ok((n, _)) => {
+                ok.fetch_add(1, Ordering::Relaxed);
+                logs.push(format!(
+                    "seed {semilla}: ✓ respondió ({n} B)"
+                ));
+            }
+            Err(_) => {
+                logs.push(format!(
+                    "seed {semilla}: ✗ sin respuesta en 3s (UDP bloqueado o muda)"
+                ));
+            }
+        }
+    }
 }
 
 // ----------------------------------------------------------------- filtro
@@ -120,6 +181,8 @@ pub struct DhtBusca {
     stats: Arc<Mutex<Stats>>,
     vistos: Arc<AtomicU64>,
     pedidos: Arc<AtomicU64>,
+    semillas_ok: Arc<AtomicU64>,
+    semillas_total: Arc<AtomicU64>,
     canal: Mutex<Option<Arc<Sender<String>>>>,
     logs: EventLog,
     dir_cache: PathBuf,
@@ -130,6 +193,9 @@ pub struct DhtBusca {
 #[derive(Clone, Default, serde::Serialize)]
 pub struct Stats {
     pub nodos_tabla: usize,
+    /// semillas bootstrap que respondieron UDP / total probadas
+    pub semillas_ok: u64,
+    pub semillas_total: u64,
     pub capturados: u64,
     /// requests DHT de CUALQUIER tipo que cruzaron el nodo. Si queda en 0
     /// con el spider corriendo => red bloquea UDP o bootstrap sin pares.
@@ -152,6 +218,8 @@ impl DhtBusca {
             stats: Arc::new(Mutex::new(Stats::default())),
             vistos: Arc::new(AtomicU64::new(0)),
             pedidos: Arc::new(AtomicU64::new(0)),
+            semillas_ok: Arc::new(AtomicU64::new(0)),
+            semillas_total: Arc::new(AtomicU64::new(0)),
             canal: Mutex::new(None),
             logs: EventLog::new(),
             dir_cache: dir,
@@ -183,8 +251,22 @@ impl DhtBusca {
             Some(tx_filtro.clone());
         let vistos_hilo = self.vistos.clone();
         let pedidos_hilo = self.pedidos.clone();
+        let sem_ok = self.semillas_ok.clone();
+        let sem_tot = self.semillas_total.clone();
+        let logs_ping = logs.clone();
         let stop = self.stop.clone();
         let logs = self.logs.clone();
+
+        // diagnóstico inmediato: ¿nuestra red deja salir UDP?
+        {
+            let l = logs_ping.clone();
+            let ok = sem_ok.clone();
+            let tot = sem_tot.clone();
+            std::thread::Builder::new()
+                .name("dhtbusca-seeds".into())
+                .spawn(move || ping_semillas(l, ok, tot))
+                .ok();
+        }
 
         // El DHT vive en su propio hilo (API sync de mainline).
         let builder_thread = std::thread::Builder::new().name("dhtbusca-spider".into());
@@ -327,6 +409,8 @@ impl DhtBusca {
         let mut st = self.stats.lock().unwrap_or_else(|e| e.into_inner()).clone();
         st.capturados = self.vistos.load(Ordering::Relaxed);
         st.pedidos = self.pedidos.load(Ordering::Relaxed);
+        st.semillas_ok = self.semillas_ok.load(Ordering::Relaxed);
+        st.semillas_total = self.semillas_total.load(Ordering::Relaxed);
         st
     }
 

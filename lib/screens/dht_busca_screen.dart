@@ -148,6 +148,18 @@ class _DhtBuscaScreenState extends State<DhtBuscaScreen> {
     return '${(n / 1073741824).toStringAsFixed(2)}G';
   }
 
+  String _semillasTexto() {
+    final st = _stats;
+    if (st == null) return 'semillas: probando…';
+    if (st.semillasTotal == 0) return 'semillas: probando…';
+    if (st.semillasOk == 0) {
+      return 'SORDO: 0/${st.semillasTotal} semillas responden → '
+          'tu red bloquea UDP o DNS';
+    }
+    return 'semillas: ${st.semillasOk}/${st.semillasTotal} responden ✓ · '
+        'paquetes vistos: ${st.pedidos}';
+  }
+
   @override
   Widget build(BuildContext context) {
     final corriendo = _estado.contains('corriendo');
@@ -179,9 +191,7 @@ class _DhtBuscaScreenState extends State<DhtBuscaScreen> {
                     color: Colors.blueAccent)),
             if (_stats != null)
               Text(
-                _stats!.pedidos == 0
-                    ? 'SORDO: 0 paquetes DHT → tu red bloquea UDP o no llega a bootstrap'
-                    : 'paquetes DHT vistos: ${_stats!.pedidos}',
+                _semillasTexto(),
                 style: TextStyle(
                     fontSize: 10.5,
                     fontFamily: 'monospace',
@@ -258,3 +268,4 @@ class _DhtBuscaScreenState extends State<DhtBuscaScreen> {
     );
   }
 }
+

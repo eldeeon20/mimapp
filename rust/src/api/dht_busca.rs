@@ -19,6 +19,8 @@ pub struct HalladoItem {
 #[derive(Clone)]
 pub struct DhtStats {
     pub nodos_tabla: usize,
+    pub semillas_ok: u64,
+    pub semillas_total: u64,
     pub capturados: u64,
     pub pedidos: u64,
     pub resueltos: usize,
@@ -83,6 +85,8 @@ impl MotorDht {
             let s: StatsInt = m.stats();
             Ok(DhtStats {
                 nodos_tabla: s.nodos_tabla,
+                semillasOk: s.semillas_ok,
+                semillasTotal: s.semillas_total,
                 capturados: s.capturados,
                 pedidos: s.pedidos,
                 resueltos: s.resueltos,

@@ -1,7 +1,6 @@
-/// Tor embebido vía arti: cliente completo en el dispositivo que expone un
-/// proxy SOCKS5 en localhost. Cualquier HttpClient de la app (o socket crudo)
-/// puede salir por ahí, incluyendo páginas comunes, descargas de CDN y
-/// git smart-http, además de servicios .onion.
+/// Tor embebido vía arti: cliente completo en el dispositivo. El HTTP(S)
+/// sale DIRECTO por el puente FRB usando arti-ureq (lib oficial del
+/// proyecto Tor): sin servidor local, sin puertos 127.0.0.1.
 ///
 /// Porte del plugin Foundation-Devices/tor (MIT), adaptado:
 /// - TokioRustlsRuntime en vez de TokioNativeTlsRuntime (cero OpenSSL;
@@ -11,12 +10,8 @@
 /// - Errores como String legible (convención ok/error del proyecto).
 use std::sync::{Arc, Mutex, OnceLock};
 
-use arti::proxy;
 use arti_client::config::CfgPath;
 use arti_client::{DormantMode, TorClient, TorClientConfig};
-use tokio::runtime::{Builder, Runtime};
-use tokio::task::JoinHandle;
-use tor_config::Listen;
 // OJO: el tipo vive en el módulo tokio (no "rustls"); la feature rustls de
 // tor-rtcompat es la que hace que este runtime use TLS puro Rust.
 use tor_rtcompat::tokio::TokioRustlsRuntime;
@@ -42,67 +37,34 @@ pub fn tor_estado() -> String {
         _ => "apagado".into(),
     }
 }
-static PROXY: Mutex<Option<JoinHandle<anyhow::Result<()>>>> = Mutex::new(None);
-static PORT: Mutex<u16> = Mutex::new(0);
+/// Runtime EXCLUSIVO del stack Tor: bootstrap, warm-up y todas las
+/// consultas HTTP viven aquí. Un stack de red = un runtime (regla del
+/// proyecto: cuando entre I2P tendrá el suyo propio).
+static TOR_RT: OnceLock<TokioRustlsRuntime> = OnceLock::new();
 
-fn runtime() -> &'static Result<Runtime, String> {
-    static RT: OnceLock<Result<Runtime, String>> = OnceLock::new();
-    RT.get_or_init(|| {
-        Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .map_err(|e| format!("runtime tokio: {e}"))
+fn tor_rt() -> &'static TokioRustlsRuntime {
+    TOR_RT.get_or_init(|| TokioRustlsRuntime::create().expect("runtime TLS rustls"))
+}
+
+fn agente() -> Result<ureq::Agent, String> {
+    let c = CLIENT.lock().map_err(|_| "mutex cliente")?;
+    let c = c.as_ref().ok_or("Tor no está corriendo")?;
+    Ok(arti_ureq::Connector::with_tor_client((**c).clone()).agent())
+}
     })
-}
-
-fn port_now() -> u16 {
-    match PORT.lock() {
-        Ok(g) => *g,
-        Err(_) => 0,
-    }
-}
-
-fn set_port(p: u16) {
-    if let Ok(mut g) = PORT.lock() {
-        *g = p;
-    }
 }
 
 #[flutter_rust_bridge::frb]
 pub fn tor_is_running() -> bool {
-    // El cliente existe Y la tarea del proxy sigue viva. Si algo mató la
-    // tarea por fuera (Android en segundo plano, pánico), acá nos enteramos:
-    // is_finished() true = la tarea ya terminó aunque no llamemos tor_stop().
-    let client_ok = matches!(CLIENT.lock(), Ok(g) if g.is_some());
-    let proxy_ok = match PROXY.lock() {
-        Ok(g) => g.as_ref().map(|h| !h.is_finished()).unwrap_or(false),
-        Err(_) => false,
-    };
-    client_ok && proxy_ok
+    matches!(CLIENT.lock(), Ok(g) if g.is_some())
+        && ESTADO.load(std::sync::atomic::Ordering::Relaxed) != 0
 }
 
-/// Puerto SOCKS5 activo, o None si Tor está apagado.
-///
-/// FIX: antes era `*PORT.lock().unwrap_or(&mut 0)`, que no compila: lock()
-/// devuelve Result<MutexGuard<u16>, PoisonError<_>>, así que unwrap_or
-/// esperaría un MutexGuard (no un `&mut u16`), y además fabricar un guard
-/// temporario para descartarlo es imposible por diseño. El match tipa bien,
-/// lee el valor solo con el candado sano y cae a 0 si el mutex quedó
-/// envenenado: función infalible, sin unwrap() que pueda paniquear.
+/// Arranca el cliente Tor. Bloquea varios segundos mientras bootstrapea
+/// (llamar desde un isolate/future de UI aparte). SIN servidor local:
+/// las consultas HTTP salen directo por arti-ureq desde Rust.
 #[flutter_rust_bridge::frb]
-pub fn tor_socks_port() -> Option<u16> {
-    let p = port_now();
-    if tor_is_running() && p != 0 {
-        Some(p)
-    } else {
-        None
-    }
-}
-
-/// Arranca el cliente Tor y el proxy SOCKS5 local. Bloquea varios segundos
-/// mientras bootstrapea (llamar desde un isolate/future de UI aparte).
-#[flutter_rust_bridge::frb]
-pub fn tor_start(socks_port: u16, state_dir: String, cache_dir: String) -> Result<String, String> {
+pub fn tor_start(state_dir: String, cache_dir: String) -> Result<String, String> {
     if tor_is_running() {
         return Err("Tor ya está corriendo".into());
     }
@@ -114,7 +76,7 @@ pub fn tor_start(socks_port: u16, state_dir: String, cache_dir: String) -> Resul
         let _ = rlimit::increase_nofile_limit(4096);
     }
 
-    let rt = TokioRustlsRuntime::create().map_err(|e| format!("runtime TLS: {e}"))?;
+    let rt = tor_rt();
 
     // Ajustes móviles heredados de Foundation-Devices/tor:
     // - permitir direcciones .onion
@@ -132,81 +94,54 @@ pub fn tor_start(socks_port: u16, state_dir: String, cache_dir: String) -> Resul
 
     let cfg = b.build().map_err(|e| format!("config: {e}"))?;
 
-    let client = rt
+    let client = tor_rt()
         .block_on(async {
-            TorClient::with_runtime(rt.clone())
+            TorClient::with_runtime(tor_rt().clone())
                 .config(cfg)
                 .create_bootstrapped()
                 .await
         })
         .map_err(|e| format!("bootstrap falló: {e}"))?;
     let client: Client = Arc::new(client);
-    estado_set(2); // bootstrap OK → calentando circuitos de salida
-
-    // Warm-up: abrir UNA conexión de salida en background fuerza la
-    // creación del circuito de exit ANTES de que el usuario toque nada.
-    {
-        let c = client.clone();
-        runtime().as_ref().map_err(|e| e.clone())?.spawn(async move {
-            for intento in 1..=6u32 {
-                let prueba = c
-                    .clone()
-                    .connect(("check.torproject.org", 80))
-                    .await;
-                match prueba {
-                    Ok(stream) => {
-                        drop(stream);
-                        estado_set(3);
-                        return;
-                    }
-                    Err(e) => {
-                        eprintln!("[tor] warm-up intento {intento}: {e}");
-                        tokio::time::sleep(std::time::Duration::from_secs(5))
-                            .await;
-                    }
-                }
-            }
-            estado_set(3); // igual habilitamos: el GET tiene reintento propio
-        });
-    }
-
-    // Proxy SOCKS5 en localhost:puerto, tarea propia del runtime global.
-    let handle = {
-        // as_ref() porque runtime() devuelve &'static Result: map_err consume
-        // al receptor y sobre una referencia compartida hay que pedir préstamo.
-        let rt_inner = runtime().as_ref().map_err(|e| e.clone())?;
-        let c = client.clone();
-        rt_inner.spawn(proxy::run_proxy(
-            client.runtime().clone(),
-            (*c).clone(),
-            Listen::new_localhost(socks_port),
-            None,
-        ))
-    };
-
-    if let Ok(mut g) = PROXY.lock() {
-        *g = Some(handle);
-    }
     if let Ok(mut g) = CLIENT.lock() {
         *g = Some(client);
     }
-    set_port(socks_port);
-    Ok(format!("Tor listo · SOCKS5 en 127.0.0.1:{socks_port}"))
+    estado_set(2); // bootstrap OK → calentando: falta probar una página real
+
+    // Warm-up HONESTO: un hilo liviano repite un GET real por arti-ureq
+    // hasta que la red responde. "listo" significa eso, nada menos.
+    std::thread::Builder::new()
+        .name("tor-warmup".into())
+        .spawn(|| {
+            while ESTADO.load(std::sync::atomic::Ordering::Relaxed) == 2 {
+                match tor_http_get("https://check.torproject.org/api/ip".into()) {
+                    Ok(_) => {
+                        estado_set(3);
+                        eprintln!("[tor] warm-up OK · circuito verificado");
+                        return;
+                    }
+                    Err(e) => {
+                        eprintln!("[tor] warm-up esperando red: {e}");
+                        std::thread::sleep(std::time::Duration::from_secs(8));
+                    }
+                }
+            }
+        })
+        .map_err(|e| format!("hilo warm-up: {e}"))?;
+
+    Ok("Tor arriba · HTTP directo por arti (sin puente local)".into())
 }
 
-/// Corta el proxy y suelta el cliente. Idempotente.
+/// Apaga el cliente. Idempotente.
 #[flutter_rust_bridge::frb]
 pub fn tor_stop() -> Result<(), String> {
     estado_set(0);
-    if let Ok(mut g) = PROXY.lock() {
-        if let Some(h) = g.take() {
-            h.abort();
-        }
+    if let Ok(mut g) = AGENTE.lock() {
+        *g = None;
     }
     if let Ok(mut g) = CLIENT.lock() {
         *g = None;
     }
-    set_port(0);
     Ok(())
 }
 
@@ -229,38 +164,6 @@ pub fn tor_set_dormant(soft: bool) -> Result<(), String> {
     c.as_ref()
         .set_dormant(if soft { DormantMode::Soft } else { DormantMode::Normal });
     Ok(())
-}
-
-// ------------------------------------------------- HTTP por el túnel (Rust)
-
-fn socks_url() -> Option<String> {
-    let p = port_now();
-    if tor_is_running() && p != 0 {
-        // socks5h: el DNS TAMBIÉN resuelve dentro del circuito, así que
-        // funcionan dominios comunes y direcciones .onion desde Rust.
-        Some(format!("socks5h://127.0.0.1:{p}"))
-    } else {
-        None
-    }
-}
-
-/// URL del proxy para que CUALQUIER cliente Rust de la app salga por Tor:
-/// `reqwest::Proxy::all(tor_proxy_url())`. None si Tor está apagado.
-/// Con esto, git smart-http / CDNs / APIs pueden tunelar sin cambiar código:
-/// basta armar el cliente con ese proxy.
-#[flutter_rust_bridge::frb]
-pub fn tor_proxy_url() -> Option<String> {
-    socks_url()
-}
-
-fn tor_http_client() -> Result<reqwest::blocking::Client, String> {
-    let url = socks_url().ok_or("Tor no está corriendo")?;
-    let proxy = reqwest::Proxy::all(&url).map_err(|e| format!("proxy: {e}"))?;
-    reqwest::blocking::Client::builder()
-        .proxy(proxy)
-        .timeout(std::time::Duration::from_secs(120))
-        .build()
-        .map_err(|e| format!("cliente HTTP: {e}"))
 }
 
 /// GET por el circuito Tor (CDNs, APIs, git smart-http): devuelve

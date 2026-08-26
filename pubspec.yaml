@@ -39,7 +39,6 @@ dependencies:
   flutter_rust_bridge: 2.12.0
   lua_dardo_plus: ^0.3.0
   http: ^1.2.2
-  socks5_proxy: ^1.0.3
   path_provider: ^2.1.4
   media_kit: ^1.2.6
   media_kit_video: ^2.0.1
