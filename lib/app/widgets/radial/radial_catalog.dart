@@ -100,6 +100,11 @@ abstract final class RadialCatalog {
         icon: Icons.lan_rounded,
         color: Colors.lightBlueAccent),
     RadialMenuItem(
+        key: 'ic',
+        label: 'Iroh Chat',
+        icon: Icons.forum_rounded,
+        color: Color(0xFF4DD0E1)),
+    RadialMenuItem(
         key: 'ring',
         label: 'Nostringer',
         icon: Icons.fingerprint_rounded,

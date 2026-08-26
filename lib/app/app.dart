@@ -25,6 +25,7 @@ import '../screens/nostr_busca_screen.dart';
 import '../screens/nostrn_screen.dart';
 import '../screens/pkarr_test_screen.dart';
 import '../screens/dht_busca_screen.dart';
+import '../screens/iroh_chat_screen.dart';
 import '../screens/iroh_test_screen.dart';
 import '../screens/tor_test_screen.dart';
 import '../screens/unarc_test_screen.dart';
@@ -168,6 +169,10 @@ class _HomePageState extends State<HomePage> {
             case 'dh':
               _openTest(
                   context, 'DHT Busca · spider Mainline', const DhtBuscaScreen());
+            case 'ic':
+              Navigator.of(ctx).push(MaterialPageRoute(
+                  builder: (_) => const IrohChatScreen()));
+              break;
             case 'ir':
               _openTest(
                   context, 'Iroh P2P · transferir archivos', const IrohTestScreen());

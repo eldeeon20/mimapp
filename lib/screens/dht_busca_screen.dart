@@ -169,6 +169,18 @@ class _DhtBuscaScreenState extends State<DhtBuscaScreen> {
                       fontSize: 11,
                       fontFamily: 'monospace',
                       color: Colors.amberAccent)),
+            if (_stats != null)
+              Text(
+                _stats!.pedidos == 0
+                    ? 'SORDO: 0 paquetes DHT → tu red bloquea UDP o no llega a bootstrap'
+                    : 'paquetes DHT vistos: ${_stats!.pedidos}',
+                style: TextStyle(
+                    fontSize: 10.5,
+                    fontFamily: 'monospace',
+                    color: _stats!.pedidos == 0
+                        ? Colors.redAccent
+                        : Colors.greenAccent),
+              ),
 
             const SizedBox(height: 8),
             Wrap(spacing: 8, runSpacing: 4, children: [

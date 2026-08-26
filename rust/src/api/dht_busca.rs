@@ -20,6 +20,7 @@ pub struct HalladoItem {
 pub struct DhtStats {
     pub nodos_tabla: usize,
     pub capturados: u64,
+    pub pedidos: u64,
     pub resueltos: usize,
     pub pendientes: usize,
     pub total_indice: usize,
@@ -83,6 +84,7 @@ impl MotorDht {
             Ok(DhtStats {
                 nodos_tabla: s.nodos_tabla,
                 capturados: s.capturados,
+                pedidos: s.pedidos,
                 resueltos: s.resueltos,
                 pendientes: s.pendientes,
                 total_indice: m.total(),

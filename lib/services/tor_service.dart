@@ -142,7 +142,7 @@ class TorService extends ChangeNotifier {
 
   /// GET HTTP(S) por el circuito: HttpClient común + SOCKS5 local.
   /// Sirve para páginas comunes (duckduckgo, check.torproject.org) y .onion.
-  Future<String> httpGet(String url) async {
+  Future<String> httpGet(String url, {int reintentos = 1}) async {
     if (!_running || _port == null) throw 'Tor no está corriendo';
     final client = _tunnelClient(_port!);
     try {
@@ -153,6 +153,15 @@ class TorService extends ChangeNotifier {
       _say('GET $url → HTTP ${res.statusCode} (${body.length} B)');
       return 'HTTP ${res.statusCode}\n\n$body';
     } catch (e) {
+      // circuito recién nacido: reconstruimos y probamos UNA vez más
+      // antes de culpar al usuario.
+      if (reintentos > 0) {
+        _say('GET falló (${e.toString().split('\n').first}) · '
+            'rebootstrap + reintento…');
+        try { await rebootstrap(); } catch (_) {}
+        await Future.delayed(const Duration(seconds: 4));
+        return httpGet(url, reintentos: reintentos - 1);
+      }
       throw _traducirSocks(e, 'GET $url');
     } finally {
       client.close();

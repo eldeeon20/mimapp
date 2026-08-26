@@ -59,6 +59,7 @@ pub struct Hallado {
 #[derive(Clone, Default, Serialize, Deserialize)]
 struct Estado {
     hallados: Vec<Hallado>,
+    pedidos: Arc<AtomicU64>,
 }
 
 fn ahora_ms() -> i64 {
@@ -75,6 +76,9 @@ fn ahora_ms() -> i64 {
 struct FiltroAtrapador {
     tx: Arc<Sender<String>>,
     vistos: Arc<AtomicU64>,
+    /// TODO request que cruza el nodo (diagnóstico de sordera: si esto
+    /// queda en 0 la red bloquea UDP o el bootstrap no llegó a nadie).
+    pedidos: Arc<AtomicU64>,
 }
 
 impl FiltroAtrapador {
@@ -86,6 +90,7 @@ impl FiltroAtrapador {
 
 impl RequestFilter for FiltroAtrapador {
     fn allow_request(&self, request: &mainline::RequestSpecific, _from: SocketAddrV4) -> bool {
+        self.pedidos.fetch_add(1, Ordering::Relaxed);
         let hash = match &request.request_type {
             RequestTypeSpecific::GetPeers(GetPeersRequestArguments { info_hash }) => {
                 hex_id(info_hash)
@@ -114,6 +119,7 @@ pub struct DhtBusca {
     nuevos_desde_poll: Arc<Mutex<Vec<String>>>,
     stats: Arc<Mutex<Stats>>,
     vistos: Arc<AtomicU64>,
+    pedidos: Arc<AtomicU64>,
     canal: Mutex<Option<Arc<Sender<String>>>>,
     logs: EventLog,
     dir_cache: PathBuf,
@@ -125,6 +131,9 @@ pub struct DhtBusca {
 pub struct Stats {
     pub nodos_tabla: usize,
     pub capturados: u64,
+    /// requests DHT de CUALQUIER tipo que cruzaron el nodo. Si queda en 0
+    /// con el spider corriendo => red bloquea UDP o bootstrap sin pares.
+    pub pedidos: u64,
     pub resueltos: usize,
     pub pendientes: usize,
 }
@@ -142,6 +151,7 @@ impl DhtBusca {
             nuevos_desde_poll: Arc::new(Mutex::new(Vec::new())),
             stats: Arc::new(Mutex::new(Stats::default())),
             vistos: Arc::new(AtomicU64::new(0)),
+            pedidos: Arc::new(AtomicU64::new(0)),
             canal: Mutex::new(None),
             logs: EventLog::new(),
             dir_cache: dir,
@@ -172,6 +182,7 @@ impl DhtBusca {
         *self.canal.lock().unwrap_or_else(|e| e.into_inner()) =
             Some(tx_filtro.clone());
         let vistos_hilo = self.vistos.clone();
+        let pedidos_hilo = self.pedidos.clone();
         let stop = self.stop.clone();
         let logs = self.logs.clone();
 
@@ -182,6 +193,7 @@ impl DhtBusca {
                 Box::new(FiltroAtrapador {
                 tx: tx_filtro.clone(),
                 vistos: vistos_hilo.clone(),
+                pedidos: pedidos_hilo.clone(),
             });
             let dht = match Dht::builder()
                 .server_mode()
@@ -314,6 +326,7 @@ impl DhtBusca {
     pub fn stats(&self) -> Stats {
         let mut st = self.stats.lock().unwrap_or_else(|e| e.into_inner()).clone();
         st.capturados = self.vistos.load(Ordering::Relaxed);
+        st.pedidos = self.pedidos.load(Ordering::Relaxed);
         st
     }
 

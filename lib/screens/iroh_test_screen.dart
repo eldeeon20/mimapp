@@ -23,10 +23,6 @@ class _IrohTestScreenState extends State<IrohTestScreen> {
       text: '/storage/emulated/0/Download/foto.jpg');
   final _ticketCtrl = TextEditingController();
   final _nombreCtrl = TextEditingController(text: 'recibido.bin');
-  final _chatTicketCtrl = TextEditingController();
-  final _chatMsgCtrl = TextEditingController();
-  final List<Map<String, String>> _chat = []; // {'de','texto'}
-  String? _miChatTicket;
   String? _miId;
   String? _ticketGenerado;
   String? _resultado;
@@ -73,14 +69,7 @@ class _IrohTestScreenState extends State<IrohTestScreen> {
   // ---- ENVIAR ----------------------------------------------------------
   Future<void> _iniciar() => _guard(() async {
         final id = await _nodo!.startServidor();
-        String? chat;
-        try {
-          chat = await _nodo!.chatTicket();
-        } catch (_) {}
-        setState(() {
-          _miId = id;
-          _miChatTicket = chat;
-        });
+        setState(() => _miId = id);
       });
 
   Future<void> _ofrecer() => _guard(() async {
@@ -89,24 +78,6 @@ class _IrohTestScreenState extends State<IrohTestScreen> {
         }
         final t = await _nodo!.ofrecer(_rutaCtrl.text.trim());
         setState(() => _ticketGenerado = t);
-      });
-
-  Future<void> _miTicket() => _guard(() async {
-        final t = await _nodo!.chatTicket();
-        setState(() => _miChatTicket = t);
-      });
-
-  Future<void> _chatConectar() => _guard(() async {
-        await _nodo!.chatConectar(_chatTicketCtrl.text.trim());
-        _say('✓ chat conectado con el par');
-      });
-
-  Future<void> _chatMandar() => _guard(() async {
-        final t = _chatMsgCtrl.text.trim();
-        if (t.isEmpty) return;
-        await _nodo!.chatMandar(t);
-        setState(() => _chat.add({'de': 'yo', 'texto': t}));
-        _chatMsgCtrl.clear();
       });
 
   // ---- RECIBIR ---------------------------------------------------------
@@ -216,86 +187,6 @@ class _IrohTestScreenState extends State<IrohTestScreen> {
                       label: const Text('copiar ticket del archivo')),
                 ),
               ],
-            ]),
-          ),
-        ),
-        // ---- CHAT / CONEXIÓN por ticket (P2P crudo, sin blobs)
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(10),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('CHAT directo (estilo DM) · ${_nodo?.chatActivo ?? false ? 'canal vivo' : 'sin canal'}',
-                  style:
-                      TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-              const Text(
-                  'peer 1 comparte su ticket de conexión · peer 2 lo pega acá '
-                  'y queda conectado; después escriben los dos cuando quieran',
-                  style: TextStyle(fontSize: 9.5, color: Colors.white38)),
-              const SizedBox(height: 6),
-              Row(children: [
-                Expanded(child: TextField(
-                  controller: _chatTicketCtrl,
-                  maxLines: 2,
-                  decoration: const InputDecoration(
-                      labelText: 'ticket de CONEXIÓN del par',
-                      hintText: 'pegá el que te compartieron'),
-                )),
-                IconButton.filled(
-                    tooltip: 'conectar',
-                    onPressed: _busy ? null : _chatConectar,
-                    icon: const Icon(Icons.link_rounded)),
-              ]),
-              const SizedBox(height: 8),
-              // hilo de mensajes
-              Container(
-                height: 190,
-                width: double.infinity,
-                color: Colors.black.withValues(alpha: .55),
-                padding: const EdgeInsets.all(8),
-                child: _chat.isEmpty
-                    ? const Center(
-                        child: Text('sin mensajes todavía',
-                            style: TextStyle(color: Colors.white24, fontSize: 11)))
-                    : ListView.builder(
-                        reverse: true,
-                        itemCount: _chat.length,
-                        itemBuilder: (_, i) {
-                          final m = _chat[_chat.length - 1 - i];
-                          final mio = m['de'] == 'yo';
-                          return Align(
-                            alignment: mio
-                                ? Alignment.centerRight
-                                : Alignment.centerLeft,
-                            child: Container(
-                              margin: const EdgeInsets.symmetric(vertical: 2),
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 10, vertical: 6),
-                              constraints: const BoxConstraints(maxWidth: 280),
-                              decoration: BoxDecoration(
-                                  color: mio
-                                      ? Colors.cyan.withValues(alpha: .18)
-                                      : Colors.greenAccent.withValues(alpha: .12),
-                                  borderRadius: BorderRadius.circular(10)),
-                              child: SelectableText(m['texto'] ?? '',
-                                  style: const TextStyle(fontSize: 12.5)),
-                            ),
-                          );
-                        },
-                      ),
-              ),
-              const SizedBox(height: 8),
-              Row(children: [
-                Expanded(child: TextField(
-                  controller: _chatMsgCtrl,
-                  enabled: true,
-                  decoration: const InputDecoration(
-                      labelText: 'mensaje', hintText: 'escribí…'),
-                  onSubmitted: (_) => _chatMandar(),
-                )),
-                IconButton.filled(
-                    onPressed: _busy ? null : _chatMandar,
-                    icon: const Icon(Icons.send_rounded)),
-              ]),
             ]),
           ),
         ),
