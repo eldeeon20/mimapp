@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../build_info.dart';
 import '../services/iroh_p2p.dart';
 
 /// Ejemplo de transferencia de archivos por iroh-blobs:
@@ -129,19 +130,8 @@ class _IrohTestScreenState extends State<IrohTestScreen> {
                 onPressed: _busy || on ? null : _iniciar,
                 icon: const Icon(Icons.play_arrow_rounded, size: 18),
                 label: const Text('Iniciar nodo')),
-            if (_miChatTicket != null) ...[
-              const SizedBox(height: 6),
-              Row(children: [
-                Expanded(
-                    child: SelectableText('ticket chat: $_miChatTicket',
-                        style: const TextStyle(
-                            fontSize: 9, fontFamily: 'monospace'))),
-                IconButton(
-                    icon: const Icon(Icons.copy_rounded, size: 16),
-                    onPressed: () => _copiar(_miChatTicket!,
-                        'tu dirección copiada · pasasela al otro')),
-              ]),
-            ],
+            Text('build $kSha',
+                style: const TextStyle(fontSize: 8, color: Colors.white24)),
           ]),
         ),
         const SizedBox(height: 10),
@@ -246,3 +236,4 @@ class _IrohTestScreenState extends State<IrohTestScreen> {
     );
   }
 }
+

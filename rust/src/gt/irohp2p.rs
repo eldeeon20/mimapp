@@ -119,6 +119,22 @@ impl ProtocolHandler for ChatNodo {
     }
 }
 
+/// Limpia un ticket pegado/escrito a mano: fuera TODOS los espacios y
+/// saltos (el teclado y WhatsApp los meten siempre). Devuelve el string
+/// listo para parsear.
+fn limpiar_ticket(s: &str) -> String {
+    s.chars().filter(|c| !c.is_whitespace()).collect()
+}
+
+/// Error legible cuando el ticket no parsea: dice qué llegó.
+fn error_ticket(llego: &str, e: impl std::fmt::Debug) -> anyhow::Error {
+    let n = llego.chars().count();
+    let head: String = llego.chars().take(12).collect();
+    anyhow!(
+        "ticket inválido ({e:?}) · llegaron {n} chars empezando '{head}…'"
+    )
+}
+
 /// Nodo iroh completo: servidor de blobs + cliente de descarga.
 pub struct IrohPar {
     runtime: Arc<tokio::runtime::Runtime>,
@@ -246,10 +262,10 @@ impl IrohPar {
         let dir = std::path::PathBuf::from(dir_destino);
         let destino = dir.join(nombre.trim());
         let destino_en_hilo = destino.clone();
-        let ticket: BlobTicket = ticket_str
-            .trim()
+        let limpio = limpiar_ticket(ticket_str);
+        let ticket: BlobTicket = limpio
             .parse()
-            .map_err(|e| anyhow!("ticket inválido: {e:?}"))?;
+            .map_err(|e| error_ticket(&limpio, e))?;
         self.logs.push(format!(
             "bajando {} desde {:?}…",
             ticket.hash(),
@@ -291,7 +307,7 @@ impl IrohPar {
                 .endpoint
                 .clone()
         };
-        let dueño = ticket_str.trim().to_string();
+        let dueño = limpiar_ticket(ticket_str);
         let nodo = ChatNodo {
             entrantes: self.chat_entrantes.clone(),
             salidas: self.chat_salidas.clone(),
@@ -299,7 +315,7 @@ impl IrohPar {
         let conn = self.bloquea(async move {
             let t: EndpointTicket = dueño
                 .parse()
-                .map_err(|e| anyhow!("ticket inválido: {e:?}"))?;
+                .map_err(|e| error_ticket(&dueño, e))?;
             let c = endpoint
                 .connect(t.endpoint_addr().clone(), ALPN_CHAT)
                 .await
@@ -321,7 +337,9 @@ impl IrohPar {
         let salidas = self.chat_salidas.lock().unwrap_or_else(|e| e.into_inner());
         let primera = salidas
             .first()
-            .ok_or_else(|| anyhow!("sin chat activo: conectate primero"))?;
+            .ok_or_else(|| {
+                anyhow!("sin canal: pegá el ticket del host y tocá CONECTAR")
+            })?;
         primera
             .send(texto.to_string())
             .map_err(|_| anyhow!("el par se fue"))

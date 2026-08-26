@@ -47,11 +47,17 @@ class TorService extends ChangeNotifier {
     notifyListeners();
   }
 
+  String? _fase;
+  /// Fase del ciclo de vida reportada por Rust:
+  /// apagado · bootstrap · calentando circuitos… · listo
+  String get fase => _fase ?? (_running ? 'bootstrap' : 'apagado');
+
   /// Consulta el estado real lado Rust y actualiza la caché local.
   Future<void> refresh() async {
     try {
       _running = await rust.torIsRunning();
       _port = await rust.torSocksPort();
+      _fase = await rust.torEstado();
     } catch (_) {}
     notifyListeners();
   }

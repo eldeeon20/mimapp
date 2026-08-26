@@ -25,6 +25,23 @@ use tor_rtcompat::ToplevelBlockOn;
 type Client = Arc<TorClient<TokioRustlsRuntime>>;
 
 static CLIENT: Mutex<Option<Client>> = Mutex::new(None);
+/// 0 apagado · 1 bootstrap · 2 calentando circuitos · 3 LISTO
+static ESTADO: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+fn estado_set(v: u8) {
+    ESTADO.store(v, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Estado humano del ciclo de vida de Tor para la UI.
+#[flutter_rust_bridge::frb]
+pub fn tor_estado() -> String {
+    match ESTADO.load(std::sync::atomic::Ordering::Relaxed) {
+        1 => "bootstrap".into(),
+        2 => "calentando circuitos…".into(),
+        3 => "listo".into(),
+        _ => "apagado".into(),
+    }
+}
 static PROXY: Mutex<Option<JoinHandle<anyhow::Result<()>>>> = Mutex::new(None);
 static PORT: Mutex<u16> = Mutex::new(0);
 
@@ -89,6 +106,7 @@ pub fn tor_start(socks_port: u16, state_dir: String, cache_dir: String) -> Resul
     if tor_is_running() {
         return Err("Tor ya está corriendo".into());
     }
+    estado_set(1);
 
     // Los FDs por defecto de Android son bajos y arti abre varios sockets.
     #[cfg(not(target_os = "windows"))]
@@ -123,6 +141,34 @@ pub fn tor_start(socks_port: u16, state_dir: String, cache_dir: String) -> Resul
         })
         .map_err(|e| format!("bootstrap falló: {e}"))?;
     let client: Client = Arc::new(client);
+    estado_set(2); // bootstrap OK → calentando circuitos de salida
+
+    // Warm-up: abrir UNA conexión de salida en background fuerza la
+    // creación del circuito de exit ANTES de que el usuario toque nada.
+    {
+        let c = client.clone();
+        runtime().as_ref().map_err(|e| e.clone())?.spawn(async move {
+            for intento in 1..=6u32 {
+                let prueba = c
+                    .clone()
+                    .connect(("check.torproject.org", 80))
+                    .await;
+                match prueba {
+                    Ok(stream) => {
+                        drop(stream);
+                        estado_set(3);
+                        return;
+                    }
+                    Err(e) => {
+                        eprintln!("[tor] warm-up intento {intento}: {e}");
+                        tokio::time::sleep(std::time::Duration::from_secs(5))
+                            .await;
+                    }
+                }
+            }
+            estado_set(3); // igual habilitamos: el GET tiene reintento propio
+        });
+    }
 
     // Proxy SOCKS5 en localhost:puerto, tarea propia del runtime global.
     let handle = {
@@ -151,6 +197,7 @@ pub fn tor_start(socks_port: u16, state_dir: String, cache_dir: String) -> Resul
 /// Corta el proxy y suelta el cliente. Idempotente.
 #[flutter_rust_bridge::frb]
 pub fn tor_stop() -> Result<(), String> {
+    estado_set(0);
     if let Ok(mut g) = PROXY.lock() {
         if let Some(h) = g.take() {
             h.abort();

@@ -170,9 +170,7 @@ class _HomePageState extends State<HomePage> {
               _openTest(
                   context, 'DHT Busca · spider Mainline', const DhtBuscaScreen());
             case 'ic':
-              Navigator.of(ctx).push(MaterialPageRoute(
-                  builder: (_) => const IrohChatScreen()));
-              break;
+              _openTest(context, 'Iroh Chat · DM', const IrohChatScreen());
             case 'ir':
               _openTest(
                   context, 'Iroh P2P · transferir archivos', const IrohTestScreen());

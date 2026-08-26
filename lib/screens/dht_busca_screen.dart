@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../build_info.dart';
 import '../services/dht_busca.dart';
 import '../services/rqbit.dart';
 import '../src/rust/api/dht_busca.dart' as rust;
@@ -171,6 +172,13 @@ class _DhtBuscaScreenState extends State<DhtBuscaScreen> {
                       color: Colors.amberAccent)),
             if (_stats != null)
               Text(
+                'tabla Kademlia: ${_stats!.nodosTabla} nodos',
+                style: const TextStyle(
+                    fontSize: 10.5,
+                    fontFamily: 'monospace',
+                    color: Colors.blueAccent)),
+            if (_stats != null)
+              Text(
                 _stats!.pedidos == 0
                     ? 'SORDO: 0 paquetes DHT → tu red bloquea UDP o no llega a bootstrap'
                     : 'paquetes DHT vistos: ${_stats!.pedidos}',
@@ -181,6 +189,8 @@ class _DhtBuscaScreenState extends State<DhtBuscaScreen> {
                         ? Colors.redAccent
                         : Colors.greenAccent),
               ),
+            Text('build $kSha',
+                style: const TextStyle(fontSize: 8, color: Colors.white24)),
 
             const SizedBox(height: 8),
             Wrap(spacing: 8, runSpacing: 4, children: [

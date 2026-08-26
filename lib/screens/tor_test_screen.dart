@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../build_info.dart';
 import '../services/tor_service.dart';
 
 /// Probador del Tor embebido: arranque/parada, dormante, GET de páginas
@@ -100,7 +101,17 @@ class _TorTestScreenState extends State<TorTestScreen> {
                   .withValues(alpha: .1),
               borderRadius: BorderRadius.circular(8)),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('estado: ${s.state}', style: const TextStyle(fontSize: 11)),
+            Text('estado: ${s.state}',
+                style: const TextStyle(fontSize: 11)),
+            Text('fase: ${tor.fase}',
+                style: TextStyle(
+                    fontSize: 11,
+                    fontFamily: 'monospace',
+                    color: tor.fase == 'listo'
+                        ? Colors.greenAccent
+                        : Colors.orangeAccent)),
+            Text('build $kSha',
+                style: const TextStyle(fontSize: 8, color: Colors.white24)),
             if (on && s.port != null)
               SelectableText('SOCKS5: ${TorService.host}:${s.port} · proxy ${s.proxyUrl}',
                   style:

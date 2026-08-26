@@ -25,7 +25,8 @@ jobs:
             os: ubuntu-latest
             # Solo arm64: sin esto Flutter pasa los 3 ABIs a Gradle y
             # Cargokit compila Rust 3 veces (armv7 incluido).
-            command: flutter build apk --release --target-platform android-arm64
+            command: 
+            flutter build apk --release --target-platform android-arm64 --dart-define=GIT_SHA=${GITHUB_SHA:0:7}
 
     steps:
       - name: Free disk space
