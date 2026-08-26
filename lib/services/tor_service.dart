@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:socks5_proxy/socks_client.dart';
@@ -219,6 +221,80 @@ class TorService extends ChangeNotifier {
       throw _traducirSocks(e, 'descarga $url');
     } finally {
       client.close();
+    }
+  }
+}
+
+/// Passthrough de eventos de un socket para esperar respuestas
+/// secuenciales durante el handshake SOCKS5.
+class _CanalSocks {
+  final Socket s;
+  final _c = StreamController<List<int>>();
+  StreamSubscription<List<int>>? _sub;
+  _CanalSocks(this.s) {
+    _sub = s.listen(_c.add, onError: _c.addError, onDone: () {});
+  }
+  Future<List<int>> leer({int segs = 8}) =>
+      _c.stream.first.timeout(Duration(seconds: segs),
+          onTimeout: () => throw 'timeout esperando al proxy');
+  Future<void> soltar() async {
+    await _sub?.cancel();
+    _c.close();
+  }
+}
+
+extension TunelCrudoTor on TorService {
+  /// Abre un socket CRUDO hacia [host]:[puerto] a través del circuito,
+  /// con el mismo handshake del ejemplo oficial de Foundation-Devices.
+  /// Si [ssl], actualiza a TLS con SNI=[host] y devuelve el socket seguro.
+  Future<SecureSocket> socketSeguroPorTor(String host, int puerto) async {
+    if (!_running || _port == null) throw 'Tor no está corriendo';
+    final raw = await Socket.connect(InternetAddress.loopbackIPv4, _port!);
+    final canal = _CanalSocks(raw);
+    try {
+      // 1 · greeting: versión 5, un método, sin autenticación
+      raw.add([0x05, 0x01, 0x00]);
+      final saludo = await canal.leer();
+      if (saludo.length < 2 || saludo[1] != 0x00) {
+        throw 'SOCKS5: método rechazado por el proxy local';
+      }
+      // 2 · CONNECT por nombre de dominio (ATYP 0x03)
+      final dom = host.codeUnits;
+      raw.add([
+        0x05, 0x01, 0x00, 0x03, dom.length, ...dom,
+        (puerto >> 8) & 0xFF, puerto & 0xFF,
+      ]);
+      final conn = await canal.leer(segs: 15);
+      if (conn.length < 2 || conn[1] != 0x00) {
+        throw 'el circuito no pudo alcanzar $host:$puerto '
+            '(código ${conn.length > 1 ? conn[1] : '?'})';
+      }
+      // 3 · soltar nuestro listener y entregarle el socket a TLS
+      await canal.soltar();
+      return SecureSocket.secure(raw, host: host);
+    } catch (_) {
+      await canal.soltar();
+      raw.destroy();
+      rethrow;
+    }
+  }
+
+  /// Ping Electrum real: server.version por TLS dentro del circuito.
+  /// Devuelve la primera línea que responde el nodo.
+  Future<String> pingElectrum(String host, int puerto) async {
+    final sec = await socketSeguroPorTor(host, puerto);
+    try {
+      sec.writeln(
+          '{"jsonrpc":"2.0","id":"0","method":"server.version",'
+          '"params":["mimapp","1.0"]}');
+      final linea = await sec
+          .transform(utf8.decoder)
+          .transform(const LineSplitter())
+          .first
+          .timeout(const Duration(seconds: 10));
+      return linea;
+    } finally {
+      sec.destroy();
     }
   }
 }

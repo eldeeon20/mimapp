@@ -17,6 +17,9 @@ class TorTestScreen extends StatefulWidget {
 }
 
 class _TorTestScreenState extends State<TorTestScreen> {
+  final _eleCtrl = TextEditingController(text: 'bitcoin.stackwallet.com:50002');
+  String? _eleResp;
+
   final _urlCtrl =
       TextEditingController(text: 'https://check.torproject.org/api/ip');
   final _onionCtrl = TextEditingController(
@@ -63,6 +66,18 @@ class _TorTestScreenState extends State<TorTestScreen> {
         setState(() => _response = 'consultando…');
         final r = await TorService.instance.httpGet(url);
         setState(() => _response = r);
+      });
+
+  /// Test del ejemplo Foundation: socket SSL crudo por el circuito.
+  Future<void> _electrum() => _guard(() async {
+        final t = _eleCtrl.text.trim();
+        if (!t.contains(':')) throw 'formato: host:puerto';
+        final host = t.split(':').first;
+        final puerto = int.tryParse(t.split(':').last.split('/').first);
+        if (host.isEmpty || puerto == null) throw 'formato: host:puerto';
+        setState(() => _eleResp = 'conectando por el circuito…');
+        final r = await TorService.instance.pingElectrum(host, puerto);
+        setState(() => _eleResp = r);
       });
 
   Future<void> _download() => _guard(() async {
@@ -161,6 +176,44 @@ class _TorTestScreenState extends State<TorTestScreen> {
         // ---- test onion
         _row(_onionCtrl, 'Servicio .onion', 'GET',
             () => _fetch(_onionCtrl.text.trim())),
+        const SizedBox(height: 8),
+        // ---- test socket crudo SSL (patrón ejemplo Foundation)
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+              color: Colors.amber.withValues(alpha: .07),
+              borderRadius: BorderRadius.circular(8)),
+          child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('SOCKET SSL por el circuito · Electrum',
+                    style:
+                        TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                Text('server.version real a través de SOCKS5+TLS',
+                    style:
+                        const TextStyle(fontSize: 10, color: Colors.white38)),
+                const SizedBox(height: 6),
+                Row(children: [
+                  Expanded(child: TextField(
+                      controller: _eleCtrl,
+                      autocorrect: false,
+                      enableSuggestions: false,
+                      textCapitalization: TextCapitalization.none,
+                      style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
+                      decoration: const InputDecoration(
+                          labelText: 'host:puerto'))),
+                  FilledButton.tonal(
+                      onPressed: _busy ? null : _electrum,
+                      child: const Text('PING')),
+                ]),
+                if (_eleResp != null)
+                  Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: SelectableText(_eleResp!,
+                          style: const TextStyle(
+                              fontFamily: 'monospace', fontSize: 11))),
+              ]),
+        ),
         const SizedBox(height: 8),
         // ---- test descarga CDN por el túnel
         Container(
