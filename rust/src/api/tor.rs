@@ -46,7 +46,7 @@ fn tor_rt() -> &'static TokioRustlsRuntime {
     TOR_RT.get_or_init(|| TokioRustlsRuntime::create().expect("runtime TLS rustls"))
 }
 
-fn agente() -> Result<ureq::Agent, String> {
+fn agente() -> Result<arti_ureq::ureq::Agent, String> {
     let c = CLIENT.lock().map_err(|_| "mutex cliente")?;
     let c = c.as_ref().ok_or("Tor no está corriendo")?;
     Ok(arti_ureq::Connector::with_tor_client((**c).clone()).agent())
