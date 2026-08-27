@@ -147,11 +147,12 @@ class TorService extends ChangeNotifier {
     if (!_running) throw 'Tor no está corriendo';
     try {
       final n = await rust.torDownload(url: url, destPath: savePath);
-      onProgress?.call(n, n);
+      onProgress?.call(n.toInt(), n.toInt());
       _say('descargado $url → $savePath ($n B)');
       return savePath;
     } catch (e) {
-      throw e;
+      rethrow;
+    }
   }
 }
 

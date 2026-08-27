@@ -189,3 +189,17 @@ pub fn tor_download(url: String, dest_path: String) -> Result<u64, String> {
     f.flush().map_err(|e| format!("flush: {e}"))?;
     Ok(buf.len() as u64)
 }
+
+/// Ping TCP crudo por el circuito Tor: abre una conexión hacia host:puerto
+/// (sin HTTP) para verificar conectividad a cualquier servicio .onion/común.
+#[flutter_rust_bridge::frb]
+pub fn tor_tcp_ping(host: String, puerto: i32) -> Result<String, String> {
+    let g = CLIENT.lock().map_err(|_| "mutex cliente")?;
+    let c = g.as_ref().ok_or("Tor no está corriendo")?;
+    let start = std::time::Instant::now();
+    let _s = tor_rt()
+        .block_on(c.connect((host.clone(), puerto as u16)))
+        .map_err(|e| format!("connect {host}:{puerto}: {e}"))?;
+    let ms = start.elapsed().as_millis();
+    Ok(format!("OK {host}:{puerto} · {ms} ms por el circuito Tor"))
+}
