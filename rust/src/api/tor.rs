@@ -39,7 +39,7 @@ pub fn tor_estado() -> String {
 }
 /// Runtime EXCLUSIVO del stack Tor: bootstrap, warm-up y todas las
 /// consultas HTTP viven aquí. Un stack de red = un runtime (regla del
-/// proyecto: cuando entre I2P tendrá el suyo propio).
+/// proyecto: una red = un runtime).
 static TOR_RT: OnceLock<TokioRustlsRuntime> = OnceLock::new();
 
 fn tor_rt() -> &'static TokioRustlsRuntime {

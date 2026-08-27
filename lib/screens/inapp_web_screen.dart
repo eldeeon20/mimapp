@@ -7,7 +7,7 @@ import '../browser/browser_webview.dart';
 /// Browser chico sobre flutter_inappwebview: barra URL, pestañas y toggle
 /// de JavaScript. Solo compone las clases del módulo lib/browser/.
 ///
-/// Por ahora sin selector de red (Tor/I2P/directo): la clase Proxy queda
+/// Por ahora sin selector de red (Tor/directo): la clase Proxy queda
 /// pendiente; cuando exista se enchufa acá y en DownloadManager.
 class InAppWebScreen extends StatefulWidget {
   const InAppWebScreen({super.key});

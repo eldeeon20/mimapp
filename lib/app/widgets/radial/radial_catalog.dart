@@ -109,10 +109,6 @@ abstract final class RadialCatalog {
         label: 'Nostringer',
         icon: Icons.fingerprint_rounded,
         color: Color(0xFFB57CFF)),
-    RadialMenuItem(
-        key: 'i2',
-        label: 'I2P',
-        icon: Icons.public_rounded,
-        color: Colors.brownAccent),
+
   ];
 }

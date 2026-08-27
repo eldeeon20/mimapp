@@ -32,10 +32,7 @@ arti-ureq = { version = "=0.36.0", default-features = false, features = ["rustls
 tor-rtcompat = { version = "=0.36.0", default-features = false, features = ["tokio", "rustls"] }
 tor-config = "=0.36.0"
 rlimit = "0.10"
-# --- I2P embebido (emissary: router Rust puro, LICENCIA MIT; el cliente
-# SAMv3 y la resolución de nombres son propios, sin puente local) ---
-emissary-core = "=0.4.0"
-emissary-util = "=0.4.0"
+
 nostr-sdk = { version = "=0.43.0", features = ["nip44", "nip59"] }
 nostr = "=0.43.1"
 shamirsecretsharing = "0.1"

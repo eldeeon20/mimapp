@@ -27,7 +27,7 @@ class DownloadItem {
 /// <appSupport>/browser_downloads con progreso por item.
 ///
 /// Hoy sale directo; la clase Proxy queda pendiente — cuando exista, acá
-/// se enchufa el túnel (Tor/I2P) sin cambiar a los que llaman.
+/// se enchufa el túnel (Tor) sin cambiar a los que llaman.
 class DownloadManager extends ChangeNotifier {
   DownloadManager._();
   static final DownloadManager instance = DownloadManager._();
