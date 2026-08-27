@@ -89,8 +89,8 @@ impl MotorDht {
             let s: StatsInt = m.stats();
             Ok(DhtStats {
                 nodos_tabla: s.nodos_tabla,
-                semillasOk: s.semillas_ok,
-                semillasTotal: s.semillas_total,
+                semillas_ok: s.semillas_ok,
+                semillas_total: s.semillas_total,
                 capturados: s.capturados,
                 pedidos: s.pedidos,
                 resueltos: s.resueltos,

@@ -179,7 +179,7 @@ fn hex_id(id: &Id) -> String {
 /// Parse root-level creation date and comment from full torrent bytes (when present).
 /// `torrent_bytes` es `Bytes` (siempre presente) en librqbit 9.
 fn parse_root_metadata(torrent_bytes: &[u8]) -> (String, String) {
-    let root = match librqbit::torrent_from_bytes::<librqbit::ByteBufOwned>(torrent_bytes) {
+    let root = match librqbit::torrent_from_bytes(torrent_bytes) {
         Ok(r) => r,
         Err(_) => return (String::new(), String::new()),
     };
@@ -281,7 +281,7 @@ impl DhtBusca {
         let pedidos_hilo = self.pedidos.clone();
         let sem_ok = self.semillas_ok.clone();
         let sem_tot = self.semillas_total.clone();
-        let logs_ping = logs.clone();
+        let logs_ping = self.logs.clone();
         let stop = self.stop.clone();
         let logs = self.logs.clone();
 
