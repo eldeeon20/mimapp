@@ -166,7 +166,7 @@ pub fn tor_set_dormant(soft: bool) -> Result<(), String> {
 #[flutter_rust_bridge::frb]
 pub fn tor_http_get(url: String) -> Result<String, String> {
     let c = agente()?;
-    let r = c.get(&url).call().map_err(|e| format!("GET {url}: {e}"))?;
+    let mut r = c.get(&url).call().map_err(|e| format!("GET {url}: {e}"))?;
     let status = r.status();
     let body = r.body_mut().read_to_string().map_err(|e| format!("cuerpo: {e}"))?;
     Ok(format!("HTTP {status}\n\n{body}"))
@@ -179,7 +179,7 @@ pub fn tor_http_get(url: String) -> Result<String, String> {
 pub fn tor_download(url: String, dest_path: String) -> Result<u64, String> {
     use std::io::{Read, Write};
     let c = agente()?;
-    let r = c.get(&url).call().map_err(|e| format!("GET {url}: {e}"))?;
+    let mut r = c.get(&url).call().map_err(|e| format!("GET {url}: {e}"))?;
     let mut reader = r.body_mut().as_reader();
     let mut f = std::fs::File::create(&dest_path)
         .map_err(|e| format!("crear {dest_path}: {e}"))?;
