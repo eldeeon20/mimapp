@@ -72,9 +72,9 @@ pub struct Hallado {
 /// ya resueltos.
 #[derive(Clone)]
 struct Captura {
-    hash: String,
-    nombre: String,
-    resuelto: bool,
+    pub hash: String,
+    pub nombre: String,
+    pub resuelto: bool,
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
@@ -438,6 +438,7 @@ impl DhtBusca {
         let dir_tmp = self.dir_cache.join("_meta");
         let stop2 = self.stop.clone();
         let max_meta = self.max_meta;
+        let capturas_arc = self.capturas.clone();
         self.runtime.spawn(async move {
             meta_loop(
                 rx_hash,
@@ -450,7 +451,7 @@ impl DhtBusca {
                 dir_tmp,
                 max_meta,
                 dht_meta,
-                self.capturas.clone(),
+                capturas_arc,
             )
             .await;
         });
