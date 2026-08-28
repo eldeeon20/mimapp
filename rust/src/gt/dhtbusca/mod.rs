@@ -71,7 +71,7 @@ pub struct Hallado {
 /// atrapando en tiempo real (la lista de "hashes"), aparte de los metadatos
 /// ya resueltos.
 #[derive(Clone)]
-struct Captura {
+pub(crate) struct Captura {
     pub hash: String,
     pub nombre: String,
     pub resuelto: bool,
@@ -505,7 +505,7 @@ impl DhtBusca {
 
     /// Base de capturas en vivo (cada hash interceptado, con estado de
     /// resolución). `limit<=0` devuelve todas.
-    pub fn capturas(&self, limit: i32) -> Vec<Captura> {
+    pub(crate) fn capturas(&self, limit: i32) -> Vec<Captura> {
         let g = self.capturas.lock().unwrap_or_else(|e| e.into_inner());
         let take = if limit <= 0 {
             g.len()
@@ -516,7 +516,7 @@ impl DhtBusca {
     }
 
     /// Filtra la base por hash o nombre (substring, parcial, case-insensitive).
-    pub fn capturas_filtradas(&self, texto: &str, limit: i32) -> Vec<Captura> {
+    pub(crate) fn capturas_filtradas(&self, texto: &str, limit: i32) -> Vec<Captura> {
         let q = texto.trim().to_lowercase();
         let g = self.capturas.lock().unwrap_or_else(|e| e.into_inner());
         let take = if limit <= 0 {
