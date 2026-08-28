@@ -10,10 +10,15 @@ import 'browser_tab.dart';
 /// El toggle global de JavaScript también vive acá: al cambiarlo se aplica
 /// en vivo a todos los controladores registrados y queda como valor inicial
 /// de las pestañas nuevas.
+///
+/// Es un singleton: las pestañas (y el host global de WebViews) sobreviven a
+/// la navegación dentro de la app. `openBrowser`/`closeBrowser` controlan el
+/// overlay global montado en app.dart.
 class BrowserTabs extends ChangeNotifier {
-  BrowserTabs() {
+  BrowserTabs._() {
     tabs.add(BrowserTab(id: _nextId()));
   }
+  static final BrowserTabs instance = BrowserTabs._();
 
   static const maxTabs = 8;
 
@@ -23,7 +28,23 @@ class BrowserTabs extends ChangeNotifier {
   bool jsEnabled = true;
   int _idSeq = 0;
 
-  BrowserTab get active => tabs[activeIndex];
+  final ValueNotifier<bool> _open = ValueNotifier(false);
+  bool get isOpen => _open.value;
+  void openBrowser() {
+    _open.value = true;
+    notifyListeners();
+  }
+
+  void closeBrowser() {
+    _open.value = false;
+    notifyListeners();
+  }
+
+  BrowserTab get active {
+    if (tabs.isEmpty) tabs.add(BrowserTab(id: _nextId()));
+    final i = activeIndex.clamp(0, tabs.length - 1);
+    return tabs[i];
+  }
 
   int _nextId() => _idSeq++;
 
@@ -44,20 +65,26 @@ class BrowserTabs extends ChangeNotifier {
 
   void add() {
     if (tabs.length >= maxTabs) return;
-    tabs.add(
-        BrowserTab(id: _nextId(), title: 'Nueva pestaña', url: 'https://duckduckgo.com/'));
+    tabs.add(BrowserTab(
+        id: _nextId(), title: 'Nueva pestaña', url: 'https://duckduckgo.com/'));
     activeIndex = tabs.length - 1;
     notifyListeners();
   }
 
+  /// Cierra SOLO la pestaña en [index] (sin cascada). Si era la última,
+  /// crea una "Nueva pestaña" fresca para que siempre haya una.
   void closeAt(int index) {
-    if (tabs.length <= 1) return;
     if (index < 0 || index >= tabs.length) return;
     final id = tabs[index].id;
     _controllers.remove(id);
     tabs[index].dispose();
     tabs.removeAt(index);
+    if (tabs.isEmpty) {
+      tabs.add(BrowserTab(
+          id: _nextId(), title: 'Nueva pestaña', url: 'https://duckduckgo.com/'));
+    }
     if (activeIndex >= tabs.length) activeIndex = tabs.length - 1;
+    if (activeIndex < 0) activeIndex = 0;
     notifyListeners();
   }
 
@@ -85,17 +112,22 @@ class BrowserTabs extends ChangeNotifier {
       u = 'https://$u';
     }
     updateUrl(tabId, u);
-    await controllerOf(tabId)
-        ?.loadUrl(urlRequest: URLRequest(url: WebUri(u)));
+    await controllerOf(tabId)?.loadUrl(urlRequest: URLRequest(url: WebUri(u)));
   }
 
-  Future<void> reload(int tabId) async =>
-      controllerOf(tabId)?.reload();
+  Future<void> reload(int tabId) => controllerOf(tabId)?.reload();
 
   Future<bool> goBack(int tabId) async {
     final c = controllerOf(tabId);
     if (c == null || !(await c.canGoBack())) return false;
     await c.goBack();
+    return true;
+  }
+
+  Future<bool> goForward(int tabId) async {
+    final c = controllerOf(tabId);
+    if (c == null || !(await c.canGoForward())) return false;
+    await c.goForward();
     return true;
   }
 

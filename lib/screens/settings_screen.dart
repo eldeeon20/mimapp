@@ -46,6 +46,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
               await s.save();
             },
           ),
+          SwitchListTile(
+            secondary: const Icon(Icons.router_rounded),
+            title: const Text('Puertos (UPnP/NAT-PMP)'),
+            subtitle: const Text(
+                'Abre puertos en el router para DHT y otros servicios'),
+            value: s.natEnabled,
+            onChanged: (v) async {
+              setState(() => s.natEnabled = v);
+              await s.save();
+            },
+          ),
           const Divider(),
           ListTile(
             leading: const Icon(Icons.vpn_lock_rounded),

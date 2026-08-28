@@ -19,6 +19,9 @@ class Settings {
   /// Toggle funcional del menú: mostrar la ruta/URI completa en media.
   bool mediaShowUri = false;
 
+  /// Abrir puertos en el router vía UPnP/NAT-PMP (servicio NatService).
+  bool natEnabled = false;
+
   /// Modo de la web Lua: true = oscuro, false = claro (parámetro global).
   bool webDarkMode = true;
 
@@ -62,6 +65,7 @@ class Settings {
         }
         final map = jsonDecode(utf8.decode(plain)) as Map<String, dynamic>;
         mediaShowUri = map['mediaShowUri'] as bool? ?? false;
+        natEnabled = map['natEnabled'] as bool? ?? false;
         webDarkMode = map['webDarkMode'] as bool? ?? true;
         if (map['accounts'] is Map) {
           accounts = Map<String, dynamic>.from(map['accounts']);
@@ -107,6 +111,7 @@ class Settings {
     try {
       final map = {
         'mediaShowUri': mediaShowUri,
+        'natEnabled': natEnabled,
         'webDarkMode': webDarkMode,
         'accounts': accounts,
         'tasks': tasks,

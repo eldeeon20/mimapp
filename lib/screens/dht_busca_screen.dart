@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../build_info.dart';
 import '../services/dht_busca.dart';
+import '../services/nat_service.dart';
 import '../services/rqbit.dart';
 import '../src/rust/api/dht_busca.dart' as rust;
 import 'torrent_screen.dart';
@@ -99,6 +100,27 @@ class _DhtBuscaScreenState extends State<DhtBuscaScreen> {
   Future<void> _parar() => _guard(() async {
         await _motor!.stop();
         setState(() => _estado = 'detenido · índice guardado');
+      });
+
+  /// Abre el puerto default del spider (UDP 6881) en el router vía UPnP/NAT-PMP.
+  Future<void> _abrirPuertos() => _guard(() async {
+        if (!NatService.instance.enabled) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                content: Text('Activá "Puertos (UPnP/NAT-PMP)" en Ajustes',
+                    style: TextStyle(color: Colors.redAccent)),
+                backgroundColor: Colors.black));
+          }
+          return;
+        }
+        final ext = await NatService.instance.openUdp(
+          localPort: 6881,
+          externalPort: 6881,
+          description: 'mimapp DHT spider',
+        );
+        setState(() => _estado = ext != null
+            ? 'puerto UDP 6881 mapeado en el router (externo $ext)'
+            : 'no se pudo mapear el puerto (sin gateway UPnP/NAT-PMP)');
       });
 
   Future<void> _probar() => _guard(() async {
@@ -216,6 +238,11 @@ class _DhtBuscaScreenState extends State<DhtBuscaScreen> {
             const SizedBox(height: 2),
             const Text('modo nodo servidor · ayudás a rutear la red',
                 style: TextStyle(fontSize: 10, color: Colors.white38)),
+            const SizedBox(height: 8),
+            FilledButton.icon(
+                onPressed: _abrirPuertos,
+                icon: const Icon(Icons.router_rounded, size: 18),
+                label: const Text('Abrir puertos (UDP 6881)')),
           ]),
         ),
         const SizedBox(height: 10),

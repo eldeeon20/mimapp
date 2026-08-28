@@ -6,7 +6,8 @@ import '../colab_cli/colab_dialog.dart';
 import '../media/media_player.dart';
 import '../screens/ai_screen.dart';
 import '../screens/downloads_test_screen.dart';
-import '../screens/inapp_web_screen.dart';
+import '../browser/browser_host.dart';
+import '../browser/browser_tabs.dart';
 import '../screens/torrent_screen.dart';
 import '../screens/filosoia_screen.dart';
 import '../agents/agent_manager.dart';
@@ -60,6 +61,7 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   late final MediaPlayer _mediaPlayer;
   late final LaureliaChat _laurelia;
+  OverlayEntry? _browserEntry;
 
   @override
   void initState() {
@@ -69,10 +71,19 @@ class _HomePageState extends State<HomePage> {
     // Agentes IA: cargar persistencia cifrada al arrancar la app; viven
     // a nivel app y sobreviven a los cambios de pantalla.
     AgentManager.instance.ensureLoaded();
+    // Browser: overlay global persistente. Vive en el Overlay de la app,
+    // así los WebViews no se destruyen al navegar (estado vivo completo).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _browserEntry = OverlayEntry(
+          builder: (_) => Positioned.fill(child: const BrowserWebViewsHost()));
+      Overlay.of(context).insert(_browserEntry!);
+    });
   }
 
   @override
   void dispose() {
+    _browserEntry?.remove();
     _mediaPlayer.dispose();
     super.dispose();
   }
@@ -106,10 +117,8 @@ class _HomePageState extends State<HomePage> {
 
   void _openWeb(BuildContext context) {
     // Lua quedó suelto (código intacto en lib/lua/, sin invocar): el botón
-    // Web ahora abre el browser inappwebview.
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const InAppWebScreen()),
-    );
+    // Web ahora abre el browser inappwebview como overlay global.
+    BrowserTabs.instance.openBrowser();
   }
 
   void _openSettings(BuildContext context) {
