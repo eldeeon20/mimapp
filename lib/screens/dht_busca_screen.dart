@@ -26,6 +26,7 @@ class _DhtBuscaScreenState extends State<DhtBuscaScreen> {
   final _buscaCtrl = TextEditingController();
   final _pruebaCtrl = TextEditingController();
   List<rust.HalladoItem> _resultados = [];
+  List<rust.CapturaItem> _capturas = [];
   rust.DhtStats? _stats;
   bool _busy = false;
   String _estado = 'motor sin iniciar';
@@ -63,11 +64,23 @@ class _DhtBuscaScreenState extends State<DhtBuscaScreen> {
     if (m == null || _busy) return;
     try {
       final st = await m.stats();
+      final q = _buscaCtrl.text.trim();
       final nuevos = await m.pollNuevos();
       await m.guardar();
+      // La lista de capturas se filtra en vivo por la búsqueda (hash o nombre).
+      final caps = q.isEmpty
+          ? await m.capturas(limit: 400)
+          : await m.capturasFiltradas(q, limit: 400);
+      List<rust.HalladoItem>? resueltos;
+      if (q.isNotEmpty) {
+        resueltos = await m.buscar(q);
+      }
       setState(() {
         _stats = st;
-        if (nuevos.isNotEmpty) {
+        _capturas = caps;
+        if (resueltos != null) {
+          _resultados = resueltos;
+        } else if (nuevos.isNotEmpty) {
           _resultados = [...nuevos, ..._resultados].take(200).toList();
         }
       });
@@ -202,10 +215,11 @@ class _DhtBuscaScreenState extends State<DhtBuscaScreen> {
   Widget build(BuildContext context) {
     final corriendo = _estado.contains('corriendo');
     return Scaffold(
-      body: ListView(padding: const EdgeInsets.all(12), children: [
+      body: Column(children: [
         // ---- estado + control del spider
         Container(
           padding: const EdgeInsets.all(10),
+          margin: const EdgeInsets.all(12),
           decoration: BoxDecoration(
               color: (corriendo ? Colors.greenAccent : Colors.grey)
                   .withValues(alpha: .08),
@@ -226,7 +240,8 @@ class _DhtBuscaScreenState extends State<DhtBuscaScreen> {
                 style: const TextStyle(
                     fontSize: 10.5,
                     fontFamily: 'monospace',
-                    color: Colors.blueAccent)),
+                    color: Colors.blueAccent),
+              ),
             if (_stats != null)
               Text(
                 _semillasTexto(),
@@ -239,7 +254,6 @@ class _DhtBuscaScreenState extends State<DhtBuscaScreen> {
               ),
             Text('build $kSha',
                 style: const TextStyle(fontSize: 8, color: Colors.white24)),
-
             const SizedBox(height: 8),
             Wrap(spacing: 8, runSpacing: 4, children: [
               FilledButton.icon(
@@ -261,56 +275,116 @@ class _DhtBuscaScreenState extends State<DhtBuscaScreen> {
                 label: const Text('Abrir puertos (UDP 6881)')),
           ]),
         ),
-        const SizedBox(height: 10),
-        // ---- búsqueda por texto sobre el índice local
-        Row(children: [
-          Expanded(
-              child: TextField(
-            controller: _buscaCtrl,
-            decoration: const InputDecoration(
-                labelText: 'buscar en el índice local',
-                hintText: 'linux iso…'),
-            onSubmitted: (_) => _buscar(),
-          )),
-          IconButton(onPressed: _buscar, icon: const Icon(Icons.search_rounded)),
-        ]),
+        // ---- búsqueda (filtra ambas listas en vivo)
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Row(children: [
+            Expanded(
+                child: TextField(
+              controller: _buscaCtrl,
+              decoration: const InputDecoration(
+                  labelText: 'buscar (hash o nombre, parcial)',
+                  hintText: 'ubuntu…'),
+              onChanged: (_) => _tick(),
+              onSubmitted: (_) => _tick(),
+            )),
+            IconButton(onPressed: _tick, icon: const Icon(Icons.search_rounded)),
+          ]),
+        ),
         const SizedBox(height: 8),
-        // ---- resultados
-        if (_resultados.isEmpty)
-          Padding(
-              padding: const EdgeInsets.all(20),
-              child: Text(
-                  _buscaCtrl.text.isEmpty
-                      ? 'El spider atrapa lo que la red busca.\n'
-                          'Con el tiempo el índice local crece solo.\n'
-                          '(Kademlia no busca por nombre:\n'
-                          'se olfatea y se indexa acá.)'
-                      : 'sin resultados aún',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.white38, fontSize: 12)))
-        else
-          ..._resultados.map((h) => ListTile(
-                dense: true,
-                title: Text(h.nombre,
-                    maxLines: 2, overflow: TextOverflow.ellipsis),
-                subtitle: Text(
-                    '${_tamano(h.tamano.toInt())} · ${h.archivos} arch'
-                    '${h.creationDate.isNotEmpty ? " · ${h.creationDate}" : ""}'
-                    '${h.comment.isNotEmpty ? " · ${h.comment}" : ""}',
-                    style: const TextStyle(fontFamily: 'monospace', fontSize: 10)),
-                trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                  IconButton(
-                      tooltip: 'copiar magnet',
-                      icon: const Icon(Icons.copy_rounded, size: 18),
-                      onPressed: () => _copiarMagnet(h)),
-                  IconButton(
-                      tooltip: 'bajar con rqbit',
-                      icon: const Icon(Icons.download_rounded, size: 18),
-                      onPressed: _busy ? null : () => _aRqbit(h)),
-                ]),
-              )),
+        // ---- dos listas: capturas (hashes) + resueltos (metadatos)
+        Expanded(
+          child: ListView(children: [
+            _seccion('CAPTURADOS (hashes) · ${_capturas.length}'),
+            if (_capturas.isEmpty)
+              const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Text(
+                      'El spider atrapa lo que la red busca. Aparece acá en vivo.',
+                      style: TextStyle(color: Colors.white38, fontSize: 12)))
+            else
+              ..._capturas.map(_capturaTile),
+            const Divider(height: 18),
+            _seccion('RESUELTOS (metadatos) · ${_resultados.length}'),
+            if (_resultados.isEmpty)
+              const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Text(
+                      'Lo resuelto (nombre/tamaño) aparece acá. Con el tiempo crece.',
+                      style: TextStyle(color: Colors.white38, fontSize: 12)))
+            else
+              ..._resultados.map((h) => ListTile(
+                    dense: true,
+                    title: Text(h.nombre,
+                        maxLines: 2, overflow: TextOverflow.ellipsis),
+                    subtitle: Text(
+                        '${_tamano(h.tamano.toInt())} · ${h.archivos} arch'
+                        '${h.creationDate.isNotEmpty ? " · ${h.creationDate}" : ""}'
+                        '${h.comment.isNotEmpty ? " · ${h.comment}" : ""}',
+                        style: const TextStyle(
+                            fontFamily: 'monospace', fontSize: 10)),
+                    trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                      IconButton(
+                          tooltip: 'copiar magnet',
+                          icon: const Icon(Icons.copy_rounded, size: 18),
+                          onPressed: () => _copiarMagnet(h)),
+                      IconButton(
+                          tooltip: 'bajar con rqbit',
+                          icon: const Icon(Icons.download_rounded, size: 18),
+                          onPressed: _busy ? null : () => _aRqbit(h)),
+                    ]),
+                  )),
+          ]),
+        ),
+        // ---- probar hash manual
+        Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(children: [
+            Expanded(
+                child: TextField(
+              controller: _pruebaCtrl,
+              decoration: const InputDecoration(
+                  labelText: 'probar info_hash (40 hex) o magnet',
+                  hintText: 'magnet:?xt=urn:btih:…'),
+              onSubmitted: (_) => _probar(),
+            )),
+            IconButton(onPressed: _probar, icon: const Icon(Icons.send_rounded)),
+          ]),
+        ),
       ]),
     );
   }
+
+  Widget _seccion(String t) => Container(
+        padding: const EdgeInsets.fromLTRB(12, 6, 12, 2),
+        color: Colors.white10,
+        child: Text(t,
+            style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: Colors.cyanAccent)),
+      );
+
+  Widget _capturaTile(rust.CapturaItem c) => ListTile(
+        dense: true,
+        leading: Icon(
+            c.resuelto ? Icons.check_circle : Icons.hourglass_bottom,
+            size: 18,
+            color: c.resuelto ? Colors.greenAccent : Colors.orangeAccent),
+        title: Text(
+            c.resuelto && c.nombre.isNotEmpty ? c.nombre : 'resolviendo…',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 13)),
+        subtitle: Text(c.infoHash,
+            style: const TextStyle(fontFamily: 'monospace', fontSize: 10)),
+        onTap: () {
+          Clipboard.setData(ClipboardData(text: c.infoHash));
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('hash copiado',
+                  style: TextStyle(color: Colors.greenAccent)),
+              backgroundColor: Colors.black));
+        },
+      );
 }
 

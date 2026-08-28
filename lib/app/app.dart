@@ -46,7 +46,17 @@ class PrApp extends StatelessWidget {
       theme: ThemeData.dark().copyWith(
         scaffoldBackgroundColor: const Color(0xFF020617),
       ),
-      home: const HomePage(),
+      home: PopScope(
+        // El botón atrás NUNCA cierra la app: si el browser está abierto lo
+        // cierra (web intacta); si no, se queda en la app.
+        canPop: false,
+        onPopInvokedWithResult: (didPop, result) {
+          if (BrowserTabs.instance.isOpen) {
+            BrowserTabs.instance.closeBrowser();
+          }
+        },
+        child: const HomePage(),
+      ),
     );
   }
 }

@@ -19,7 +19,7 @@ use mainline::{
     RequestTypeSpecific, ServerSettings,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::{Ipv4Addr, SocketAddrV4, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -30,8 +30,13 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::gt::eventlog::EventLog;
 
-/// Hashes esperando metadatos se rinden a los 5 minutos.
-const PENDING_TIMEOUT: Duration = Duration::from_secs(300);
+/// Hashes esperando metadatos se rinden pasado este tiempo (se libera el
+/// slot para nuevos; el torrent queda en la sesión y se indexa si resuelve).
+const PENDING_TIMEOUT: Duration = Duration::from_secs(180);
+/// Tope de espera por hash al pedir metadatos: si no resuelve en este
+/// tiempo, se suelta y sigue con el siguiente. Nunca nos quedamos colgados
+/// en un solo hash cuando hay varios en cola.
+const RESOLVE_TIMEOUT: Duration = Duration::from_secs(60);
 /// Ritmo activo moderado (~10 consultas/seg) para no saturar la red.
 const TICK_ACTIVO: Duration = Duration::from_millis(100);
 /// Tope duro del índice en RAM (los más viejos se recortan al guardar).
@@ -59,6 +64,17 @@ pub struct Hallado {
     pub creation_date: String,
     #[serde(default)]
     pub comment: String,
+}
+
+/// Captura en vivo: cada hash interceptado por el spider, con estado de
+/// resolución. Se muestra en la UI para que el usuario vea qué está
+/// atrapando en tiempo real (la lista de "hashes"), aparte de los metadatos
+/// ya resueltos.
+#[derive(Clone)]
+struct Captura {
+    hash: String,
+    nombre: String,
+    resuelto: bool,
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
@@ -219,6 +235,9 @@ pub struct DhtBusca {
     /// Handle vivo del nodo DHT, compartido entre el hilo spider y el loop de
     /// metadatos (solo lectura vía lock corto; el Dht no es Clone).
     dht: Arc<Mutex<Option<Dht>>>,
+    /// Base de capturas en vivo (cada hash interceptado, con estado de
+    /// resolución). Se expone a la UI como la lista de "hashes".
+    capturas: Arc<Mutex<VecDeque<Captura>>>,
 }
 
 #[derive(Clone, Default, serde::Serialize)]
@@ -255,6 +274,7 @@ impl DhtBusca {
             logs: EventLog::new(),
             dir_cache: dir,
             dht: Arc::new(Mutex::new(None)),
+            capturas: Arc::new(Mutex::new(VecDeque::new())),
             runtime: Arc::new(
                 tokio::runtime::Builder::new_multi_thread()
                     .worker_threads(2)
@@ -430,6 +450,7 @@ impl DhtBusca {
                 dir_tmp,
                 max_meta,
                 dht_meta,
+                self.capturas.clone(),
             )
             .await;
         });
@@ -479,6 +500,39 @@ impl DhtBusca {
         hits.sort_by(|a, b| b.fecha_ms.cmp(&a.fecha_ms));
         hits.truncate(200);
         hits
+    }
+
+    /// Base de capturas en vivo (cada hash interceptado, con estado de
+    /// resolución). `limit<=0` devuelve todas.
+    pub fn capturas(&self, limit: i32) -> Vec<Captura> {
+        let g = self.capturas.lock().unwrap_or_else(|e| e.into_inner());
+        let take = if limit <= 0 {
+            g.len()
+        } else {
+            limit as usize
+        };
+        g.iter().rev().take(take).cloned().collect()
+    }
+
+    /// Filtra la base por hash o nombre (substring, parcial, case-insensitive).
+    pub fn capturas_filtradas(&self, texto: &str, limit: i32) -> Vec<Captura> {
+        let q = texto.trim().to_lowercase();
+        let g = self.capturas.lock().unwrap_or_else(|e| e.into_inner());
+        let take = if limit <= 0 {
+            g.len()
+        } else {
+            limit as usize
+        };
+        g.iter()
+            .rev()
+            .filter(|c| {
+                q.is_empty()
+                    || c.hash.contains(&q)
+                    || c.nombre.to_lowercase().contains(&q)
+            })
+            .take(take)
+            .cloned()
+            .collect()
     }
 
     pub fn total(&self) -> usize {
@@ -554,6 +608,7 @@ async fn meta_loop(
     dir_tmp: PathBuf,
     max_meta: usize,
     dht_arc: Arc<Mutex<Option<Dht>>>,
+    capturas: Arc<Mutex<VecDeque<Captura>>>,
 ) {
     let _ = std::fs::create_dir_all(&dir_tmp);
     let mut aviso_sordo = false;
@@ -587,11 +642,34 @@ async fn meta_loop(
                     }
                     let magnet = format!("magnet:?xt=urn:btih:{hash}");
                     pendientes.insert(hash.clone(), Instant::now());
+                    // Registrar en la base de capturas en vivo (estado: resolviendo).
+                    {
+                        let mut cap =
+                            capturas.lock().unwrap_or_else(|e| e.into_inner());
+                        if cap.len() >= 5000 {
+                            cap.pop_back();
+                        }
+                        if !cap.iter().any(|c| c.hash == hash) {
+                            cap.push_front(Captura {
+                                hash: hash.clone(),
+                                nombre: String::new(),
+                                resuelto: false,
+                            });
+                        }
+                    }
                     let s = session.clone();
                     tokio::spawn(async move {
                         let add = librqbit::AddTorrent::from_url(magnet);
                         let opts = librqbit::AddTorrentOptions::default();
-                        let _ = s.add_torrent(add, Some(opts)).await;
+                        // No nos quedamos esperando para siempre un hash: si no
+                        // resuelve en RESOLVE_TIMEOUT, soltamos y seguimos con
+                        // el siguiente. El torrent queda en la sesión; si luego
+                        // resuelve, el cosechado lo indexa igual.
+                        let _ = tokio::time::timeout(
+                            RESOLVE_TIMEOUT,
+                            s.add_torrent(add, Some(opts)),
+                        )
+                        .await;
                     });
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => break,
@@ -609,7 +687,10 @@ async fn meta_loop(
         session.with_torrents(|iter| {
             for (_idx, tor) in iter {
                 let hash = tor.info_hash().as_string();
-                if !pendientes.contains_key(&hash) {
+                // Cosechar todo lo que ya tenga metadato y NO esté indexado:
+                // así un hash lento que resuelve después de soltarse también
+                // entra. No dependemos de seguir en `pendientes`.
+                if ya_indexado(&indice, &hash) {
                     continue;
                 }
                 let got: Option<Hallado> = tor
@@ -642,6 +723,16 @@ async fn meta_loop(
         let cosechados = cosechados_celd.into_inner();
         for h in &cosechados {
             pendientes.remove(&h.info_hash);
+        }
+        // Marcar en la base de capturas los que ya resolvieron su metadato.
+        {
+            let mut cap = capturas.lock().unwrap_or_else(|e| e.into_inner());
+            for h in &cosechados {
+                if let Some(c) = cap.iter_mut().find(|c| c.hash == h.info_hash) {
+                    c.resuelto = true;
+                    c.nombre = h.nombre.clone();
+                }
+            }
         }
 
         if !cosechados.is_empty() {

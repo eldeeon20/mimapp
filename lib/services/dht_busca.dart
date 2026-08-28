@@ -22,6 +22,13 @@ class DhtBusca {
   Future<List<rust.HalladoItem>> buscar(String texto) => _m.buscar(texto: texto);
   Future<rust.DhtStats> stats() => _m.stats();
   Future<void> probar(String texto) => _m.probar(texto: texto);
+
+  /// Base de capturas en vivo (cada hash interceptado, con estado).
+  Future<List<rust.CapturaItem>> capturas({int limit = 400}) =>
+      _m.capturas(limit: limit);
+  Future<List<rust.CapturaItem>> capturasFiltradas(String texto,
+          {int limit = 400}) =>
+      _m.capturasFiltradas(texto: texto, limit: limit);
   Future<void> guardar() => _m.guardar();
   Future<List<String>> logs() => _m.takeLogs();
 

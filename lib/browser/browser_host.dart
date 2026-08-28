@@ -13,9 +13,10 @@ import 'browser_webview.dart';
 ///
 /// Barra: `← atrás · → adelante · ⟳ recargar · URL · [pestañas] · [⋮]`.
 /// El botón ⋮ abre un menú propio (no PopupMenuButton, que no funciona dentro
-/// del overlay) con Nueva pestaña / Habilitar JavaScript / Ajustes del
-/// navegador / Cerrar Web. El botón atrás del celular nunca cierra la app:
-/// cierra popups → cierra el browser (web intacta) → si no hay nada, bloquea.
+/// del overlay) con Nueva pestaña / Ajustes del navegador / Cerrar Web.
+/// JavaScript se activa solo desde Ajustes. El botón atrás del celular nunca
+/// cierra la app: cierra popups → cierra el browser (web intacta) → si no hay
+/// nada, bloquea.
 class BrowserWebViewsHost extends StatefulWidget {
   const BrowserWebViewsHost({super.key});
 
@@ -60,6 +61,11 @@ class _BrowserWebViewsHostState extends State<BrowserWebViewsHost>
   /// (las WebViews siguen vivas); si no queda nada, bloqueamos la salida.
   @override
   Future<bool> didRequestPopRoute() async {
+    // Si hay una pantalla apilada (sub-ruta), dejamos que el Navigator la
+    // cierre normalmente: no bloqueamos la navegación de la app.
+    if (Navigator.of(context, rootNavigator: true).canPop()) {
+      return false;
+    }
     if (_historyOpen) {
       setState(() => _historyOpen = false);
       return true;
@@ -230,11 +236,6 @@ class _BrowserWebViewsHostState extends State<BrowserWebViewsHost>
               tabs.add();
               setState(() => _menuOpen = false);
             },
-          ),
-          SwitchListTile(
-            title: const Text('Habilitar JavaScript'),
-            value: tabs.jsEnabled,
-            onChanged: (v) => tabs.setJs(v),
           ),
           ListTile(
             leading: const Icon(Icons.settings),

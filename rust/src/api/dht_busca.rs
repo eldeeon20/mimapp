@@ -17,6 +17,17 @@ pub struct HalladoItem {
     pub comment: String,
 }
 
+/// Captura en vivo del spider: un info_hash interceptado, con estado de
+/// resolución. La UI lo muestra en la lista de "hashes" (aparte de los
+/// metadatos ya resueltos).
+#[flutter_rust_bridge::frb]
+#[derive(Clone)]
+pub struct CapturaItem {
+    pub info_hash: String,
+    pub nombre: String,
+    pub resuelto: bool,
+}
+
 #[flutter_rust_bridge::frb]
 #[derive(Clone)]
 pub struct DhtStats {
@@ -82,6 +93,39 @@ impl MotorDht {
     /// Búsqueda de texto por nombre sobre el índice local.
     pub async fn buscar(&self, texto: String) -> Result<Vec<HalladoItem>, String> {
         self.con(|m| Ok(m.buscar(&texto).into_iter().map(mapear).collect()))?
+    }
+
+    /// Base de capturas en vivo: cada hash interceptado por el spider, con
+    /// estado de resolución (resuelto = ya tiene metadato).
+    pub async fn capturas(&self, limit: i32) -> Result<Vec<CapturaItem>, String> {
+        self.con(|m| {
+            Ok(m.capturas(limit)
+                .into_iter()
+                .map(|c| CapturaItem {
+                    info_hash: c.hash,
+                    nombre: c.nombre,
+                    resuelto: c.resuelto,
+                })
+                .collect())
+        })?
+    }
+
+    /// Filtra la base de capturas por hash o nombre (substring, parcial).
+    pub async fn capturas_filtradas(
+        &self,
+        texto: String,
+        limit: i32,
+    ) -> Result<Vec<CapturaItem>, String> {
+        self.con(|m| {
+            Ok(m.capturas_filtradas(&texto, limit)
+                .into_iter()
+                .map(|c| CapturaItem {
+                    info_hash: c.hash,
+                    nombre: c.nombre,
+                    resuelto: c.resuelto,
+                })
+                .collect())
+        })?
     }
 
     pub async fn stats(&self) -> Result<DhtStats, String> {
