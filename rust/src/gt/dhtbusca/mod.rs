@@ -389,7 +389,7 @@ impl DhtBusca {
                     }
                     // como el crawler: si el id aleatorio tiene swarm,
                     // también entra al canal (descubrimiento activo real)
-                    let iter = dht_arc
+                    let mut iter = dht_arc
                         .lock()
                         .unwrap_or_else(|e| e.into_inner())
                         .as_ref()
