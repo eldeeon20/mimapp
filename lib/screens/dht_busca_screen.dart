@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:path_provider/path_provider.dart';
 
 import '../build_info.dart';
 import '../services/dht_busca.dart';
@@ -27,6 +26,7 @@ class _DhtBuscaScreenState extends State<DhtBuscaScreen> {
   final _pruebaCtrl = TextEditingController();
   List<rust.HalladoItem> _resultados = [];
   List<rust.CapturaItem> _capturas = [];
+  List<String> _logs = [];
   rust.DhtStats? _stats;
   bool _busy = false;
   String _estado = 'motor sin iniciar';
@@ -38,13 +38,16 @@ class _DhtBuscaScreenState extends State<DhtBuscaScreen> {
     _init();
   }
 
+  /// Usa la instancia SINGLETON en segundo plano: al volver a la pantalla
+  /// NO se recrea el motor ni se reinicia el spider (sigue corriendo).
   Future<void> _init() async {
     try {
-      final dir = await getApplicationSupportDirectory();
-      final m = await DhtBusca.crear('${dir.path}/dhtbusca');
+      final m = await DhtBusca.instancia;
       setState(() {
         _motor = m;
-        _estado = 'listo · tocá INICIAR para unirte a la red';
+        _estado = DhtBusca.corriendo
+            ? 'spider corriendo · atrapando hashes de la red'
+            : 'listo · tocá INICIAR para unirte a la red';
       });
       _ticker = Timer.periodic(const Duration(seconds: 3), (_) => _tick());
     } catch (e) {
@@ -75,9 +78,15 @@ class _DhtBuscaScreenState extends State<DhtBuscaScreen> {
       if (q.isNotEmpty) {
         resueltos = await m.buscar(q);
       }
+      // logs en su propio try: si falla, no tumba el resto del tick.
+      List<String> logs = _logs;
+      try {
+        logs = await m.logs();
+      } catch (_) {}
       setState(() {
         _stats = st;
         _capturas = caps;
+        _logs = logs;
         if (resueltos != null) {
           _resultados = resueltos;
         } else if (nuevos.isNotEmpty) {
@@ -334,6 +343,22 @@ class _DhtBuscaScreenState extends State<DhtBuscaScreen> {
                           onPressed: _busy ? null : () => _aRqbit(h)),
                     ]),
                   )),
+            const Divider(height: 18),
+            _seccion('LOG (rqbit / red) · ${_logs.length}'),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: _logs.reversed
+                    .take(25)
+                    .map((l) => Text(l,
+                        style: const TextStyle(
+                            fontSize: 9.5,
+                            fontFamily: 'monospace',
+                            color: Colors.white54)))
+                    .toList(),
+              ),
+            ),
           ]),
         ),
         // ---- probar hash manual

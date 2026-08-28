@@ -14,6 +14,10 @@
 //! local acumulado acá. Mismo enfoque del crawler de referencia.
 
 use anyhow::{anyhow, Context, Result};
+use librqbit::{
+    AddTorrent, AddTorrentOptions, DhtSessionConfig, DhtPersistenceConfig, ListenerMode,
+    ListenerOptions, Session, SessionOptions, SessionPersistenceConfig,
+};
 use mainline::{
     Dht, GetPeersRequestArguments, Id, PutRequest, PutRequestSpecific, RequestFilter,
     RequestTypeSpecific, ServerSettings,
@@ -613,7 +617,32 @@ async fn meta_loop(
 ) {
     let _ = std::fs::create_dir_all(&dir_tmp);
     let mut aviso_sordo = false;
-    let session = match librqbit::Session::new(dir_tmp).await {
+    // MISMA receta que el test de rqbit que SÍ resuelve (api/torrent/session.rs):
+    // Session::new por defecto DEJA EL DHT DESHABILITADO, por eso un magnet
+    // nunca encontraba pares y no se resolvía. Hay que habilitar DHT, dar
+    // persistencia y un listen. Con esto rqbit resuelve info_hashes reales.
+    let mut sopts = SessionOptions::default();
+    sopts.persistence = Some(SessionPersistenceConfig::Json {
+        folder: Some(dir_tmp.clone()),
+    });
+    sopts.dht = Some(DhtSessionConfig {
+        persistence: Some(DhtPersistenceConfig {
+            config_filename: Some(dir_tmp.join("dht.json")),
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+    sopts.listen = Some(ListenerOptions {
+        mode: ListenerMode::TcpAndUtp,
+        listen_addr: "[::]:0".parse::<std::net::SocketAddr>().unwrap(),
+        enable_upnp_port_forwarding: true,
+        utp_opts: None,
+        announce_port: None,
+        ipv4_only: false,
+        max_pending_incoming_handshake_checks: 256,
+    });
+    sopts.fastresume = true;
+    let session = match Session::new_with_opts(dir_tmp.clone(), sopts).await {
         Ok(s) => s,
         Err(e) => {
             logs.push(format!("✗ rqbit Session: {e:?}"));
@@ -660,8 +689,16 @@ async fn meta_loop(
                     }
                     let s = session.clone();
                     tokio::spawn(async move {
-                        let add = librqbit::AddTorrent::from_url(magnet);
-                        let opts = librqbit::AddTorrentOptions::default();
+                        let add = AddTorrent::Url(magnet);
+                        // paused: rqbit AGREGA el torrent a la sesión (así
+                        // with_torrents lo cosecha) pero NO baja el contenido.
+                        // overwrite por si reaparece. Sin DHT no resolvía nada;
+                        // la sesión ahora viene con DHT habilitado (ver arriba).
+                        let opts = AddTorrentOptions {
+                            overwrite: true,
+                            paused: true,
+                            ..Default::default()
+                        };
                         // No nos quedamos esperando para siempre un hash: si no
                         // resuelve en RESOLVE_TIMEOUT, soltamos y seguimos con
                         // el siguiente. El torrent queda en la sesión; si luego
