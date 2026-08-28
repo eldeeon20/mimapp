@@ -56,7 +56,8 @@ class DhtBusca {
       _m.resueltos(limit: limit);
 
   /// Activa/desactiva el sondeo de hashes aleatorios.
-  Future<void> setSondeoAleatorio(bool on) => _m.setSondeoAleatorio(on: on);
+  /// Nota: FRB renombra el parámetro reservado `on` a `on_` en Dart.
+  Future<void> setSondeoAleatorio(bool on) => _m.setSondeoAleatorio(on_: on);
 
   /// true si el sondeo de hashes aleatorios está activo.
   Future<bool> sondeoAleatorio() => _m.sondeoAleatorio();
