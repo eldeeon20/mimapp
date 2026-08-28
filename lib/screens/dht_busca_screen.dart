@@ -92,6 +92,22 @@ class _DhtBuscaScreenState extends State<DhtBuscaScreen> {
 
   Future<void> _iniciar() => _guard(() async {
         setState(() => _estado = 'conectando a bootstrap…');
+        // Abre el puerto 6881 en el router (UPnP/NAT-PMP) antes de arrancar,
+        // para que el DHT (que ahora escucha en 6881) reciba tráfico entrante.
+        if (NatService.instance.enabled) {
+          try {
+            final ext = await NatService.instance.openUdp(
+              localPort: 6881,
+              externalPort: 6881,
+              description: 'mimapp DHT spider',
+            );
+            if (ext != null) {
+              setState(() => _estado = 'puerto UDP 6881 mapeado ($ext) · uniendo a la red…');
+            }
+          } catch (_) {
+            // no fatal: el pasivo puede no funcionar sin reenvío
+          }
+        }
         await _motor!.start();
         setState(() =>
             _estado = 'spider corriendo · atrapando hashes de la red');

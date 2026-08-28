@@ -20,7 +20,7 @@ use mainline::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::net::{SocketAddrV4, ToSocketAddrs};
+use std::net::{Ipv4Addr, SocketAddrV4, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -216,6 +216,9 @@ pub struct DhtBusca {
     dir_cache: PathBuf,
     runtime: Arc<tokio::runtime::Runtime>,
     max_meta: usize,
+    /// Handle vivo del nodo DHT, compartido entre el hilo spider y el loop de
+    /// metadatos (solo lectura vía lock corto; el Dht no es Clone).
+    dht: Arc<Mutex<Option<Dht>>>,
 }
 
 #[derive(Clone, Default, serde::Serialize)]
@@ -251,6 +254,7 @@ impl DhtBusca {
             canal: Mutex::new(None),
             logs: EventLog::new(),
             dir_cache: dir,
+            dht: Arc::new(Mutex::new(None)),
             runtime: Arc::new(
                 tokio::runtime::Builder::new_multi_thread()
                     .worker_threads(2)
@@ -284,6 +288,7 @@ impl DhtBusca {
         let logs_ping = self.logs.clone();
         let stop = self.stop.clone();
         let logs = self.logs.clone();
+        let dht_arc = self.dht.clone();
 
         // diagnóstico inmediato: ¿nuestra red deja salir UDP?
         {
@@ -296,32 +301,67 @@ impl DhtBusca {
                 .ok();
         }
 
-        // El DHT vive en su propio hilo (API sync de mainline).
-        let builder_thread = std::thread::Builder::new().name("dhtbusca-spider".into());
-        let handle = builder_thread.spawn(move || {
-            let filtro: Box<dyn RequestFilter> =
-                Box::new(FiltroAtrapador {
+        // Filtro que atrapa TODOS los info_hashes que cruzan el nodo
+        // (entran por get_peers/announce_peer de otros pares).
+        let filtro = || {
+            Box::new(FiltroAtrapador {
                 tx: tx_filtro.clone(),
                 vistos: vistos_hilo.clone(),
                 pedidos: pedidos_hilo.clone(),
-            });
-            let dht = match Dht::builder()
-                .server_mode()
-                .server_settings(ServerSettings {
-                    filter: filtro,
-                    ..ServerSettings::default()
-                })
-                .bootstrap(BOOTSTRAP)
-                .request_timeout(Duration::from_secs(10))
-                .build()
-            {
-                Ok(d) => d,
-                Err(e) => {
-                    logs.push(format!("✗ DHT no arrancó: {e:?}"));
-                    return;
+            }) as Box<dyn RequestFilter>
+        };
+
+        // Construye el nodo servidor. Fija el puerto 6881 para que el reenvío
+        // UPnP/NAT-PMP apunte al socket real: si escucha en un puerto efímero
+        // el nodo queda sordo a lo entrante y la captura pasiva da 0 aunque la
+        // red salga (ese es el bug de "nodos 0 / nada entra").
+        let dht = match Dht::builder()
+            .server_mode()
+            .server_settings(ServerSettings {
+                filter: filtro(),
+                ..ServerSettings::default()
+            })
+            .bind_address(Ipv4Addr::UNSPECIFIED)
+            .port(6881)
+            .bootstrap(BOOTSTRAP)
+            .request_timeout(Duration::from_secs(10))
+            .build()
+        {
+            Ok(d) => d,
+            Err(e) => {
+                logs.push(format!(
+                    "✗ bind 6881 falló ({e:?}); reintento en puerto efímero (pasivo puede no funcionar)"
+                ));
+                match Dht::builder()
+                    .server_mode()
+                    .server_settings(ServerSettings {
+                        filter: filtro(),
+                        ..ServerSettings::default()
+                    })
+                    .bootstrap(BOOTSTRAP)
+                    .request_timeout(Duration::from_secs(10))
+                    .build()
+                {
+                    Ok(d) => d,
+                    Err(e2) => {
+                        logs.push(format!("✗ DHT no arrancó: {e2:?}"));
+                        return Err(anyhow!("DHT no arrancó: {e2:?}"));
+                    }
                 }
-            };
-            let _ = dht.bootstrapped();
+            }
+        };
+        *dht_arc.lock().unwrap_or_else(|e| e.into_inner()) = Some(dht);
+        let dht_meta = dht_arc.clone();
+
+        // El DHT vive en su propio hilo (API sync de mainline).
+        let builder_thread = std::thread::Builder::new().name("dhtbusca-spider".into());
+        let handle = builder_thread.spawn(move || {
+            let _ = dht_arc
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .as_ref()
+                .unwrap()
+                .bootstrapped();
             logs.push("✓ nodo DHT servidor en red · ayudando a rutear");
 
             let mut vistos: HashSet<[u8; 20]> = HashSet::new();
@@ -333,7 +373,12 @@ impl DhtBusca {
                 if activo {
                     if ultimo_find_node.elapsed() >= Duration::from_secs(30) {
                         for _ in 0..5 {
-                            let _ = dht.find_node(Id::random());
+                            let _ = dht_arc
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .as_ref()
+                                .unwrap()
+                                .find_node(Id::random());
                         }
                         ultimo_find_node = Instant::now();
                     }
@@ -344,7 +389,13 @@ impl DhtBusca {
                     }
                     // como el crawler: si el id aleatorio tiene swarm,
                     // también entra al canal (descubrimiento activo real)
-                    if dht.get_peers(id).next().is_some() {
+                    let iter = dht_arc
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .as_ref()
+                        .unwrap()
+                        .get_peers(id);
+                    if iter.next().is_some() {
                         vistos_hilo.fetch_add(1, Ordering::Relaxed);
                         let _ = tx_filtro.send(hex_id(&id));
                     }
@@ -378,6 +429,7 @@ impl DhtBusca {
                 logs_meta,
                 dir_tmp,
                 max_meta,
+                dht_meta,
             )
             .await;
         });
@@ -501,8 +553,10 @@ async fn meta_loop(
     logs: EventLog,
     dir_tmp: PathBuf,
     max_meta: usize,
+    dht_arc: Arc<Mutex<Option<Dht>>>,
 ) {
     let _ = std::fs::create_dir_all(&dir_tmp);
+    let mut aviso_sordo = false;
     let session = match librqbit::Session::new(dir_tmp).await {
         Ok(s) => s,
         Err(e) => {
@@ -611,15 +665,36 @@ async fn meta_loop(
         }
 
         // 4) stats vivos
-        // el conteo fino de la tabla vive dentro de rqbit; reportamos
-        // pendientes/resueltos que es lo accionable en UI
-        let nodos = 0usize;
+        // nodos_tabla = muestra real de la tabla de ruteo (cercanos a un id
+        // aleatorio). Antes estaba hardcodeado en 0: por eso la UI mostraba
+        // "Kademlia: 0 nodos" siempre.
+        let nodos = dht_arc
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .map(|d| d.get_closest_nodes(Id::random()).len())
+            .unwrap_or(0);
+        let (semillas_ok, pedidos) = {
+            let s = stats.lock().unwrap_or_else(|e| e.into_inner());
+            (s.semillas_ok, s.pedidos)
+        };
         {
             let mut st = stats.lock().unwrap_or_else(|e| e.into_inner());
             st.nodos_tabla = nodos;
             st.resueltos = indice.lock().unwrap_or_else(|e| e.into_inner()).hallados.len();
             st.pendientes = pendientes.len();
             st.capturados = vistos_meta.load(Ordering::Relaxed);
+        }
+        // Diagnóstico único: UDP sale (semillas responden) pero nada entra =>
+        // falta reenviar el 6881 en el router para la captura pasiva.
+        if !aviso_sordo && semillas_ok > 0 && pedidos == 0 {
+            aviso_sordo = true;
+            logs.push(
+                "⚠ UDP sale (semillas responden) pero 0 paquetes entran: el nodo \
+                 necesita el puerto 6881 reenviado (UPnP/NAT-PMP) y el DHT debe \
+                 escuchar en 6881 para captura pasiva."
+                    .to_string(),
+            );
         }
 
         tokio::time::sleep(Duration::from_secs(2)).await;
