@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
+import 'browser_cookies.dart';
 import 'browser_tab.dart';
 
 /// Gestor de pestañas del browser: lista, activa, alta/baja con tope por
@@ -28,6 +29,17 @@ class BrowserTabs extends ChangeNotifier {
   bool jsEnabled = true;
   int _idSeq = 0;
 
+  // Ajustes del navegador (preferencias vivas, aplicadas a cada WebView).
+  bool thirdPartyCookies = true;
+  bool sharedCookies = false;
+  bool blockNetworkImage = false;
+  bool geolocation = false; // false = "sin geolocalizar"
+  bool safeBrowsing = true; // "modo seguro"
+  bool incognito = false;
+  bool proxyEnabled = false;
+  String proxyHostPort = '';
+  String proxyScheme = 'PROXY';
+
   final ValueNotifier<bool> _open = ValueNotifier(false);
   bool get isOpen => _open.value;
   void openBrowser() {
@@ -49,10 +61,10 @@ class BrowserTabs extends ChangeNotifier {
   int _nextId() => _idSeq++;
 
   /// Registra el controlador que [BrowserWebview] crea para esa pestaña;
-  /// aplica de una vez el estado JS global actual.
+  /// aplica de una vez todos los ajustes actuales.
   void registerController(int tabId, InAppWebViewController c) {
     _controllers[tabId] = c;
-    setJs(jsEnabled);
+    applyTo(c);
   }
 
   void forgetController(int tabId) => _controllers.remove(tabId);
@@ -133,16 +145,104 @@ class BrowserTabs extends ChangeNotifier {
     return true;
   }
 
+  /// Configuración completa que se aplica a cada WebView (nuevos y vivos).
+  InAppWebViewSettings currentWebViewSettings() => InAppWebViewSettings(
+        javaScriptEnabled: jsEnabled,
+        thirdPartyCookiesEnabled: thirdPartyCookies,
+        sharedCookiesEnabled: sharedCookies,
+        blockNetworkImage: blockNetworkImage,
+        geolocationEnabled: geolocation,
+        safeBrowsingEnabled: safeBrowsing,
+        incognito: incognito,
+        transparentBackground: true,
+        supportZoom: true,
+      );
+
+  /// Aplica todos los ajustes actuales a un controlador concreto.
+  Future<void> applyTo(InAppWebViewController c) async {
+    try {
+      await c.setSettings(settings: currentWebViewSettings());
+    } catch (_) {}
+  }
+
+  Future<void> _applyAll() async {
+    for (final c in _controllers.values) {
+      await applyTo(c);
+    }
+  }
+
   /// Cambia el JavaScript global y lo aplica en vivo a cada WebView vivo.
   Future<void> setJs(bool enabled) async {
     jsEnabled = enabled;
-    for (final c in _controllers.values) {
-      try {
-        await c.setSettings(
-            settings: InAppWebViewSettings(javaScriptEnabled: enabled));
-      } catch (_) {}
-    }
+    await _applyAll();
     notifyListeners();
+  }
+
+  Future<void> setThirdPartyCookies(bool v) async {
+    thirdPartyCookies = v;
+    notifyListeners();
+    await _applyAll();
+  }
+
+  Future<void> setSharedCookies(bool v) async {
+    sharedCookies = v;
+    notifyListeners();
+    await _applyAll();
+  }
+
+  Future<void> setBlockNetworkImage(bool v) async {
+    blockNetworkImage = v;
+    notifyListeners();
+    await _applyAll();
+  }
+
+  Future<void> setGeolocation(bool v) async {
+    geolocation = v;
+    notifyListeners();
+    await _applyAll();
+  }
+
+  Future<void> setSafeBrowsing(bool v) async {
+    safeBrowsing = v;
+    notifyListeners();
+    await _applyAll();
+  }
+
+  Future<void> setIncognito(bool v) async {
+    incognito = v;
+    notifyListeners();
+    // Las WebViews ya vivas no cambian incógnito en caliente: limpiamos su
+    // rastro y las nuevas respetan el modo vía initialSettings.
+    if (v) {
+      try {
+        await InAppWebViewController.clearAllCache();
+      } catch (_) {}
+      await CookieStore.instance.clearAll();
+    }
+  }
+
+  /// Aplica (o quita) un proxy genérico a TODOS los WebViews de la app.
+  /// [scheme] es 'PROXY' (HTTP) o 'SOCKS'.
+  Future<bool> setProxy(bool enabled, String hostPort, String scheme) async {
+    proxyEnabled = enabled;
+    proxyHostPort = hostPort.trim();
+    proxyScheme = scheme;
+    notifyListeners();
+    try {
+      final pc = ProxyController.instance();
+      if (enabled && proxyHostPort.isNotEmpty) {
+        await pc.setProxyOverride(
+          settings: ProxySettings(
+            proxyRules: [ProxyRule(url: '$scheme $proxyHostPort')],
+          ),
+        );
+      } else {
+        await pc.clearProxyOverride();
+      }
+      return true;
+    } catch (e) {
+      return false;
+    }
   }
 
   @override
