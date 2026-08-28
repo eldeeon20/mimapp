@@ -115,7 +115,9 @@ class BrowserTabs extends ChangeNotifier {
     await controllerOf(tabId)?.loadUrl(urlRequest: URLRequest(url: WebUri(u)));
   }
 
-  Future<void> reload(int tabId) => controllerOf(tabId)?.reload();
+  Future<void> reload(int tabId) async {
+    await controllerOf(tabId)?.reload();
+  }
 
   Future<bool> goBack(int tabId) async {
     final c = controllerOf(tabId);

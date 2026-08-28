@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
 import 'browser_tab.dart';
 import 'browser_tabs.dart';
