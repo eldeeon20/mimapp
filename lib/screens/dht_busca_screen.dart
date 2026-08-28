@@ -27,6 +27,7 @@ class _DhtBuscaScreenState extends State<DhtBuscaScreen> {
   List<rust.HalladoItem> _resultados = [];
   List<rust.CapturaItem> _capturas = [];
   List<String> _logs = [];
+  bool _sondeoAleatorio = true;
   rust.DhtStats? _stats;
   bool _busy = false;
   String _estado = 'motor sin iniciar';
@@ -43,8 +44,13 @@ class _DhtBuscaScreenState extends State<DhtBuscaScreen> {
   Future<void> _init() async {
     try {
       final m = await DhtBusca.instancia;
+      bool sondeo = true;
+      try {
+        sondeo = await m.sondeoAleatorio();
+      } catch (_) {}
       setState(() {
         _motor = m;
+        _sondeoAleatorio = sondeo;
         _estado = DhtBusca.corriendo
             ? 'spider corriendo · atrapando hashes de la red'
             : 'listo · tocá INICIAR para unirte a la red';
@@ -68,16 +74,18 @@ class _DhtBuscaScreenState extends State<DhtBuscaScreen> {
     try {
       final st = await m.stats();
       final q = _buscaCtrl.text.trim();
-      final nuevos = await m.pollNuevos();
+      // Drena la cola de novedades en Rust (evita que crezca sin límite).
+      await m.pollNuevos();
       await m.guardar();
       // La lista de capturas se filtra en vivo por la búsqueda (hash o nombre).
       final caps = q.isEmpty
           ? await m.capturas(limit: 400)
           : await m.capturasFiltradas(q, limit: 400);
-      List<rust.HalladoItem>? resueltos;
-      if (q.isNotEmpty) {
-        resueltos = await m.buscar(q);
-      }
+      // RESUELTOS: si hay búsqueda, filtra por nombre; si no, el índice
+      // completo (incluidos los metadatos recargados del JSON al abrir).
+      final resueltos = q.isEmpty
+          ? await m.resueltos(limit: 300)
+          : await m.buscar(q);
       // logs en su propio try: si falla, no tumba el resto del tick.
       List<String> logs = _logs;
       try {
@@ -87,11 +95,7 @@ class _DhtBuscaScreenState extends State<DhtBuscaScreen> {
         _stats = st;
         _capturas = caps;
         _logs = logs;
-        if (resueltos != null) {
-          _resultados = resueltos;
-        } else if (nuevos.isNotEmpty) {
-          _resultados = [...nuevos, ..._resultados].take(200).toList();
-        }
+        _resultados = resueltos;
       });
     } catch (_) {}
   }
@@ -277,6 +281,32 @@ class _DhtBuscaScreenState extends State<DhtBuscaScreen> {
             const SizedBox(height: 2),
             const Text('modo nodo servidor · ayudás a rutear la red',
                 style: TextStyle(fontSize: 10, color: Colors.white38)),
+            const SizedBox(height: 6),
+            Row(children: [
+              Switch(
+                  value: _sondeoAleatorio,
+                  onChanged: _busy
+                      ? null
+                      : (v) async {
+                          setState(() => _sondeoAleatorio = v);
+                          try {
+                            await _motor!.setSondeoAleatorio(v);
+                          } catch (e) {
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                                  content: Text('ERROR: $e',
+                                      style: const TextStyle(
+                                          color: Colors.redAccent)),
+                                  backgroundColor: Colors.black));
+                            }
+                          }
+                        }),
+              const Expanded(
+                  child: Text(
+                      'Sondeo aleatorio (hashes): genera hashes al azar para '
+                      'crecer la tabla. Apagalo para indexar solo torrents reales.',
+                      style: TextStyle(fontSize: 10, color: Colors.white54))),
+            ]),
             const SizedBox(height: 8),
             FilledButton.icon(
                 onPressed: _abrirPuertos,

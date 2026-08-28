@@ -51,6 +51,16 @@ class DhtBusca {
   Future<rust.DhtStats> stats() => _m.stats();
   Future<void> probar(String texto) => _m.probar(texto: texto);
 
+  /// Índice completo de metadatos resueltos (incluidos los del JSON al abrir).
+  Future<List<rust.HalladoItem>> resueltos({int limit = 300}) =>
+      _m.resueltos(limit: limit);
+
+  /// Activa/desactiva el sondeo de hashes aleatorios.
+  Future<void> setSondeoAleatorio(bool on) => _m.setSondeoAleatorio(on: on);
+
+  /// true si el sondeo de hashes aleatorios está activo.
+  Future<bool> sondeoAleatorio() => _m.sondeoAleatorio();
+
   /// Base de capturas en vivo (cada hash interceptado, con estado).
   Future<List<rust.CapturaItem>> capturas({int limit = 400}) =>
       _m.capturas(limit: limit);

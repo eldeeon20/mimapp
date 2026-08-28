@@ -32,6 +32,7 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use tokio::sync::Semaphore;
 
 use crate::gt::eventlog::EventLog;
 
@@ -46,6 +47,10 @@ const RESOLVE_TIMEOUT: Duration = Duration::from_secs(60);
 const TICK_ACTIVO: Duration = Duration::from_millis(100);
 /// Tope duro del índice en RAM (los más viejos se recortan al guardar).
 const TOPE_INDICE: usize = 20_000;
+/// Tope de resoluciones de metadatos concurrentes hacia rqbit. Acota cuántos
+/// `add_torrent` corren a la vez para no saturar la red/DHT ni hacer un
+/// cuello de botella cuando llegan muchos hashes de golpe (30-50).
+const MAX_CONCURRENT_META: usize = 8;
 
 const BOOTSTRAP: &[&str] = &[
     "router.bittorrent.com:6881",
@@ -243,6 +248,10 @@ pub struct DhtBusca {
     /// Base de capturas en vivo (cada hash interceptado, con estado de
     /// resolución). Se expone a la UI como la lista de "hashes".
     capturas: Arc<Mutex<VecDeque<Captura>>>,
+    /// true = el spider hace sondeo de hashes aleatorios (get_peers sobre ids
+    /// random). false = solo captura pasiva (lo que otros buscan de verdad).
+    /// El find_node de mantenimiento de tabla NO se desactiva con esto.
+    sondear_aleatorio: Arc<AtomicBool>,
 }
 
 #[derive(Clone, Default, serde::Serialize)]
@@ -280,6 +289,7 @@ impl DhtBusca {
             dir_cache: dir,
             dht: Arc::new(Mutex::new(None)),
             capturas: Arc::new(Mutex::new(VecDeque::new())),
+            sondear_aleatorio: Arc::new(AtomicBool::new(true)),
             runtime: Arc::new(
                 tokio::runtime::Builder::new_multi_thread()
                     .worker_threads(2)
@@ -314,6 +324,7 @@ impl DhtBusca {
         let stop = self.stop.clone();
         let logs = self.logs.clone();
         let dht_arc = self.dht.clone();
+        let sondear = self.sondear_aleatorio.clone();
 
         // diagnóstico inmediato: ¿nuestra red deja salir UDP?
         {
@@ -407,22 +418,28 @@ impl DhtBusca {
                         }
                         ultimo_find_node = Instant::now();
                     }
-                    let id = Id::random();
-                    vistos.insert(*id.as_bytes());
-                    if vistos.len() > 50_000 {
-                        vistos.clear();
-                    }
-                    // como el crawler: si el id aleatorio tiene swarm,
-                    // también entra al canal (descubrimiento activo real)
-                    let mut iter = dht_arc
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .as_ref()
-                        .unwrap()
-                        .get_peers(id);
-                    if iter.next().is_some() {
-                        vistos_hilo.fetch_add(1, Ordering::Relaxed);
-                        let _ = tx_filtro.send(hex_id(&id));
+                    // Sondeo de hashes aleatorios: se puede desactivar desde la UI
+                    // (botón "Sondeo aleatorio"). Mantiene find_node arriba para
+                    // que la tabla Kademlia siga creciendo, pero deja de generar
+                    // hashes al azar (solo captura pasiva = torrents reales).
+                    if sondear.load(Ordering::SeqCst) {
+                        let id = Id::random();
+                        vistos.insert(*id.as_bytes());
+                        if vistos.len() > 50_000 {
+                            vistos.clear();
+                        }
+                        // como el crawler: si el id aleatorio tiene swarm,
+                        // también entra al canal (descubrimiento activo real)
+                        let mut iter = dht_arc
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .as_ref()
+                            .unwrap()
+                            .get_peers(id);
+                        if iter.next().is_some() {
+                            vistos_hilo.fetch_add(1, Ordering::Relaxed);
+                            let _ = tx_filtro.send(hex_id(&id));
+                        }
                     }
                     std::thread::sleep(TICK_ACTIVO);
                 } else {
@@ -506,6 +523,23 @@ impl DhtBusca {
         hits.sort_by(|a, b| b.fecha_ms.cmp(&a.fecha_ms));
         hits.truncate(200);
         hits
+    }
+
+    /// Índice completo de metadatos resueltos (los persistidos en
+    /// dhtbusca.json y recargados al abrir). `limit<=0` = todos. Ordenado
+    /// del más nuevo al más viejo. Sirve para poblar la lista RESUELTOS al
+    /// iniciar, incluidos los que venían del JSON.
+    pub fn resueltos(&self, limit: i32) -> Vec<Hallado> {
+        let est = self.indice.lock().unwrap_or_else(|e| e.into_inner());
+        let take = if limit <= 0 {
+            est.hallados.len()
+        } else {
+            limit as usize
+        };
+        let mut v: Vec<Hallado> = est.hallados.iter().cloned().collect();
+        v.sort_by(|a, b| b.fecha_ms.cmp(&a.fecha_ms));
+        v.truncate(take);
+        v
     }
 
     /// Base de capturas en vivo (cada hash interceptado, con estado de
@@ -651,6 +685,12 @@ async fn meta_loop(
         }
     };
 
+    // Semáforo: a lo sumo MAX_CONCURRENT_META resoluciones de metadatos
+    // corriendo a la vez. Así si llegan 30-50 hashes de golpe no saturan la
+    // red/DHT ni se forma un cuello de botella: se encolan y se resuelven de
+    // a MAX_CONCURRENT_META, cada una con su propio RESOLVE_TIMEOUT.
+    let sem = Arc::new(Semaphore::new(MAX_CONCURRENT_META));
+
     let mut pendientes: HashMap<String, Instant> = HashMap::new();
 
     while !stop.load(Ordering::SeqCst) {
@@ -689,7 +729,13 @@ async fn meta_loop(
                         }
                     }
                     let s = session.clone();
+                    let sem = sem.clone();
                     tokio::spawn(async move {
+                        // Espera un slot del semáforo antes de tocar rqbit.
+                        let _permit = match sem.acquire().await {
+                            Ok(p) => p,
+                            Err(_) => return,
+                        };
                         let add = AddTorrent::Url(magnet.into());
                         // paused: rqbit AGREGA el torrent a la sesión (así
                         // with_torrents lo cosecha) pero NO baja el contenido.
