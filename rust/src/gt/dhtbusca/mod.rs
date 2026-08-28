@@ -15,9 +15,10 @@
 
 use anyhow::{anyhow, Context, Result};
 use librqbit::{
-    AddTorrent, AddTorrentOptions, DhtSessionConfig, DhtPersistenceConfig, ListenerMode,
-    ListenerOptions, Session, SessionOptions, SessionPersistenceConfig,
+    AddTorrent, AddTorrentOptions, DhtSessionConfig, ListenerMode, ListenerOptions, Session,
+    SessionOptions, SessionPersistenceConfig,
 };
+use librqbit::dht::DhtPersistenceConfig;
 use mainline::{
     Dht, GetPeersRequestArguments, Id, PutRequest, PutRequestSpecific, RequestFilter,
     RequestTypeSpecific, ServerSettings,
@@ -689,7 +690,7 @@ async fn meta_loop(
                     }
                     let s = session.clone();
                     tokio::spawn(async move {
-                        let add = AddTorrent::Url(magnet);
+                        let add = AddTorrent::Url(magnet.into());
                         // paused: rqbit AGREGA el torrent a la sesión (así
                         // with_torrents lo cosecha) pero NO baja el contenido.
                         // overwrite por si reaparece. Sin DHT no resolvía nada;
