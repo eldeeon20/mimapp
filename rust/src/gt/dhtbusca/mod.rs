@@ -250,8 +250,8 @@ pub struct DhtBusca {
     capturas: Arc<Mutex<VecDeque<Captura>>>,
     /// true = el spider hace sondeo de hashes aleatorios (get_peers sobre ids
     /// random). false = solo captura pasiva (lo que otros buscan de verdad).
-    /// El find_node de mantenimiento de tabla NO se desactiva con esto.
-    sondear_aleatorio: Arc<AtomicBool>,
+    /// El find_node de mantenimiento de tabla Kademlia NO se desactiva con esto.
+    pub(crate) sondear_aleatorio: Arc<AtomicBool>,
 }
 
 #[derive(Clone, Default, serde::Serialize)]

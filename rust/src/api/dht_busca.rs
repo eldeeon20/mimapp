@@ -153,7 +153,7 @@ impl MotorDht {
     /// Índice completo de metadatos resueltos (incluidos los recargados del
     /// JSON al abrir). Puebla la lista RESUELTOS al iniciar.
     pub async fn resueltos(&self, limit: i32) -> Result<Vec<HalladoItem>, String> {
-        self.con(|m| Ok(m.resueltos(limit).into_iter().map(mapear).collect()))
+        self.con(|m| Ok(m.resueltos(limit).into_iter().map(mapear).collect()))?
     }
 
     /// Activa/desactiva el sondeo de hashes aleatorios (get_peers sobre ids
@@ -162,12 +162,12 @@ impl MotorDht {
         self.con_mut(|m| {
             m.sondear_aleatorio.store(on, Ordering::SeqCst);
             Ok(())
-        })
+        })?
     }
 
     /// Estado actual del sondeo de hashes aleatorios.
     pub async fn sondeo_aleatorio(&self) -> Result<bool, String> {
-        self.con(|m| Ok(m.sondear_aleatorio.load(Ordering::SeqCst)))
+        self.con(|m| Ok(m.sondear_aleatorio.load(Ordering::SeqCst)))?
     }
 
     /// Guarda índice sin parar el spider.
