@@ -5,7 +5,6 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
 import '../services/gpu/gpu_shader_lab.dart';
-import 'lua_sandbox.dart';
 
 /// Herramientas de agente (estilo FilosoIA tools/) con permisos.
 /// El manager chequea el permiso ANTES de ejecutar; acá va la lógica pura.
@@ -17,7 +16,7 @@ extension AgentPermissionX on AgentPermission {
         AgentPermission.readFiles => 'Leer archivos',
         AgentPermission.writeFiles => 'Escribir archivos',
         AgentPermission.webAccess => 'Acceso a web',
-        AgentPermission.controlGui => 'Lua / GUI del motor',
+        AgentPermission.controlGui => 'Control de GUI (sin motor)',
         AgentPermission.gpuRun => 'Ejecutar shaders GPU',
       };
 }
@@ -99,7 +98,7 @@ final List<ToolDef> AGENT_TOOLS = [
   ),
   ToolDef(
     'parse_local_doc',
-    'Abre un documento local (.md .txt .json .lua .html) y devuelve su texto.',
+    'Abre un documento local (.md .txt .json .html) y devuelve su texto.',
     {
       'type': 'object',
       'properties': {
@@ -108,20 +107,6 @@ final List<ToolDef> AGENT_TOOLS = [
       'required': ['path'],
     },
     AgentPermission.readFiles,
-  ),
-  ToolDef(
-    'lua_gui',
-    'Ejecuta código Lua del motor pr_app que construye una página con la API '
-        "gui_* (gui_heading, gui_text, gui_button, gui_input...). "
-        'El usuario luego puede VER esa GUI generada.',
-    {
-      'type': 'object',
-      'properties': {
-        'code': {'type': 'string', 'description': 'script Lua completo'}
-      },
-      'required': ['code'],
-    },
-    AgentPermission.controlGui,
   ),
   ToolDef(
     'gpu_run',
@@ -221,15 +206,6 @@ Future<String> executeTool(String name, Map<String, dynamic> args) async {
         final text =
             ct.contains('html') ? stripHtml(res.body) : res.body;
         return _clip(text, 15000);
-
-      case 'lua_gui':
-        final page = LuaSandbox.instance.run(args['code'] ?? '');
-        if (page == null) {
-          return 'ERROR: el script Lua no compiló o no definió `page`';
-        }
-        LuaSandbox.instance.markDirty();
-        return 'OK GUI generada: "${page.title}" con ${page.body.length} widgets. '
-            'Avisale al usuario que toque "Ver GUI" en tu tarjeta.';
 
       case 'gpu_run':
         final lab = GpuShaderLab();

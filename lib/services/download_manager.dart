@@ -6,7 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
-import '../../services/notification_service.dart';
+import 'notification_service.dart';
 
 /// Estado de una descarga.
 enum DlStatus { activa, ok, error, cancelada }
@@ -29,9 +29,6 @@ class DownloadTask {
 
 /// Descargas HTTP reales en Dart puro: streaming a disco con progreso
 /// por bytes, notificación del sistema con MB reales y cancelación.
-///
-/// Lua solo engancha con la clase (ver lua_downloads.dart): dl_start,
-/// dl_cancel, dl_tasks; el % vivo llega vía engine_set("dl_<id>", "42%").
 class DownloadManager with ChangeNotifier {
   DownloadManager._();
 

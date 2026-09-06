@@ -7,6 +7,8 @@ import 'package:media_kit/media_kit.dart';
 import '../services/settings.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
+import 'media_library.dart';
+
 /// Reproductor de audio/video con playlist y notificación del sistema
 /// (botones play/pausa/anterior/siguiente/stop en la notificación).
 ///
@@ -44,6 +46,22 @@ class MediaPlayer extends BaseAudioHandler with SeekHandler {
   String get current => _current;
   int get queueLength => _queue.length;
   int get queueIndex => _queueIndex;
+
+  /// Biblioteca (historial + favoritos) del reproductor.
+  MediaLibraryStore get library => MediaLibraryStore.instance;
+
+  /// ¿El archivo actual está en favoritos?
+  bool get isCurrentFavorite =>
+      _current.isNotEmpty && library.isFavorite(_current);
+
+  /// Marca/desmarca el archivo actual como favorito.
+  Future<bool> toggleCurrentFavorite() async {
+    if (_current.isEmpty) return false;
+    final fav =
+        await library.toggleFavorite(_current, title: _titleOf(_current));
+    onChanged?.call();
+    return fav;
+  }
 
   Stream<Duration> get positionStream => _player.stream.position;
   Stream<Duration> get durationStream => _player.stream.duration;
@@ -152,7 +170,7 @@ class MediaPlayer extends BaseAudioHandler with SeekHandler {
   // Reproducción
   // ===========================================================================
 
-  /// Reproduce un archivo por ruta.
+  /// Reproduce un archivo por ruta (y lo registra en el historial).
   Future<void> openPath(String path) async {
     try {
       await _player.open(Media(path));
@@ -160,6 +178,8 @@ class MediaPlayer extends BaseAudioHandler with SeekHandler {
       _status = 'Reproduciendo: ${_titleOf(path)}';
       mediaItem.add(_mediaItemFor(path));
       _broadcastState(true);
+      // Historial: no bloquea la reproducción si falla el disco.
+      unawaited(library.addHistory(path).then((_) => onChanged?.call()));
     } catch (e) {
       _status = 'Error al reproducir: $e';
     }

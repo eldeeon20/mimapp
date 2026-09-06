@@ -13,12 +13,13 @@ Reglas generales:
 
 ## Agente A (ox-alpha)
 
-### 1. LUA HARDENING (lib/lua/lua_controller.dart)
-- Sacar next() del conteo de children (contar con getI secuencial):
-  elimina para siempre la clase de error "table expected for
-  iteration" (crash "nodo 9 de page.body").
-- Errores con contexto completo: nodo N (tipo real) · children[i] ·
-  causa.
+### 1. LUA ELIMINADO (sin motor Lua en el proyecto)
+- Se borró `lib/lua/`, `lib/gui/`, `lib/widgets/gui_*`, `lib/services/history_store.dart`,
+  `lib/agents/lua_sandbox.dart`, `assets/pages/` y la dep `lua_dardo_plus`.
+- `lib/services/download_manager.dart` se reubicó desde `lib/lua/downloads/`
+  (Dart puro, lo usa `downloads_test_screen.dart`).
+- NO reintroducir Lua: la tool de agente `lua_gui` y el permiso asociado
+  quedaron desactivados.
 
 ### 2. NOSTR BUSCA (módulo nuevo independiente)
 - rust/src/gt/nostrbusca.rs: cliente efímero read-only propio (no
@@ -31,7 +32,7 @@ Reglas generales:
   PerfilItem{npub,name,display_name,about,picture,nip05}, patrón
   ok/error del proyecto.
 - lib/services/nostr_busca.dart: clase NostrBusca reutilizable desde
-  cualquier pantalla o página Lua caliente.
+  cualquier pantalla.
 - lib/screens/nostr_busca_screen.dart: un campo de texto que detecta
   npub/nprofile → B1 directo, si no → B2; lista de resultados → ficha;
   RelayEditor con defaults damus/nos.social/nostr.band/

@@ -37,7 +37,6 @@ dependencies:
   rust_lib_pr_app:
     path: rust_builder
   flutter_rust_bridge: 2.12.0
-  lua_dardo_plus: ^0.3.0
   http: ^1.2.2
   path_provider: ^2.1.4
   media_kit: ^1.2.6
@@ -81,9 +80,6 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
-
-  assets:
-    - assets/pages/
 
   # To add assets to your application, add an assets section, like this:
   # assets:

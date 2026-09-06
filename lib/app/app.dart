@@ -126,8 +126,8 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _openWeb(BuildContext context) {
-    // Lua quedó suelto (código intacto en lib/lua/, sin invocar): el botón
-    // Web ahora abre el browser inappwebview como overlay global.
+    // El botón Web abre el browser inappwebview como overlay global
+    // (el motor Lua fue eliminado del proyecto).
     BrowserTabs.instance.openBrowser();
   }
 

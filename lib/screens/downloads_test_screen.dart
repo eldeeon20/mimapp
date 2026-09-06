@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../lua/downloads/download_manager.dart';
+import '../services/download_manager.dart';
 
 /// Test del menú central: pegar link de descarga y probar el pipeline real
 /// (streaming Dart puro + notificación con MB en vivo + cancelar).

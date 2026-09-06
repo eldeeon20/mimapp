@@ -9,7 +9,6 @@ import 'package:path_provider/path_provider.dart';
 import '../services/crypto_vault.dart';
 import '../services/settings.dart';
 import 'key_vault.dart';
-import 'lua_sandbox.dart';
 import 'provider_registry.dart';
 import 'tools.dart';
 
@@ -63,9 +62,6 @@ class Agent {
 
   /// Chat individual del agente (se envía como historial).
   final List<AgentMsg> log = [];
-
-  /// ¿El agente generó una página GUI con lua_gui?
-  bool get hasGui => LuaSandbox.instance.lastPage != null;
 
   Agent({
     required this.id,
