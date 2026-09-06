@@ -127,7 +127,7 @@ class _TorTestScreenState extends State<TorTestScreen> {
                         : Colors.orangeAccent)),
             Text('build $kSha',
                 style: const TextStyle(fontSize: 8, color: Colors.white24)),
-            if (on && s.port != null)
+            if (on)
               SelectableText('salida: HTTP directo por arti (sin puente local)',
                   style:
                       const TextStyle(fontSize: 10.5, fontFamily: 'monospace')),

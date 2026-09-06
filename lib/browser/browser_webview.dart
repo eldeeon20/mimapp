@@ -31,11 +31,7 @@ class _BrowserWebviewState extends State<BrowserWebview> {
         Expanded(
           child: InAppWebView(
             initialUrlRequest: URLRequest(url: WebUri(widget.tab.url)),
-            initialSettings: InAppWebViewSettings(
-              javaScriptEnabled: widget.tabs.jsEnabled,
-              transparentBackground: true,
-              supportZoom: true,
-            ),
+            initialSettings: widget.tabs.currentWebViewSettings(),
             onWebViewCreated: (c) =>
                 widget.tabs.registerController(widget.tab.id, c),
             onProgressChanged: (_, p) {

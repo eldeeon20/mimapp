@@ -2,6 +2,7 @@
 //! ciclo start/poll/buscar/stop y patrón ok/error del proyecto.
 
 use crate::gt::dhtbusca::{DhtBusca, Hallado as HalladoInt, Stats as StatsInt};
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 
 /// Torrent hallado por el spider, serializable a Dart.
@@ -13,6 +14,19 @@ pub struct HalladoItem {
     pub tamano: u64,
     pub archivos: usize,
     pub fecha_ms: i64,
+    pub creation_date: String,
+    pub comment: String,
+}
+
+/// Captura en vivo del spider: un info_hash interceptado, con estado de
+/// resolución. La UI lo muestra en la lista de "hashes" (aparte de los
+/// metadatos ya resueltos).
+#[flutter_rust_bridge::frb]
+#[derive(Clone)]
+pub struct CapturaItem {
+    pub info_hash: String,
+    pub nombre: String,
+    pub resuelto: bool,
 }
 
 #[flutter_rust_bridge::frb]
@@ -35,6 +49,8 @@ fn mapear(h: HalladoInt) -> HalladoItem {
         tamano: h.tamano,
         archivos: h.archivos,
         fecha_ms: h.fecha_ms,
+        creation_date: h.creation_date,
+        comment: h.comment,
     }
 }
 
@@ -80,13 +96,46 @@ impl MotorDht {
         self.con(|m| Ok(m.buscar(&texto).into_iter().map(mapear).collect()))?
     }
 
+    /// Base de capturas en vivo: cada hash interceptado por el spider, con
+    /// estado de resolución (resuelto = ya tiene metadato).
+    pub async fn capturas(&self, limit: i32) -> Result<Vec<CapturaItem>, String> {
+        self.con(|m| {
+            Ok(m.capturas(limit)
+                .into_iter()
+                .map(|c| CapturaItem {
+                    info_hash: c.hash,
+                    nombre: c.nombre,
+                    resuelto: c.resuelto,
+                })
+                .collect())
+        })?
+    }
+
+    /// Filtra la base de capturas por hash o nombre (substring, parcial).
+    pub async fn capturas_filtradas(
+        &self,
+        texto: String,
+        limit: i32,
+    ) -> Result<Vec<CapturaItem>, String> {
+        self.con(|m| {
+            Ok(m.capturas_filtradas(&texto, limit)
+                .into_iter()
+                .map(|c| CapturaItem {
+                    info_hash: c.hash,
+                    nombre: c.nombre,
+                    resuelto: c.resuelto,
+                })
+                .collect())
+        })?
+    }
+
     pub async fn stats(&self) -> Result<DhtStats, String> {
         self.con(|m| {
             let s: StatsInt = m.stats();
             Ok(DhtStats {
                 nodos_tabla: s.nodos_tabla,
-                semillasOk: s.semillas_ok,
-                semillasTotal: s.semillas_total,
+                semillas_ok: s.semillas_ok,
+                semillas_total: s.semillas_total,
                 capturados: s.capturados,
                 pedidos: s.pedidos,
                 resueltos: s.resueltos,
@@ -99,6 +148,26 @@ impl MotorDht {
     /// Prueba manual: magnet completo o info_hash hex de 40.
     pub async fn probar(&self, texto: String) -> Result<(), String> {
         self.con(|m| m.probar(&texto).map_err(|e| format!("probar: {e:#}")))?
+    }
+
+    /// Índice completo de metadatos resueltos (incluidos los recargados del
+    /// JSON al abrir). Puebla la lista RESUELTOS al iniciar.
+    pub async fn resueltos(&self, limit: i32) -> Result<Vec<HalladoItem>, String> {
+        self.con(|m| Ok(m.resueltos(limit).into_iter().map(mapear).collect()))?
+    }
+
+    /// Activa/desactiva el sondeo de hashes aleatorios (get_peers sobre ids
+    /// random). El find_node de mantenimiento de tabla Kademlia sigue activo.
+    pub async fn set_sondeo_aleatorio(&self, on: bool) -> Result<(), String> {
+        self.con_mut(|m| {
+            m.sondear_aleatorio.store(on, Ordering::SeqCst);
+            Ok(())
+        })?
+    }
+
+    /// Estado actual del sondeo de hashes aleatorios.
+    pub async fn sondeo_aleatorio(&self) -> Result<bool, String> {
+        self.con(|m| Ok(m.sondear_aleatorio.load(Ordering::SeqCst)))?
     }
 
     /// Guarda índice sin parar el spider.

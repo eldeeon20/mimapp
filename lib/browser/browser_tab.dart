@@ -16,8 +16,10 @@ class BrowserTab implements BrowserTabLike {
     this.url = 'https://duckduckgo.com/',
   });
 
+  @override
   final int id;
   String title;
+  @override
   String url;
 
   InAppWebViewController? controller;

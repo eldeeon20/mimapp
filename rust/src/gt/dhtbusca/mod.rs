@@ -14,28 +14,43 @@
 //! local acumulado acá. Mismo enfoque del crawler de referencia.
 
 use anyhow::{anyhow, Context, Result};
+use librqbit::{
+    AddTorrent, AddTorrentOptions, DhtSessionConfig, ListenerMode, ListenerOptions, Session,
+    SessionOptions, SessionPersistenceConfig,
+};
+use librqbit::dht::DhtPersistenceConfig;
 use mainline::{
     Dht, GetPeersRequestArguments, Id, PutRequest, PutRequestSpecific, RequestFilter,
     RequestTypeSpecific, ServerSettings,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
-use std::net::{SocketAddrV4, ToSocketAddrs};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::net::{Ipv4Addr, SocketAddrV4, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use tokio::sync::Semaphore;
 
 use crate::gt::eventlog::EventLog;
 
-/// Hashes esperando metadatos se rinden a los 5 minutos.
-const PENDING_TIMEOUT: Duration = Duration::from_secs(300);
+/// Hashes esperando metadatos se rinden pasado este tiempo (se libera el
+/// slot para nuevos; el torrent queda en la sesión y se indexa si resuelve).
+const PENDING_TIMEOUT: Duration = Duration::from_secs(180);
+/// Tope de espera por hash al pedir metadatos: si no resuelve en este
+/// tiempo, se suelta y sigue con el siguiente. Nunca nos quedamos colgados
+/// en un solo hash cuando hay varios en cola.
+const RESOLVE_TIMEOUT: Duration = Duration::from_secs(60);
 /// Ritmo activo moderado (~10 consultas/seg) para no saturar la red.
 const TICK_ACTIVO: Duration = Duration::from_millis(100);
 /// Tope duro del índice en RAM (los más viejos se recortan al guardar).
 const TOPE_INDICE: usize = 20_000;
+/// Tope de resoluciones de metadatos concurrentes hacia rqbit. Acota cuántos
+/// `add_torrent` corren a la vez para no saturar la red/DHT ni hacer un
+/// cuello de botella cuando llegan muchos hashes de golpe (30-50).
+const MAX_CONCURRENT_META: usize = 8;
 
 const BOOTSTRAP: &[&str] = &[
     "router.bittorrent.com:6881",
@@ -43,6 +58,7 @@ const BOOTSTRAP: &[&str] = &[
     "dht.transmissionbt.com:6881",
     "router.bitcomet.com:6881",
     "dht.libtorrent.org:25401",
+    "dht.aelitis.com:6881",
 ];
 
 // ------------------------------------------------------------------ datos
@@ -54,6 +70,21 @@ pub struct Hallado {
     pub tamano: u64,
     pub archivos: usize,
     pub fecha_ms: i64,
+    #[serde(default)]
+    pub creation_date: String,
+    #[serde(default)]
+    pub comment: String,
+}
+
+/// Captura en vivo: cada hash interceptado por el spider, con estado de
+/// resolución. Se muestra en la UI para que el usuario vea qué está
+/// atrapando en tiempo real (la lista de "hashes"), aparte de los metadatos
+/// ya resueltos.
+#[derive(Clone)]
+pub(crate) struct Captura {
+    pub hash: String,
+    pub nombre: String,
+    pub resuelto: bool,
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
@@ -171,6 +202,29 @@ fn hex_id(id: &Id) -> String {
     id.as_bytes().iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// Parse root-level creation date and comment from full torrent bytes (when present).
+/// `torrent_bytes` es `Bytes` (siempre presente) en librqbit 9.
+fn parse_root_metadata(torrent_bytes: &[u8]) -> (String, String) {
+    let root = match librqbit::torrent_from_bytes(torrent_bytes) {
+        Ok(r) => r,
+        Err(_) => return (String::new(), String::new()),
+    };
+    let creation_date = root
+        .creation_date
+        .map(|ts| {
+            chrono::DateTime::from_timestamp(ts as i64, 0)
+                .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+                .unwrap_or_else(|| ts.to_string())
+        })
+        .unwrap_or_default();
+    let comment = root
+        .comment
+        .as_ref()
+        .map(|c| String::from_utf8_lossy(c.as_ref()).into_owned())
+        .unwrap_or_default();
+    (creation_date, comment)
+}
+
 // -------------------------------------------------------------- el motor
 
 pub struct DhtBusca {
@@ -188,6 +242,16 @@ pub struct DhtBusca {
     dir_cache: PathBuf,
     runtime: Arc<tokio::runtime::Runtime>,
     max_meta: usize,
+    /// Handle vivo del nodo DHT, compartido entre el hilo spider y el loop de
+    /// metadatos (solo lectura vía lock corto; el Dht no es Clone).
+    dht: Arc<Mutex<Option<Dht>>>,
+    /// Base de capturas en vivo (cada hash interceptado, con estado de
+    /// resolución). Se expone a la UI como la lista de "hashes".
+    capturas: Arc<Mutex<VecDeque<Captura>>>,
+    /// true = el spider hace sondeo de hashes aleatorios (get_peers sobre ids
+    /// random). false = solo captura pasiva (lo que otros buscan de verdad).
+    /// El find_node de mantenimiento de tabla Kademlia NO se desactiva con esto.
+    pub(crate) sondear_aleatorio: Arc<AtomicBool>,
 }
 
 #[derive(Clone, Default, serde::Serialize)]
@@ -223,6 +287,9 @@ impl DhtBusca {
             canal: Mutex::new(None),
             logs: EventLog::new(),
             dir_cache: dir,
+            dht: Arc::new(Mutex::new(None)),
+            capturas: Arc::new(Mutex::new(VecDeque::new())),
+            sondear_aleatorio: Arc::new(AtomicBool::new(true)),
             runtime: Arc::new(
                 tokio::runtime::Builder::new_multi_thread()
                     .worker_threads(2)
@@ -253,9 +320,11 @@ impl DhtBusca {
         let pedidos_hilo = self.pedidos.clone();
         let sem_ok = self.semillas_ok.clone();
         let sem_tot = self.semillas_total.clone();
-        let logs_ping = logs.clone();
+        let logs_ping = self.logs.clone();
         let stop = self.stop.clone();
         let logs = self.logs.clone();
+        let dht_arc = self.dht.clone();
+        let sondear = self.sondear_aleatorio.clone();
 
         // diagnóstico inmediato: ¿nuestra red deja salir UDP?
         {
@@ -268,32 +337,67 @@ impl DhtBusca {
                 .ok();
         }
 
-        // El DHT vive en su propio hilo (API sync de mainline).
-        let builder_thread = std::thread::Builder::new().name("dhtbusca-spider".into());
-        let handle = builder_thread.spawn(move || {
-            let filtro: Box<dyn RequestFilter> =
-                Box::new(FiltroAtrapador {
+        // Filtro que atrapa TODOS los info_hashes que cruzan el nodo
+        // (entran por get_peers/announce_peer de otros pares).
+        let filtro = || {
+            Box::new(FiltroAtrapador {
                 tx: tx_filtro.clone(),
                 vistos: vistos_hilo.clone(),
                 pedidos: pedidos_hilo.clone(),
-            });
-            let dht = match Dht::builder()
-                .server_mode()
-                .server_settings(ServerSettings {
-                    filter: filtro,
-                    ..ServerSettings::default()
-                })
-                .bootstrap(BOOTSTRAP)
-                .request_timeout(Duration::from_secs(10))
-                .build()
-            {
-                Ok(d) => d,
-                Err(e) => {
-                    logs.push(format!("✗ DHT no arrancó: {e:?}"));
-                    return;
+            }) as Box<dyn RequestFilter>
+        };
+
+        // Construye el nodo servidor. Fija el puerto 6881 para que el reenvío
+        // UPnP/NAT-PMP apunte al socket real: si escucha en un puerto efímero
+        // el nodo queda sordo a lo entrante y la captura pasiva da 0 aunque la
+        // red salga (ese es el bug de "nodos 0 / nada entra").
+        let dht = match Dht::builder()
+            .server_mode()
+            .server_settings(ServerSettings {
+                filter: filtro(),
+                ..ServerSettings::default()
+            })
+            .bind_address(Ipv4Addr::UNSPECIFIED)
+            .port(6881)
+            .bootstrap(BOOTSTRAP)
+            .request_timeout(Duration::from_secs(10))
+            .build()
+        {
+            Ok(d) => d,
+            Err(e) => {
+                logs.push(format!(
+                    "✗ bind 6881 falló ({e:?}); reintento en puerto efímero (pasivo puede no funcionar)"
+                ));
+                match Dht::builder()
+                    .server_mode()
+                    .server_settings(ServerSettings {
+                        filter: filtro(),
+                        ..ServerSettings::default()
+                    })
+                    .bootstrap(BOOTSTRAP)
+                    .request_timeout(Duration::from_secs(10))
+                    .build()
+                {
+                    Ok(d) => d,
+                    Err(e2) => {
+                        logs.push(format!("✗ DHT no arrancó: {e2:?}"));
+                        return Err(anyhow!("DHT no arrancó: {e2:?}"));
+                    }
                 }
-            };
-            let _ = dht.bootstrapped();
+            }
+        };
+        *dht_arc.lock().unwrap_or_else(|e| e.into_inner()) = Some(dht);
+        let dht_meta = dht_arc.clone();
+
+        // El DHT vive en su propio hilo (API sync de mainline).
+        let builder_thread = std::thread::Builder::new().name("dhtbusca-spider".into());
+        let handle = builder_thread.spawn(move || {
+            let _ = dht_arc
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .as_ref()
+                .unwrap()
+                .bootstrapped();
             logs.push("✓ nodo DHT servidor en red · ayudando a rutear");
 
             let mut vistos: HashSet<[u8; 20]> = HashSet::new();
@@ -305,20 +409,37 @@ impl DhtBusca {
                 if activo {
                     if ultimo_find_node.elapsed() >= Duration::from_secs(30) {
                         for _ in 0..5 {
-                            let _ = dht.find_node(Id::random());
+                            let _ = dht_arc
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .as_ref()
+                                .unwrap()
+                                .find_node(Id::random());
                         }
                         ultimo_find_node = Instant::now();
                     }
-                    let id = Id::random();
-                    vistos.insert(*id.as_bytes());
-                    if vistos.len() > 50_000 {
-                        vistos.clear();
-                    }
-                    // como el crawler: si el id aleatorio tiene swarm,
-                    // también entra al canal (descubrimiento activo real)
-                    if dht.get_peers(id).next().is_some() {
-                        vistos_hilo.fetch_add(1, Ordering::Relaxed);
-                        let _ = tx_filtro.send(hex_id(&id));
+                    // Sondeo de hashes aleatorios: se puede desactivar desde la UI
+                    // (botón "Sondeo aleatorio"). Mantiene find_node arriba para
+                    // que la tabla Kademlia siga creciendo, pero deja de generar
+                    // hashes al azar (solo captura pasiva = torrents reales).
+                    if sondear.load(Ordering::SeqCst) {
+                        let id = Id::random();
+                        vistos.insert(*id.as_bytes());
+                        if vistos.len() > 50_000 {
+                            vistos.clear();
+                        }
+                        // como el crawler: si el id aleatorio tiene swarm,
+                        // también entra al canal (descubrimiento activo real)
+                        let mut iter = dht_arc
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .as_ref()
+                            .unwrap()
+                            .get_peers(id);
+                        if iter.next().is_some() {
+                            vistos_hilo.fetch_add(1, Ordering::Relaxed);
+                            let _ = tx_filtro.send(hex_id(&id));
+                        }
                     }
                     std::thread::sleep(TICK_ACTIVO);
                 } else {
@@ -339,6 +460,7 @@ impl DhtBusca {
         let dir_tmp = self.dir_cache.join("_meta");
         let stop2 = self.stop.clone();
         let max_meta = self.max_meta;
+        let capturas_arc = self.capturas.clone();
         self.runtime.spawn(async move {
             meta_loop(
                 rx_hash,
@@ -350,6 +472,8 @@ impl DhtBusca {
                 logs_meta,
                 dir_tmp,
                 max_meta,
+                dht_meta,
+                capturas_arc,
             )
             .await;
         });
@@ -399,6 +523,56 @@ impl DhtBusca {
         hits.sort_by(|a, b| b.fecha_ms.cmp(&a.fecha_ms));
         hits.truncate(200);
         hits
+    }
+
+    /// Índice completo de metadatos resueltos (los persistidos en
+    /// dhtbusca.json y recargados al abrir). `limit<=0` = todos. Ordenado
+    /// del más nuevo al más viejo. Sirve para poblar la lista RESUELTOS al
+    /// iniciar, incluidos los que venían del JSON.
+    pub fn resueltos(&self, limit: i32) -> Vec<Hallado> {
+        let est = self.indice.lock().unwrap_or_else(|e| e.into_inner());
+        let take = if limit <= 0 {
+            est.hallados.len()
+        } else {
+            limit as usize
+        };
+        let mut v: Vec<Hallado> = est.hallados.iter().cloned().collect();
+        v.sort_by(|a, b| b.fecha_ms.cmp(&a.fecha_ms));
+        v.truncate(take);
+        v
+    }
+
+    /// Base de capturas en vivo (cada hash interceptado, con estado de
+    /// resolución). `limit<=0` devuelve todas.
+    pub(crate) fn capturas(&self, limit: i32) -> Vec<Captura> {
+        let g = self.capturas.lock().unwrap_or_else(|e| e.into_inner());
+        let take = if limit <= 0 {
+            g.len()
+        } else {
+            limit as usize
+        };
+        g.iter().rev().take(take).cloned().collect()
+    }
+
+    /// Filtra la base por hash o nombre (substring, parcial, case-insensitive).
+    pub(crate) fn capturas_filtradas(&self, texto: &str, limit: i32) -> Vec<Captura> {
+        let q = texto.trim().to_lowercase();
+        let g = self.capturas.lock().unwrap_or_else(|e| e.into_inner());
+        let take = if limit <= 0 {
+            g.len()
+        } else {
+            limit as usize
+        };
+        g.iter()
+            .rev()
+            .filter(|c| {
+                q.is_empty()
+                    || c.hash.contains(&q)
+                    || c.nombre.to_lowercase().contains(&q)
+            })
+            .take(take)
+            .cloned()
+            .collect()
     }
 
     pub fn total(&self) -> usize {
@@ -473,19 +647,49 @@ async fn meta_loop(
     logs: EventLog,
     dir_tmp: PathBuf,
     max_meta: usize,
+    dht_arc: Arc<Mutex<Option<Dht>>>,
+    capturas: Arc<Mutex<VecDeque<Captura>>>,
 ) {
-    use librqbit::api::ApiTorrentListOpts;
-
     let _ = std::fs::create_dir_all(&dir_tmp);
-    let session = match librqbit::Session::new(dir_tmp).await {
+    let mut aviso_sordo = false;
+    // MISMA receta que el test de rqbit que SÍ resuelve (api/torrent/session.rs):
+    // Session::new por defecto DEJA EL DHT DESHABILITADO, por eso un magnet
+    // nunca encontraba pares y no se resolvía. Hay que habilitar DHT, dar
+    // persistencia y un listen. Con esto rqbit resuelve info_hashes reales.
+    let mut sopts = SessionOptions::default();
+    sopts.persistence = Some(SessionPersistenceConfig::Json {
+        folder: Some(dir_tmp.clone()),
+    });
+    sopts.dht = Some(DhtSessionConfig {
+        persistence: Some(DhtPersistenceConfig {
+            config_filename: Some(dir_tmp.join("dht.json")),
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+    sopts.listen = Some(ListenerOptions {
+        mode: ListenerMode::TcpAndUtp,
+        listen_addr: "[::]:0".parse::<std::net::SocketAddr>().unwrap(),
+        enable_upnp_port_forwarding: true,
+        utp_opts: None,
+        announce_port: None,
+        ipv4_only: false,
+        max_pending_incoming_handshake_checks: 256,
+    });
+    sopts.fastresume = true;
+    let session = match Session::new_with_opts(dir_tmp.clone(), sopts).await {
         Ok(s) => s,
         Err(e) => {
             logs.push(format!("✗ rqbit Session: {e:?}"));
             return;
         }
     };
-    // Misma fachada que api/torrent/list.rs (API estable en rqbit 9).
-    let api = librqbit::Api::new(session.clone(), None);
+
+    // Semáforo: a lo sumo MAX_CONCURRENT_META resoluciones de metadatos
+    // corriendo a la vez. Así si llegan 30-50 hashes de golpe no saturan la
+    // red/DHT ni se forma un cuello de botella: se encolan y se resuelven de
+    // a MAX_CONCURRENT_META, cada una con su propio RESOLVE_TIMEOUT.
+    let sem = Arc::new(Semaphore::new(MAX_CONCURRENT_META));
 
     let mut pendientes: HashMap<String, Instant> = HashMap::new();
 
@@ -509,11 +713,48 @@ async fn meta_loop(
                     }
                     let magnet = format!("magnet:?xt=urn:btih:{hash}");
                     pendientes.insert(hash.clone(), Instant::now());
+                    // Registrar en la base de capturas en vivo (estado: resolviendo).
+                    {
+                        let mut cap =
+                            capturas.lock().unwrap_or_else(|e| e.into_inner());
+                        if cap.len() >= 5000 {
+                            cap.pop_back();
+                        }
+                        if !cap.iter().any(|c| c.hash == hash) {
+                            cap.push_front(Captura {
+                                hash: hash.clone(),
+                                nombre: String::new(),
+                                resuelto: false,
+                            });
+                        }
+                    }
                     let s = session.clone();
+                    let sem = sem.clone();
                     tokio::spawn(async move {
-                        let add = librqbit::AddTorrent::from_url(magnet);
-                        let opts = librqbit::AddTorrentOptions::default();
-                        let _ = s.add_torrent(add, Some(opts)).await;
+                        // Espera un slot del semáforo antes de tocar rqbit.
+                        let _permit = match sem.acquire().await {
+                            Ok(p) => p,
+                            Err(_) => return,
+                        };
+                        let add = AddTorrent::Url(magnet.into());
+                        // paused: rqbit AGREGA el torrent a la sesión (así
+                        // with_torrents lo cosecha) pero NO baja el contenido.
+                        // overwrite por si reaparece. Sin DHT no resolvía nada;
+                        // la sesión ahora viene con DHT habilitado (ver arriba).
+                        let opts = AddTorrentOptions {
+                            overwrite: true,
+                            paused: true,
+                            ..Default::default()
+                        };
+                        // No nos quedamos esperando para siempre un hash: si no
+                        // resuelve en RESOLVE_TIMEOUT, soltamos y seguimos con
+                        // el siguiente. El torrent queda en la sesión; si luego
+                        // resuelve, el cosechado lo indexa igual.
+                        let _ = tokio::time::timeout(
+                            RESOLVE_TIMEOUT,
+                            s.add_torrent(add, Some(opts)),
+                        )
+                        .await;
                     });
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => break,
@@ -525,31 +766,58 @@ async fn meta_loop(
         let ahora = Instant::now();
         pendientes.retain(|_, t| ahora.duration_since(*t) < PENDING_TIMEOUT);
 
-        // 3) cosechar metadatos listos: la lista trae name solo cuando
-        // ya resolvió metadatos; total_bytes viene en stats.
-        let mut cosechados: Vec<Hallado> = Vec::new();
-        let list = api.api_torrent_list_ext(ApiTorrentListOpts { with_stats: true });
-        for t in list.torrents {
-            if !pendientes.contains_key(&t.info_hash) {
-                continue;
+        // 3) cosechar metadatos listos con with_torrents (API estable 9.x):
+        // name/archivos/tamaño + torrent_bytes (creation_date/comentario).
+        let cosechados_celd: std::cell::RefCell<Vec<Hallado>> = std::cell::RefCell::new(Vec::new());
+        session.with_torrents(|iter| {
+            for (_idx, tor) in iter {
+                let hash = tor.info_hash().as_string();
+                // Cosechar todo lo que ya tenga metadato y NO esté indexado:
+                // así un hash lento que resuelve después de soltarse también
+                // entra. No dependemos de seguir en `pendientes`.
+                if ya_indexado(&indice, &hash) {
+                    continue;
+                }
+                let got: Option<Hallado> = tor
+                    .with_metadata(|meta| {
+                        let nombre = meta.info.name().unwrap_or_default().to_string();
+                        if nombre.is_empty() {
+                            return None;
+                        }
+                        let tamano = meta.info.iter_file_lengths().sum::<u64>();
+                        let archivos = meta.info.iter_file_lengths().count();
+                        let (creation_date, comment) =
+                            parse_root_metadata(meta.torrent_bytes.as_ref());
+                        Some(Hallado {
+                            info_hash: hash.clone(),
+                            nombre: nombre.chars().take(200).collect(),
+                            tamano,
+                            archivos,
+                            fecha_ms: ahora_ms(),
+                            creation_date,
+                            comment,
+                        })
+                    })
+                    .ok()
+                    .flatten();
+                if let Some(h) = got {
+                    cosechados_celd.borrow_mut().push(h);
+                }
             }
-            let nombre = t.name.clone().unwrap_or_default();
-            if nombre.is_empty() {
-                continue;
+        });
+        let cosechados = cosechados_celd.into_inner();
+        for h in &cosechados {
+            pendientes.remove(&h.info_hash);
+        }
+        // Marcar en la base de capturas los que ya resolvieron su metadato.
+        {
+            let mut cap = capturas.lock().unwrap_or_else(|e| e.into_inner());
+            for h in &cosechados {
+                if let Some(c) = cap.iter_mut().find(|c| c.hash == h.info_hash) {
+                    c.resuelto = true;
+                    c.nombre = h.nombre.clone();
+                }
             }
-            let tamano = t
-                .stats
-                .as_ref()
-                .map(|st| st.total_bytes)
-                .unwrap_or_default();
-            cosechados.push(Hallado {
-                info_hash: t.info_hash.clone(),
-                nombre: nombre.chars().take(200).collect(),
-                tamano,
-                archivos: 0,
-                fecha_ms: ahora_ms(),
-            });
-            pendientes.remove(&t.info_hash);
         }
 
         if !cosechados.is_empty() {
@@ -573,15 +841,36 @@ async fn meta_loop(
         }
 
         // 4) stats vivos
-        // el conteo fino de la tabla vive dentro de rqbit; reportamos
-        // pendientes/resueltos que es lo accionable en UI
-        let nodos = 0usize;
+        // nodos_tabla = muestra real de la tabla de ruteo (cercanos a un id
+        // aleatorio). Antes estaba hardcodeado en 0: por eso la UI mostraba
+        // "Kademlia: 0 nodos" siempre.
+        let nodos = dht_arc
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .map(|d| d.get_closest_nodes(Id::random()).len())
+            .unwrap_or(0);
+        let (semillas_ok, pedidos) = {
+            let s = stats.lock().unwrap_or_else(|e| e.into_inner());
+            (s.semillas_ok, s.pedidos)
+        };
         {
             let mut st = stats.lock().unwrap_or_else(|e| e.into_inner());
             st.nodos_tabla = nodos;
             st.resueltos = indice.lock().unwrap_or_else(|e| e.into_inner()).hallados.len();
             st.pendientes = pendientes.len();
             st.capturados = vistos_meta.load(Ordering::Relaxed);
+        }
+        // Diagnóstico único: UDP sale (semillas responden) pero nada entra =>
+        // falta reenviar el 6881 en el router para la captura pasiva.
+        if !aviso_sordo && semillas_ok > 0 && pedidos == 0 {
+            aviso_sordo = true;
+            logs.push(
+                "⚠ UDP sale (semillas responden) pero 0 paquetes entran: el nodo \
+                 necesita el puerto 6881 reenviado (UPnP/NAT-PMP) y el DHT debe \
+                 escuchar en 6881 para captura pasiva."
+                    .to_string(),
+            );
         }
 
         tokio::time::sleep(Duration::from_secs(2)).await;

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../services/settings.dart';
-import 'i2p_test_screen.dart';
 import 'tor_test_screen.dart';
 
 /// Menú de Configuración.
@@ -47,6 +46,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
               await s.save();
             },
           ),
+          SwitchListTile(
+            secondary: const Icon(Icons.router_rounded),
+            title: const Text('Puertos (UPnP/NAT-PMP)'),
+            subtitle: const Text(
+                'Abre puertos en el router para DHT y otros servicios'),
+            value: s.natEnabled,
+            onChanged: (v) async {
+              setState(() => s.natEnabled = v);
+              await s.save();
+            },
+          ),
           const Divider(),
           ListTile(
             leading: const Icon(Icons.vpn_lock_rounded),
@@ -56,15 +66,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             trailing: const Icon(Icons.chevron_right),
             onTap: () => Navigator.push(context,
                 MaterialPageRoute(builder: (_) => const TorTestScreen())),
-          ),
-          ListTile(
-            leading: const Icon(Icons.hub),
-            title: const Text('I2P (experimental)'),
-            subtitle: const Text(
-                'Router emissary embebido · opciones del router'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => Navigator.push(context,
-                MaterialPageRoute(builder: (_) => const I2pTestScreen())),
           ),
           const Divider(),
           ListTile(

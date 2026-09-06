@@ -7,6 +7,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:pr_app/src/rust/frb_generated.dart';
 
 import '../services/colab_service.dart';
+import '../services/nat_service.dart';
 import '../services/notification_service.dart';
 import '../services/settings.dart';
 import '../services/status_notifier.dart';
@@ -33,6 +34,7 @@ Future<void> initApp() async {
   await _initRust();
   await _initColab();
   await Settings.instance.load();
+  await NatService.instance.init();
   await StatusNotifier.instance.init();
 }
 

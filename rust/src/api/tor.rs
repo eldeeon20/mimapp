@@ -39,19 +39,17 @@ pub fn tor_estado() -> String {
 }
 /// Runtime EXCLUSIVO del stack Tor: bootstrap, warm-up y todas las
 /// consultas HTTP viven aquí. Un stack de red = un runtime (regla del
-/// proyecto: cuando entre I2P tendrá el suyo propio).
+/// proyecto: una red = un runtime).
 static TOR_RT: OnceLock<TokioRustlsRuntime> = OnceLock::new();
 
 fn tor_rt() -> &'static TokioRustlsRuntime {
     TOR_RT.get_or_init(|| TokioRustlsRuntime::create().expect("runtime TLS rustls"))
 }
 
-fn agente() -> Result<ureq::Agent, String> {
+fn agente() -> Result<arti_ureq::ureq::Agent, String> {
     let c = CLIENT.lock().map_err(|_| "mutex cliente")?;
     let c = c.as_ref().ok_or("Tor no está corriendo")?;
     Ok(arti_ureq::Connector::with_tor_client((**c).clone()).agent())
-}
-    })
 }
 
 #[flutter_rust_bridge::frb]
@@ -136,9 +134,6 @@ pub fn tor_start(state_dir: String, cache_dir: String) -> Result<String, String>
 #[flutter_rust_bridge::frb]
 pub fn tor_stop() -> Result<(), String> {
     estado_set(0);
-    if let Ok(mut g) = AGENTE.lock() {
-        *g = None;
-    }
     if let Ok(mut g) = CLIENT.lock() {
         *g = None;
     }
@@ -170,14 +165,10 @@ pub fn tor_set_dormant(soft: bool) -> Result<(), String> {
 /// "HTTP <status>\n\n<cuerpo>".
 #[flutter_rust_bridge::frb]
 pub fn tor_http_get(url: String) -> Result<String, String> {
-    let c = tor_http_client()?;
-    let r = c
-        .get(&url)
-        .send()
-        .and_then(|r| r.error_for_status())
-        .map_err(|e| format!("GET {url}: {e}"))?;
+    let c = agente()?;
+    let mut r = c.get(&url).call().map_err(|e| format!("GET {url}: {e}"))?;
     let status = r.status();
-    let body = r.text().map_err(|e| format!("cuerpo: {e}"))?;
+    let body = r.body_mut().read_to_string().map_err(|e| format!("cuerpo: {e}"))?;
     Ok(format!("HTTP {status}\n\n{body}"))
 }
 
@@ -186,16 +177,29 @@ pub fn tor_http_get(url: String) -> Result<String, String> {
 /// siempre con https:// (TLS extremo a extremo sobre el túnel).
 #[flutter_rust_bridge::frb]
 pub fn tor_download(url: String, dest_path: String) -> Result<u64, String> {
-    use std::io::{copy, Write};
-    let c = tor_http_client()?;
-    let mut r = c
-        .get(&url)
-        .send()
-        .and_then(|r| r.error_for_status())
-        .map_err(|e| format!("GET {url}: {e}"))?;
+    use std::io::{Read, Write};
+    let c = agente()?;
+    let mut r = c.get(&url).call().map_err(|e| format!("GET {url}: {e}"))?;
+    let mut reader = r.body_mut().as_reader();
     let mut f = std::fs::File::create(&dest_path)
         .map_err(|e| format!("crear {dest_path}: {e}"))?;
-    let n = copy(&mut r, &mut f).map_err(|e| format!("descarga: {e}"))?;
+    let mut buf = Vec::new();
+    reader.read_to_end(&mut buf).map_err(|e| format!("descarga: {e}"))?;
+    f.write_all(&buf).map_err(|e| format!("escribir: {e}"))?;
     f.flush().map_err(|e| format!("flush: {e}"))?;
-    Ok(n)
+    Ok(buf.len() as u64)
+}
+
+/// Ping TCP crudo por el circuito Tor: abre una conexión hacia host:puerto
+/// (sin HTTP) para verificar conectividad a cualquier servicio .onion/común.
+#[flutter_rust_bridge::frb]
+pub fn tor_tcp_ping(host: String, puerto: i32) -> Result<String, String> {
+    let g = CLIENT.lock().map_err(|_| "mutex cliente")?;
+    let c = g.as_ref().ok_or("Tor no está corriendo")?;
+    let start = std::time::Instant::now();
+    let _s = tor_rt()
+        .block_on(c.connect((host.clone(), puerto as u16)))
+        .map_err(|e| format!("connect {host}:{puerto}: {e}"))?;
+    let ms = start.elapsed().as_millis();
+    Ok(format!("OK {host}:{puerto} · {ms} ms por el circuito Tor"))
 }
