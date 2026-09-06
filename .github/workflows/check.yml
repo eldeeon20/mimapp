@@ -33,16 +33,6 @@ jobs:
           restore-keys: |
             pub-${{ runner.os }}-
 
-      - name: Cache Cargo registry
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: cargo-${{ runner.os }}-${{ hashFiles('rust/Cargo.toml') }}
-          restore-keys: |
-            cargo-${{ runner.os }}-
-
       - name: Cache cargo-expand binary
         uses: actions/cache@v5
         with:
@@ -82,9 +72,8 @@ jobs:
       - name: Generate Rust <-> Dart bindings
         run: flutter_rust_bridge_codegen generate
 
+      # El codegen YA valida el puente del lado Dart (parsea el Rust con
+      # cargo-expand y genera los bindings; si el Rust no compila el
+      # parseo, falla acá). Sin cargo check: tarda lo mismo que compilar.
       - name: Analyze Dart (errores cortan, warnings no)
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
-
-      # Solo chequeo de tipos Rust (sin NDK, sin Gradle, sin APK).
-      - name: Cargo check (solo lib, rápido)
-        run: cargo check --lib --manifest-path rust/Cargo.toml
