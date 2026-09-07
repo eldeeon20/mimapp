@@ -53,6 +53,22 @@ class ColabRuntime {
   /// Retorna lo tipeado (o null para vacío).
   Future<String?> Function(String prompt, bool password)? onInputRequest;
 
+  /// ¿El kernel pidió input y sigue esperando respuesta?
+  bool waitingForInput = false;
+
+  /// Último prompt pedido por el kernel (para el envío manual).
+  String lastInputPrompt = '';
+
+  /// Manda un input a la celda en ejecución AUNQUE no haya llegado el
+  /// input_request (desbloquea celdas colgadas en input()). Si el kernel
+  /// no está esperando nada, el mensaje se ignora del otro lado.
+  void sendInput(String value) {
+    try {
+      _send('stdin', 'input_reply', {'value': value});
+    } catch (_) {}
+    waitingForInput = false;
+  }
+
   /// Ejecución activa (para poder frenarla con [interruptCurrent]).
   Completer<void>? _activeCompleter;
   ColabExecResult? _activeResult;
@@ -277,6 +293,8 @@ class ColabRuntime {
     final result = ColabExecResult();
     final msgId = _uuid();
     final completer = Completer<void>();
+    waitingForInput = false;
+    lastInputPrompt = '';
     _activeResult = result;
     _activeCompleter = completer;
     _send('shell', 'execute_request', {
@@ -332,6 +350,7 @@ class ColabRuntime {
           break;
         case 'status':
           if (content['execution_state'] == 'idle') {
+            waitingForInput = false;
             if (!completer.isCompleted) completer.complete();
             unawaited(sub.cancel());
           }
@@ -339,6 +358,7 @@ class ColabRuntime {
         case 'execute_reply':
           final st = content['status'];
           if (st == 'error' || st == 'abort') result.status = 'error';
+          waitingForInput = false;
           if (!completer.isCompleted) completer.complete();
           unawaited(sub.cancel());
           break;
@@ -347,9 +367,12 @@ class ColabRuntime {
           onTick?.call(result.output);
           break;
         case 'input_request':
-          // El kernel pide datos (input() de Python): delegar en la UI.
+          // El kernel pide datos (input() de Python): marcar espera y
+          // delegar en la UI.
+          waitingForInput = true;
+          lastInputPrompt = content['prompt']?.toString() ?? '';
           unawaited(_answerInput(
-            content['prompt']?.toString() ?? '',
+            lastInputPrompt,
             content['password'] == true,
           ));
           break;
@@ -380,6 +403,7 @@ class ColabRuntime {
     try {
       _send('stdin', 'input_reply', {'value': value});
     } catch (_) {}
+    waitingForInput = false;
   }
 
   void _send(String channel, String type, Map<String, dynamic> content,

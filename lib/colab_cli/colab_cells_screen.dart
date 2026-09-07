@@ -108,6 +108,29 @@ print("Python:", sys.version.split()[0])''';
     }
   }
 
+  /// Manda input a mano a la celda en ejecución, aunque Colab no lo haya
+  /// pedido (desbloquea celdas colgadas en input()). Si el kernel no está
+  /// esperando nada, el mensaje se ignora del otro lado.
+  Future<void> _sendManualInput() async {
+    if (_runningIndex == null) return;
+    final prompt = _runtime.waitingForInput && _runtime.lastInputPrompt.isNotEmpty
+        ? _runtime.lastInputPrompt
+        : 'Input manual (celda ${_runningIndex! + 1}):';
+    final value = await _askInput(prompt, false);
+    if (!mounted) return;
+    final wasWaiting = _runtime.waitingForInput;
+    _runtime.sendInput(value ?? '');
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(wasWaiting
+            ? 'Input enviado a la celda'
+            : 'Enviado (el kernel no parecía esperar input)'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+    setState(() {});
+  }
+
   Future<void> _runCell(int i) async {
     final cell = _cells[i];
     if (!_connected || cell.running) return;
@@ -154,12 +177,18 @@ print("Python:", sys.version.split()[0])''';
       appBar: AppBar(
         title: Text('Colab Python ${_connected ? "●" : "○"}'),
         actions: [
-          if (_runningIndex != null)
+          if (_runningIndex != null) ...[
+            IconButton(
+              tooltip: 'Mandar input a la celda (aunque no lo pida)',
+              onPressed: _sendManualInput,
+              icon: const Icon(Icons.keyboard, color: Colors.amberAccent),
+            ),
             IconButton(
               tooltip: 'Frenar celda',
               onPressed: _stopCell,
               icon: const Icon(Icons.stop, color: Colors.redAccent),
             ),
+          ],
           IconButton(
             tooltip: 'Nueva celda',
             onPressed: () => setState(() => _cells.add(_Cell())),
@@ -242,6 +271,16 @@ print("Python:", sys.version.split()[0])''';
                                   : const Icon(Icons.play_arrow,
                                       color: Colors.greenAccent),
                             ),
+                            if (cell.running)
+                              IconButton(
+                                visualDensity: VisualDensity.compact,
+                                tooltip:
+                                    'Mandar input (aunque no lo pida)',
+                                onPressed: _sendManualInput,
+                                icon: const Icon(Icons.keyboard,
+                                    size: 20,
+                                    color: Colors.amberAccent),
+                              ),
                             IconButton(
                               visualDensity: VisualDensity.compact,
                               onPressed: _cells.length <= 1
