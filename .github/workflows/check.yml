@@ -1,10 +1,8 @@
 name: check
 
-# Chequeo RÁPIDO en cada push/PR: Dart + puente Rust, SIN compilar el APK.
-# El build pesado (APK + Gradle + NDK) es manual: workflow build.yml.
+# Chequeo RÁPIDO (Dart + puente Rust, SIN compilar el APK).
+# DESACTIVADO en automático: solo manual desde la pestaña Actions.
 on:
-  push:
-  pull_request:
   workflow_dispatch:
 
 concurrency:
