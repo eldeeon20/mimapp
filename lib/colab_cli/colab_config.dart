@@ -1,10 +1,30 @@
-/// Constantes OAuth2 del cliente propio de pr_app.
+import '../services/settings.dart';
+
+/// OAuth2 del cliente propio de pr_app.
+///
+/// Las llaves embebidas son el default; el usuario puede poner las suyas
+/// a mano con el botón + del diálogo (se guardan cifradas en Settings y
+/// tienen prioridad sobre las embebidas).
 class ColabConfig {
   ColabConfig._();
 
-  static const clientId =
+  static const _embeddedClientId =
       '';
-  static const clientSecret = '';
+  static const _embeddedClientSecret = '';
+
+  /// Llaves manuales del usuario (vacío = no hay).
+  static String get customClientId => Settings.instance.colabClientId.trim();
+  static String get customClientSecret =>
+      Settings.instance.colabClientSecret.trim();
+
+  /// ¿Se están usando llaves manuales en vez de las embebidas?
+  static bool get usingCustomKeys =>
+      customClientId.isNotEmpty && customClientSecret.isNotEmpty;
+
+  static String get clientId =>
+      usingCustomKeys ? customClientId : _embeddedClientId;
+  static String get clientSecret =>
+      usingCustomKeys ? customClientSecret : _embeddedClientSecret;
 
   /// Loopback: la app abre un servidor local y Google redirige acá
   /// (el navegador corre en el mismo dispositivo).

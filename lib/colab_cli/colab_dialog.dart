@@ -3,10 +3,12 @@ import 'package:flutter/services.dart';
 
 import 'colab_auth.dart';
 import 'colab_cells_screen.dart';
+import 'colab_config.dart';
 import 'colab_keep_alive.dart';
 import 'colab_sessions.dart';
 import 'colab_tasks_screen.dart';
 import '../services/colab_service.dart';
+import '../services/settings.dart';
 import '../services/status_notifier.dart';
 
 /// Diálogo de gestión de Colab: autenticación (loopback), sesiones, keep-alive.
@@ -152,6 +154,80 @@ class _ColabDialogBodyState extends State<_ColabDialogBody> {
     ));
   }
 
+  /// Editor manual de llaves OAuth (Client ID + Client Secret propios).
+  /// Vacío = usar las embebidas. Se guardan cifradas en Settings.
+  Future<void> _showKeysDialog() async {
+    final idCtrl =
+        TextEditingController(text: ColabConfig.customClientId);
+    final secCtrl =
+        TextEditingController(text: ColabConfig.customClientSecret);
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (dctx) => AlertDialog(
+        title: const Text('Llaves de Colab'),
+        content: SizedBox(
+          width: 380,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Client ID y Client Secret de tu proyecto de Google Cloud '
+                '(credenciales OAuth). Dejá vacío para usar las embebidas.',
+                style: TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: idCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Client ID',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: secCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Client Secret',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+                obscureText: true,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dctx, false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () async {
+              Settings.instance.colabClientId = '';
+              Settings.instance.colabClientSecret = '';
+              await Settings.instance.save();
+              if (dctx.mounted) Navigator.pop(dctx, true);
+            },
+            child: const Text('Restablecer'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              Settings.instance.colabClientId = idCtrl.text.trim();
+              Settings.instance.colabClientSecret = secCtrl.text.trim();
+              await Settings.instance.save();
+              if (dctx.mounted) Navigator.pop(dctx, true);
+            },
+            child: const Text('Guardar'),
+          ),
+        ],
+      ),
+    );
+    idCtrl.dispose();
+    secCtrl.dispose();
+    if (saved == true && mounted) setState(() {});
+  }
+
   void _openTasks(ColabSession s) {
     final nav = Navigator.of(context, rootNavigator: true);
     Navigator.pop(context);
@@ -183,6 +259,17 @@ class _ColabDialogBodyState extends State<_ColabDialogBody> {
                 style: TextStyle(fontSize: 12, color: Colors.grey),
                 textAlign: TextAlign.center,
               ),
+              const SizedBox(height: 4),
+              TextButton.icon(
+                onPressed: _loading ? null : _showKeysDialog,
+                icon: const Icon(Icons.key, size: 18),
+                label: Text(
+                  ColabConfig.usingCustomKeys
+                      ? 'Llaves: manuales (+)'
+                      : 'Llaves: embebidas (+)',
+                  style: const TextStyle(fontSize: 12),
+                ),
+              ),
             ],
             if (widget.auth.isAuthenticated) ...[
               Row(
@@ -190,6 +277,13 @@ class _ColabDialogBodyState extends State<_ColabDialogBody> {
                   const Icon(Icons.check_circle, color: Colors.green, size: 20),
                   const SizedBox(width: 8),
                   const Expanded(child: Text('Autenticado')),
+                  IconButton(
+                    onPressed: _loading ? null : _showKeysDialog,
+                    tooltip: ColabConfig.usingCustomKeys
+                        ? 'Llaves manuales (+)'
+                        : 'Llaves embebidas (+)',
+                    icon: const Icon(Icons.key, size: 20),
+                  ),
                   TextButton(
                     onPressed: () async {
                       await widget.auth.logout();

@@ -40,6 +40,11 @@ class Settings {
   List<Map<String, dynamic>> pkarrKeys = [];
   List<Map<String, dynamic>> nostrKeys = [];
 
+  /// Llaves OAuth de Colab puestas a mano por el usuario (vacío = usar
+  /// las embebidas en ColabConfig). Cifradas junto con el resto.
+  String colabClientId = '';
+  String colabClientSecret = '';
+
   bool _loaded = false;
 
   Future<void> load() async {
@@ -94,6 +99,8 @@ class Settings {
               .map((e) => Map<String, dynamic>.from(e))
               .toList();
         }
+        colabClientId = map['colabClientId'] as String? ?? '';
+        colabClientSecret = map['colabClientSecret'] as String? ?? '';
         if (needsMigration) {
           // Legado XOR -> re-guardar ya como envelope V2 (AES-GCM).
           await save();
@@ -118,6 +125,8 @@ class Settings {
         'pockets': pockets,
         'pkarrKeys': pkarrKeys,
         'nostrKeys': nostrKeys,
+        'colabClientId': colabClientId,
+        'colabClientSecret': colabClientSecret,
       };
       final plain = utf8.encode(jsonEncode(map));
       final enc =
