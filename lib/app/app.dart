@@ -13,6 +13,7 @@ import '../screens/filosoia_screen.dart';
 import '../agents/agent_manager.dart';
 import '../screens/gpu_test_screen.dart';
 import '../screens/hf_test_screen.dart';
+import '../screens/koni_test_screen.dart';
 import '../screens/ipfs_test_screen.dart';
 import '../screens/kem_test_screen.dart';
 import '../screens/media_screen.dart';
@@ -176,6 +177,9 @@ class _HomePageState extends State<HomePage> {
               _openTest(context, 'IPFS', const IpfsTestScreen());
             case 'ua':
               _openTest(context, 'Unarc · RAR/7z/ZIP', const UnarcTestScreen());
+            case 'koni':
+              _openTest(context, 'Koni · ZIP/7z/RAR (Dart)',
+                  const KoniTestScreen());
             case 'ub':
               _openTest(context, 'Nostr Busca', const NostrBuscaScreen());
             case 'nn':

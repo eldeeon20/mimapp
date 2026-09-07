@@ -70,6 +70,11 @@ abstract final class RadialCatalog {
         icon: Icons.folder_zip_rounded,
         color: Colors.blueAccent),
     RadialMenuItem(
+        key: 'koni',
+        label: 'Koni',
+        icon: Icons.archive_rounded,
+        color: Colors.lime),
+    RadialMenuItem(
         key: 'ub',
         label: 'Nostr Busca',
         icon: Icons.search_rounded,
