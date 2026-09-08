@@ -214,11 +214,11 @@ class Koni {
           maxEntrySize: maxEntradaBytes,
         ),
       );
+    } on InvalidPasswordException {
+      throw StateError('Koni[$etiqueta]: contraseña incorrecta');
     } on EncryptedArchiveException {
       throw StateError(
           'Koni[$etiqueta]: pide contraseña (ponela y reabrí)');
-    } on InvalidPasswordException {
-      throw StateError('Koni[$etiqueta]: contraseña incorrecta');
     } on UnsupportedFormatException {
       throw StateError('Koni[$etiqueta]: no se reconoció el contenido');
     }

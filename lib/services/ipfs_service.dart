@@ -129,7 +129,7 @@ class IpfsService {
   }
 
   /// Peer ID del nodo (lanza si no está iniciado).
-  String get peerId => _requireNode().peerID;
+  String get peerId => _requireNode().peerId;
 
   /// Peer ID corto para la UI ('' si no está iniciado).
   String get peerIdCorto {
