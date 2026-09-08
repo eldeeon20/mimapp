@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WebK · hola mundo</title>
+<style>
+body{font-family:sans-serif;text-align:center;padding-top:60px;background:#020617;color:#fff;margin:0}
+h1{color:#4DD0E1}
+.card{display:inline-block;border:1px solid #4DD0E155;border-radius:12px;padding:24px 40px;background:#0B1220}
+code{color:#B57CFF}
+</style>
+</head>
+<body>
+<div class="card">
+<h1>Hola WebK</h1>
+<p>Página de prueba servida por el servidor local.</p>
+<p><code>RAM · loopback · 1 conexión autorizada</code></p>
+<p>
+<button onclick="pedirEstado()">Pedir estado</button>
+<button onclick="pedirAuth()">Pedir autorización</button>
+</p>
+<pre id="out">puente: esperando…</pre>
+</div>
+<script>
+function out(t){ document.getElementById('out').textContent = t; }
+async function llamar(cmd, extra){
+  if(!window.flutter_inappwebview){
+    out('sin puente (página fuera de WebK)');
+    return;
+  }
+  try{
+    const r = await window.flutter_inappwebview.callHandler(
+      'webk', Object.assign({cmd: cmd}, extra || {}));
+    out(typeof r === 'object' ? JSON.stringify(r) : String(r));
+  }catch(e){ out('error: ' + e); }
+}
+function pedirEstado(){ llamar('estado'); }
+function pedirAuth(){ llamar('autorizar', {llave: window.WEBK_LLAVE || ''}); }
+</script>
+</body>
+</html>

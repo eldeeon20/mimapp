@@ -14,6 +14,7 @@ import '../agents/agent_manager.dart';
 import '../screens/gpu_test_screen.dart';
 import '../screens/hf_test_screen.dart';
 import '../screens/koni_test_screen.dart';
+import '../screens/webk_test_screen.dart';
 import '../screens/ipfs_test_screen.dart';
 import '../screens/kem_test_screen.dart';
 import '../screens/media_screen.dart';
@@ -180,6 +181,9 @@ class _HomePageState extends State<HomePage> {
             case 'koni':
               _openTest(context, 'Koni · ZIP/7z/RAR (Dart)',
                   const KoniTestScreen());
+            case 'webk':
+              _openTest(context, 'WebK · servidor local',
+                  const WebkTestScreen());
             case 'ub':
               _openTest(context, 'Nostr Busca', const NostrBuscaScreen());
             case 'nn':

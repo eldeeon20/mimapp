@@ -75,6 +75,11 @@ abstract final class RadialCatalog {
         icon: Icons.archive_rounded,
         color: Colors.lime),
     RadialMenuItem(
+        key: 'webk',
+        label: 'WebK',
+        icon: Icons.https_rounded,
+        color: Colors.redAccent),
+    RadialMenuItem(
         key: 'ub',
         label: 'Nostr Busca',
         icon: Icons.search_rounded,

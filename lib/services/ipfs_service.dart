@@ -128,11 +128,24 @@ class IpfsService {
     return s;
   }
 
+  /// Peer ID del nodo (lanza si no está iniciado).
+  String get peerId => _requireNode().peerID;
+
+  /// Peer ID corto para la UI ('' si no está iniciado).
+  String get peerIdCorto {
+    try {
+      final id = peerID;
+      return id.length > 16 ? '${id.substring(0, 12)}…' : id;
+    } catch (_) {
+      return '';
+    }
+  }
+
   /// Contenido bruto de un CID agregado en esta sesión (o pegado externo).
   Future<Uint8List?> cat(String cidStr) async {
     final node = _requireNode();
     final key = cidStr.trim();
-    return node.get(_cidObjects[key] ?? key);
+    return node.cat(_cidObjects[key] ?? key);
   }
 
   /// Pin: el contenido sobrevive garbage collection.
@@ -142,12 +155,20 @@ class IpfsService {
     await node.pin(_cidObjects[key] ?? key);
   }
 
-  /// Estadísticas locales del nodo (node.stats() no existe en dart_ipfs
-  /// 1.11.6; armamos el resumen con el estado propio del service).
+  /// Estadísticas del nodo: estado propio + datos reales del nodo
+  /// (peers conectados y tabla DHT en modo online).
   Future<String> stats() async {
+    var extra = '';
+    if (running && online) {
+      try {
+        final node = _requireNode();
+        final peers = await node.connectedPeers;
+        extra = ' · ${peers.length} peers · DHT ${node.dhtPeerCount}';
+      } catch (_) {}
+    }
     return 'nodo ${running ? "activo" : "inactivo"} · '
         '${_cidObjects.length} CID · gateway ${gatewayEnabled ? "ON" : "OFF"}'
-        '${online ? " · P2P" : ""}';
+        '${online ? " · P2P$extra" : ""}';
   }
 
   /// Busca proveedores de un CID en la red DHT (modo online).
@@ -167,10 +188,13 @@ class IpfsService {
           ? 'detenido'
           : 'detenido · último error: $lastError';
     }
+    final id = peerIdCorto;
     return online
         ? 'corriendo · P2P · ${_cidObjects.length} CID'
+            '${id.isNotEmpty ? " · id $id" : ""}'
             '${gatewayEnabled ? " · gateway :$gatewayPort" : ""}'
         : 'corriendo · ${_cidObjects.length} CID locales'
+            '${id.isNotEmpty ? " · id $id" : ""}'
             '${gatewayEnabled ? " · gateway :$gatewayPort" : " · sin gateway"}';
   }
 
