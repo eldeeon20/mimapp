@@ -134,7 +134,7 @@ class IpfsService {
   /// Peer ID corto para la UI ('' si no está iniciado).
   String get peerIdCorto {
     try {
-      final id = peerID;
+      final id = peerId;
       return id.length > 16 ? '${id.substring(0, 12)}…' : id;
     } catch (_) {
       return '';
