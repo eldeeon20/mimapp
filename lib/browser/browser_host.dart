@@ -91,7 +91,20 @@ class _BrowserWebViewsHostState extends State<BrowserWebViewsHost>
   }
 
   void _syncUrl() {
-    final a = BrowserTabs.instance.active;
+    final tabs = BrowserTabs.instance;
+    // Si el browser se cerró desde afuera (botón atrás de app.dart),
+    // los paneles locales quedaban abiertos y al reentrar no se veía
+    // la web. Se resetean acá.
+    if (!tabs.isOpen &&
+        (_tabsOpen || _menuOpen || _settingsOpen || _historyOpen)) {
+      setState(() {
+        _tabsOpen = false;
+        _menuOpen = false;
+        _settingsOpen = false;
+        _historyOpen = false;
+      });
+    }
+    final a = tabs.active;
     if (_urlCtrl.text != a.url) _urlCtrl.text = a.url;
   }
 
@@ -468,7 +481,16 @@ class _BrowserWebViewsHostState extends State<BrowserWebViewsHost>
                       },
                       trailing: IconButton(
                         icon: const Icon(Icons.close),
-                        onPressed: () => tabs.closeAt(i),
+                        onPressed: () {
+                          // Cerrar la última no reabre otra en bucle:
+                          // cierra el panel y el browser.
+                          final eraUltima = tabs.tabs.length <= 1;
+                          tabs.closeAt(i);
+                          if (eraUltima) {
+                            setState(() => _tabsOpen = false);
+                            tabs.closeBrowser();
+                          }
+                        },
                       ),
                     ),
                   ),

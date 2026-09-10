@@ -154,7 +154,9 @@ class BrowserTabs extends ChangeNotifier {
         geolocationEnabled: geolocation,
         safeBrowsingEnabled: safeBrowsing,
         incognito: incognito,
-        transparentBackground: true,
+        // Fondo opaco: el transparente deja la pantalla negra al volver
+        // de otra app (el surface de Android no se restaura).
+        transparentBackground: false,
         supportZoom: true,
       );
 

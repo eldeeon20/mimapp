@@ -23,6 +23,9 @@ class MediaPlayer extends BaseAudioHandler with SeekHandler {
     _player = Player();
     _videoController = VideoController(_player);
     _subscribe();
+    // Lo que cambie en la biblioteca (estrella, listas, grupos) avisa
+    // a la UI al momento.
+    library.onChanged = () => onChanged?.call();
   }
 
   late final Player _player;
@@ -46,6 +49,9 @@ class MediaPlayer extends BaseAudioHandler with SeekHandler {
   String get current => _current;
   int get queueLength => _queue.length;
   int get queueIndex => _queueIndex;
+
+  /// Cola actual (rutas). La vista Ahora la muestra como lista.
+  List<String> get queue => List.unmodifiable(_queue);
 
   /// Biblioteca (historial + favoritos) del reproductor.
   MediaLibraryStore get library => MediaLibraryStore.instance;
@@ -142,12 +148,18 @@ class MediaPlayer extends BaseAudioHandler with SeekHandler {
   }
 
   /// Reemplaza la playlist y reproduce desde [startAt].
+  /// Todos los elegidos quedan en el historial para verlos en listas.
   Future<void> setQueue(List<String> paths, {int startAt = 0}) async {
     _queue
       ..clear()
       ..addAll(paths);
+    unawaited(library.addHistoryMany(paths).then((_) => onChanged?.call()));
     await playAt(startAt.clamp(0, _queue.length - 1));
   }
+
+  /// Reproduce una lista de la biblioteca (o favoritos) como cola nueva.
+  Future<void> playPlaylist(List<String> paths, {int startAt = 0}) =>
+      setQueue(paths, startAt: startAt);
 
   /// Reproduce la pista [i] de la lista.
   Future<void> playAt(int i) async {
