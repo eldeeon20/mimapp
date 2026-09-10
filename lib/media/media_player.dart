@@ -51,7 +51,8 @@ class MediaPlayer extends BaseAudioHandler with SeekHandler {
   int get queueIndex => _queueIndex;
 
   /// Cola actual (rutas). La vista Ahora la muestra como lista.
-  List<String> get queue => List.unmodifiable(_queue);
+  /// Se llama `cola` porque `queue` ya existe en BaseAudioHandler.
+  List<String> get cola => List.unmodifiable(_queue);
 
   /// Biblioteca (historial + favoritos) del reproductor.
   MediaLibraryStore get library => MediaLibraryStore.instance;

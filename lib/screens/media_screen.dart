@@ -98,11 +98,6 @@ class _MediaScreenState extends State<MediaScreen> {
         .toList();
   }
 
-  /// Salta a la pestaña Ahora para ver la reproducción en el momento.
-  void _irAhora(BuildContext context) {
-    DefaultTabController.of(context)?.animateTo(0);
-  }
-
   @override
   Widget build(BuildContext context) {
     final mp = widget.mediaPlayer;
@@ -287,7 +282,7 @@ class _MediaScreenState extends State<MediaScreen> {
   /// Cola actual: los archivos elegidos, visibles y tocables.
   Widget _buildQueue() {
     final mp = widget.mediaPlayer;
-    if (mp.queue.isEmpty) return const SizedBox.shrink();
+    if (mp.cola.isEmpty) return const SizedBox.shrink();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -300,9 +295,9 @@ class _MediaScreenState extends State<MediaScreen> {
         ListView.builder(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
-          itemCount: mp.queue.length,
+          itemCount: mp.cola.length,
           itemBuilder: (context, i) {
-            final uri = mp.queue[i];
+            final uri = mp.cola[i];
             return _mediaTile(
               {'uri': uri, 'title': _titleOf(uri)},
               showDate: false,
@@ -425,9 +420,10 @@ class _MediaScreenState extends State<MediaScreen> {
                       tooltip: 'Reproducir lista',
                       icon: const Icon(Icons.play_arrow),
                       onPressed: () async {
+                        final tab = DefaultTabController.of(context);
                         await widget.mediaPlayer
                             .playPlaylist(lib.playlistUris(pid));
-                        if (mounted) _irAhora(context);
+                        if (mounted) tab.animateTo(0);
                       },
                     ),
                     IconButton(
@@ -472,8 +468,9 @@ class _MediaScreenState extends State<MediaScreen> {
           onSelected: (v) async {
             switch (v) {
               case 'play':
+                final tab = DefaultTabController.of(context);
                 await mp.playPlaylist(uris);
-                if (mounted) _irAhora(context);
+                if (mounted) tab.animateTo(0);
               case 'actual':
                 if (mp.current.isNotEmpty) {
                   await lib.playlistAdd(id, mp.current);
@@ -526,8 +523,9 @@ class _MediaScreenState extends State<MediaScreen> {
               showDate: false,
               dismissKey: 'lista-$id-${items[i]['uri']}',
               onTap: () async {
+                final tab = DefaultTabController.of(context);
                 await mp.playPlaylist(uris, startAt: i);
-                if (mounted) _irAhora(context);
+                if (mounted) tab.animateTo(0);
               },
               onRemove: () => lib.playlistRemove(
                   id, items[i]['uri'] ?? ''),
@@ -578,8 +576,9 @@ class _MediaScreenState extends State<MediaScreen> {
                     items[i],
                     showDate: true,
                     onTap: () async {
+                      final tab = DefaultTabController.of(context);
                       await mp.openPath(items[i]['uri'] ?? '');
-                      if (mounted) _irAhora(context);
+                      if (mounted) tab.animateTo(0);
                     },
                   ),
                 ),
@@ -615,12 +614,13 @@ class _MediaScreenState extends State<MediaScreen> {
             children: [
               TextButton.icon(
                 onPressed: () async {
+                  final tab = DefaultTabController.of(context);
                   final uris = mp.library.favorites
                       .map((e) => e['uri'] ?? '')
                       .where((u) => u.isNotEmpty)
                       .toList();
                   await mp.playPlaylist(uris);
-                  if (mounted) _irAhora(context);
+                  if (mounted) tab.animateTo(0);
                 },
                 icon: const Icon(Icons.play_arrow, size: 18),
                 label: const Text('Reproducir todo'),
@@ -643,8 +643,9 @@ class _MediaScreenState extends State<MediaScreen> {
                     items[i],
                     showDate: false,
                     onTap: () async {
+                      final tab = DefaultTabController.of(context);
                       await mp.openPath(items[i]['uri'] ?? '');
-                      if (mounted) _irAhora(context);
+                      if (mounted) tab.animateTo(0);
                     },
                   ),
                 ),
