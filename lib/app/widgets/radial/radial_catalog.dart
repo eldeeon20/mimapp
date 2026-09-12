@@ -115,6 +115,11 @@ abstract final class RadialCatalog {
         icon: Icons.forum_rounded,
         color: Color(0xFF4DD0E1)),
     RadialMenuItem(
+        key: 'age',
+        label: 'Agenda',
+        icon: Icons.note_alt_rounded,
+        color: Colors.yellowAccent),
+    RadialMenuItem(
         key: 'ring',
         label: 'Nostringer',
         icon: Icons.fingerprint_rounded,
