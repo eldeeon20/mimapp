@@ -1,46 +1,129 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:flutter_background_service/flutter_background_service.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../colab_cli/colab_auth.dart';
 import '../colab_cli/colab_config.dart';
 import '../colab_cli/colab_keep_alive.dart';
 import '../colab_cli/colab_sessions.dart';
+// import 'notification_service.dart'; // COMENTADO: no usar, la activa ya existe (777).
+import 'status_notifier.dart';
 
 /// Servicio Colab: singleton que vive toda la vida de la app.
-/// Auth + keep-alive + sesiones. La UI solo lee de acá.
+/// Auth + sesiones. La UI solo lee de acá.
+///
+/// - SIN autodetect y SIN ping en la app: el ÚNICO ping vive en el isolate
+///   del servicio (ColabPingMotor en bootstrap). La app solo le ordena
+///   "mantené esto en ping" vía [startKeepAlive] y "cortá" vía
+///   [stopKeepAlive]. Si la app se cierra, el servicio sigue pineando.
+/// - Todo aviso va por la notificación que YA existe (Estado 777).
 class ColabService {
   static final ColabService _instance = ColabService._();
   factory ColabService() => _instance;
   ColabService._();
 
   final ColabAuth auth = ColabAuth();
-  late final ColabKeepAlive keepAlive = ColabKeepAlive(auth);
   late final ColabSessions sessions = ColabSessions(auth);
+
+  // Espejo local de lo que pinea el servicio (para mostrar en 777).
+  // NO pinea: solo display. El ping real está en el isolate de fondo.
 
   bool _initialized = false;
 
   /// Cantidad de sesiones de Colab activas (para el panel de estado).
   int activeSessionCount = 0;
 
-  /// Endpoint del keep-alive actualmente activo (null = inactivo).
+  /// Endpoint que el servicio mantiene en ping (null = nada).
   String? activeEndpoint;
 
-  /// Mantiene Colab vivo en SEGUNDO PLANO aunque se cierre el menú.
-  /// No se detiene al salir del diálogo: vive con el singleton.
-  void startKeepAlive(String endpoint) {
+  /// Cuándo empezó el servicio a pinearlo (para el contador de 777).
+  DateTime? espejoInicio;
+
+  /// Pings OK contados por el servicio (lo escribe en el estado).
+  int espejoPings = 0;
+
+  /// true si el servicio mantiene algo en ping (espejo local).
+  bool get pingActivo => activeEndpoint != null && activeEndpoint!.isNotEmpty;
+
+  Duration get espejoElapsed => espejoInicio != null
+      ? DateTime.now().difference(espejoInicio!)
+      : Duration.zero;
+
+  /// Ping MANUAL: le dice al servicio "mantené este endpoint en ping".
+  /// Recarga tokens (el login del diálogo usa otra instancia de auth).
+  Future<void> startKeepAlive(String endpoint) async {
+    if (endpoint.isEmpty) return;
+    try {
+      await auth.loadTokens();
+    } catch (_) {}
+    final t = auth.tokens;
+    if (t == null) throw StateError('No autenticado en Colab');
     activeEndpoint = endpoint;
-    keepAlive.start(endpoint);
+    espejoInicio = DateTime.now();
+    espejoPings = 0;
+    try {
+      await FlutterBackgroundService().invoke('startPing', {
+        'endpoint': endpoint,
+        'accessToken': t.accessToken,
+        'refreshToken': t.refreshToken,
+        'expiry': t.expiry.toIso8601String(),
+        'clientId': ColabConfig.clientId,
+        'clientSecret': ColabConfig.clientSecret,
+      });
+    } catch (_) {}
+    StatusNotifier.instance.refresh();
   }
 
-  /// Detiene el keep-alive (solo por acción explícita del usuario).
-  void stopKeepAlive() {
-    keepAlive.stop();
+  /// Corta el ping del servicio (solo acción explícita del usuario).
+  Future<void> stopKeepAlive() async {
+    try {
+      await FlutterBackgroundService().invoke('stopPing');
+    } catch (_) {}
     activeEndpoint = null;
+    espejoInicio = null;
+    espejoPings = 0;
+    StatusNotifier.instance.refresh();
   }
 
-  /// Inicializar: carga tokens guardados al arrancar la app.
+  /// Inicializar: carga tokens y recupera el espejo de lo que el
+  /// servicio ya pineaba (si la app se cerró y el servicio siguió).
   Future<void> init() async {
     if (_initialized) return;
     _initialized = true;
     await auth.loadTokens();
+    await _recuperarEspejo();
   }
+
+  /// Lee el estado que escribe el servicio: si sigue vivo, la 777 lo
+  /// muestra sin arrancar ningún ping en la app.
+  Future<void> _recuperarEspejo() async {
+    try {
+      final dir = await getApplicationSupportDirectory();
+      final f = File('${dir.path}/colab/colab_ping_estado.json');
+      if (!await f.exists()) return;
+      final d = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
+      if (d['vivo'] != true) return;
+      final ep = '${d['endpoint'] ?? ''}';
+      if (ep.isEmpty) return;
+      final cuando = DateTime.tryParse('${d['cuando'] ?? ''}');
+      // Fresco = el servicio escribió hace menos de 5 min (sigue vivo).
+      if (cuando == null ||
+          DateTime.now().difference(cuando) > const Duration(minutes: 5)) {
+        return;
+      }
+      activeEndpoint = ep;
+      espejoInicio = DateTime.tryParse('${d['inicio'] ?? ''}');
+      espejoPings = (d['pingsOk'] as int?) ?? 0;
+    } catch (_) {}
+  }
+
+  // COMENTADO: autodetect desactivado, el ping es solo manual.
+  // Se deja sin borrar.
+  bool autoDetect = false;
+  // Timer? _watchdog;
+  // void _arrancarWatchdog() {}
+  // Future<void> _vigilar() async {}
 }

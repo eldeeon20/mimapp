@@ -154,7 +154,10 @@ class _HomePageState extends State<HomePage> {
     Navigator.of(context).push(MaterialPageRoute(
       builder: (_) => Scaffold(
         appBar: AppBar(title: Text(title)),
-        body: SafeArea(child: child),
+        // top:false: el AppBar ya ocupa su lugar; con top:true el SafeArea
+        // reservaba la altura de la barra de estado (oculta en inmersivo)
+        // y quedaba la franja sin dibujar debajo del AppBar.
+        body: SafeArea(top: false, child: child),
       ),
     ));
   }

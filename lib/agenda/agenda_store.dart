@@ -6,7 +6,6 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../services/crypto_vault.dart';
-import '../services/settings.dart';
 
 /// Una entrada de la agenda: cosa/nota con título y cuerpo.
 class AgendaItem {
@@ -42,20 +41,82 @@ class AgendaItem {
 }
 
 /// Agenda persistente: el JSON se guarda CIFRADO con CryptoVault
-/// (AES-256-GCM v2, envelope PRBX) en appSupport/agenda.pr.
-/// La clave es [Settings.instance.masterKey], igual que el resto
-/// de los .pr de la app.
+/// (AES-256-GCM v2, envelope PRBX) en appSupport/<nombre>.pr.
+/// La clave es la pass que pide la pantalla al abrir (NO la masterKey
+/// global): cada agenda tiene su nombre y su pass.
 class AgendaStore extends ChangeNotifier {
   AgendaStore._();
   static final AgendaStore instance = AgendaStore._();
 
-  static const _fileName = 'agenda.pr';
+  String _fileName = 'agenda.pr';
+  String _pass = '';
+  bool _abierta = false;
+
+  /// Nombre actual (sin .pr). Vacío = aún no abierta.
+  String nombreActual = '';
+
+  /// true si ya se abrió con nombre+pass (pantalla muestra la lista).
+  bool get abierta => _abierta;
 
   final List<AgendaItem> items = [];
   bool _loaded = false;
   bool _busy = false;
 
   bool get busy => _busy;
+
+  /// Nombre a archivo: solo letras/números/guion/piso, máx 40.
+  static String sanearNombre(String s) {
+    final limpio = s.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9_-]'), '');
+    if (limpio.isEmpty) return 'agenda';
+    return limpio.length > 40 ? limpio.substring(0, 40) : limpio;
+  }
+
+  /// Abre (o crea) la agenda [nombre] con [pass]. false = pass mal
+  /// (el archivo existe y no descifra) o pass vacío.
+  Future<bool> abrir(String nombre, String pass) async {
+    if (pass.isEmpty) return false;
+    _fileName = '${sanearNombre(nombre)}.pr';
+    nombreActual = sanearNombre(nombre);
+    _pass = pass;
+    _loaded = false;
+    _abierta = false;
+    items.clear();
+    final f = await _file();
+    if (await f.exists()) {
+      try {
+        final raw = await f.readAsBytes();
+        final plain = await CryptoVault.decrypt(raw, _pass);
+        if (plain == null) {
+          // Existe pero no abre con esta pass: no tocar nada.
+          items.clear();
+          notifyListeners();
+          return false;
+        }
+        final list = jsonDecode(utf8.decode(plain))['items'] as List? ?? [];
+        for (final e in list) {
+          final it = AgendaItem.fromJson(e as Map<String, dynamic>);
+          if (it.id.isNotEmpty) items.add(it);
+        }
+        _ordenar();
+      } catch (_) {
+        return false;
+      }
+    }
+    _loaded = true;
+    _abierta = true;
+    notifyListeners();
+    return true;
+  }
+
+  /// Cierra: olvida pass e items en memoria (el .pr queda en disco).
+  void cerrar() {
+    _pass = '';
+    _abierta = false;
+    _loaded = false;
+    nombreActual = '';
+    items.clear();
+    notifyListeners();
+  }
 
   Future<File> _file() async {
     final dir = await getApplicationSupportDirectory();
@@ -66,13 +127,13 @@ class AgendaStore extends ChangeNotifier {
   Future<String> ruta() async => (await _file()).path;
 
   Future<void> ensureLoaded() async {
-    if (_loaded) return;
+    if (_loaded || !_abierta) return;
     _loaded = true;
     try {
       final f = await _file();
       if (!f.existsSync()) return;
       final raw = await f.readAsBytes();
-      final plain = await CryptoVault.decrypt(raw, Settings.instance.masterKey);
+      final plain = await CryptoVault.decrypt(raw, _pass);
       if (plain == null) return; // clave mal o archivo alterado
       final list = jsonDecode(utf8.decode(plain))['items'] as List? ?? [];
       items.clear();
@@ -86,12 +147,13 @@ class AgendaStore extends ChangeNotifier {
   }
 
   Future<bool> _persist() async {
+    if (!_abierta || _pass.isEmpty) return false;
     try {
       final f = await _file();
       final json =
           utf8.encode(jsonEncode({'items': items.map((e) => e.toJson()).toList()}));
       final enc = await CryptoVault.encrypt(
-          Uint8List.fromList(json), Settings.instance.masterKey);
+          Uint8List.fromList(json), _pass);
       await f.writeAsBytes(enc, flush: true);
       return true;
     } catch (_) {

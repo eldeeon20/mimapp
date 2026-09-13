@@ -35,11 +35,13 @@ class NotificationService {
   /// y mata el proceso de la app. Funciona igual desde primer o segundo
   /// plano (es static puro, sin UI).
   static Future<void> exitApp() async {
-    // 1) parar el foreground service
+    // 1) parar el foreground service y ESPERAR a que procese stopSelf.
+    // Con 300ms no alcanzaba: Android veía un service STICKY muerto y lo
+    // resucitaba (la app volvía sola). 1500ms le da tiempo a suicidarse.
     try {
       FlutterBackgroundService().invoke('stop');
     } catch (_) {}
-    await Future.delayed(const Duration(milliseconds: 300));
+    await Future.delayed(const Duration(milliseconds: 1500));
 
     // 2) cancelar todas las notificaciones persistentes conocidas
     for (final id in [
@@ -81,6 +83,8 @@ class NotificationService {
             exitApp();
           }
         }
+        // 'abrir' no hace nada acá: showsUserInterface:true ya trae la
+        // app al frente solo.
       },
       // Camino CRÍTICO: tocar "Salir" con la app en segundo plano.
       onDidReceiveBackgroundNotificationResponse:
@@ -110,6 +114,30 @@ class NotificationService {
   static FlutterLocalNotificationsPlugin get plugin => _plugin;
   static String get channelId => _channelId;
   static String get channelName => _channelName;
+
+  // COMENTADO: no usar, la notificación activa ya existe
+  // (Estado de Secure App 777). Se deja el código sin borrar.
+  // static Future<void> showColabEvento(String titulo, String cuerpo) async {
+  //   const details = NotificationDetails(
+  //     android: AndroidNotificationDetails(
+  //       _channelId,
+  //       _channelName,
+  //       channelDescription: 'Avisos de Colab',
+  //       importance: Importance.high,
+  //       priority: Priority.high,
+  //       ongoing: false,
+  //       showWhen: true,
+  //     ),
+  //   );
+  //   try {
+  //     await _plugin.show(
+  //       id: 778,
+  //       title: titulo,
+  //       body: cuerpo,
+  //       notificationDetails: details,
+  //     );
+  //   } catch (_) {}
+  // }
 
   /// Notificación de servicio en primer plano con botón "Salir".
   /// Debe mostrarse con el mismo id que usa flutter_background_service.

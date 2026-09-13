@@ -352,7 +352,7 @@ class _DhtBuscaScreenState extends State<DhtBuscaScreen> {
                       'Lo resuelto (nombre/tamaño) aparece acá. Con el tiempo crece.',
                       style: TextStyle(color: Colors.white38, fontSize: 12)))
             else
-              ..._resultados.map((h) => ListTile(
+              ..._resultados.map((h) => ExpansionTile(
                     dense: true,
                     title: Text(h.nombre,
                         maxLines: 2, overflow: TextOverflow.ellipsis),
@@ -372,6 +372,31 @@ class _DhtBuscaScreenState extends State<DhtBuscaScreen> {
                           icon: const Icon(Icons.download_rounded, size: 18),
                           onPressed: _busy ? null : () => _aRqbit(h)),
                     ]),
+                    children: [
+                      if (h.archivosLista.isEmpty)
+                        const Padding(
+                            padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+                            child: Text('sin lista de archivos (índice viejo)',
+                                style: TextStyle(
+                                    fontSize: 11, color: Colors.white38)))
+                      else
+                        ...h.archivosLista.take(100).map((a) => Padding(
+                            padding:
+                                const EdgeInsets.fromLTRB(16, 1, 16, 1),
+                            child: Row(children: [
+                              const Icon(Icons.insert_drive_file_rounded,
+                                  size: 14, color: Colors.white38),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                  child: Text(a,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                          fontFamily: 'monospace',
+                                          fontSize: 10,
+                                          color: Colors.white70))),
+                            ]))),
+                    ],
                   )),
             const Divider(height: 18),
             _seccion('LOG (rqbit / red) · ${_logs.length}'),

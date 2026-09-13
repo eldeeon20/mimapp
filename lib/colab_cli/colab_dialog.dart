@@ -343,8 +343,8 @@ class _ColabDialogBodyState extends State<_ColabDialogBody> {
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          if (ColabService().keepAlive.isRunning &&
-                              ColabService().keepAlive.currentEndpoint == s.endpoint)
+                          if (ColabService().pingActivo &&
+                              ColabService().activeEndpoint == s.endpoint)
                             const Icon(Icons.timer,
                                 size: 16, color: Colors.blue),
                           PopupMenuButton<String>(
@@ -357,7 +357,7 @@ class _ColabDialogBodyState extends State<_ColabDialogBody> {
                                   _openTasks(s);
                                   break;
                                 case 'keepalive':
-                                  ColabService().startKeepAlive(s.endpoint);
+                                  await ColabService().startKeepAlive(s.endpoint);
                                   StatusNotifier.instance.refresh();
                                   setState(() {});
                                   break;
@@ -411,7 +411,7 @@ class _ColabDialogBodyState extends State<_ColabDialogBody> {
                       ),
                     ),
                   )),
-              if (ColabService().keepAlive.isRunning)
+              if (ColabService().pingActivo)
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
                   child: Row(
@@ -420,11 +420,11 @@ class _ColabDialogBodyState extends State<_ColabDialogBody> {
                       const SizedBox(width: 6),
                       Expanded(
                           child: Text(
-                              'Keep-alive: ${ColabService().keepAlive.currentEndpoint} '
-                              '(${ColabService().keepAlive.elapsed.inMinutes} min)')),
+                              'Keep-alive (servicio): ${ColabService().activeEndpoint} '
+                              '(${ColabKeepAlive.fmtDur(ColabService().espejoElapsed)})')),
                       TextButton(
-                        onPressed: () {
-                          ColabService().stopKeepAlive();
+                        onPressed: () async {
+                          await ColabService().stopKeepAlive();
                           StatusNotifier.instance.refresh();
                           setState(() {});
                         },
@@ -433,6 +433,20 @@ class _ColabDialogBodyState extends State<_ColabDialogBody> {
                     ],
                   ),
                 ),
+              // COMENTADO: autodetect desactivado, el ping es solo manual
+              // (botón Keep-alive de cada celda). Se deja sin borrar.
+              // Row(children: [
+              //   Switch(
+              //       value: ColabService().autoDetect,
+              //       onChanged: (v) {
+              //         ColabService().autoDetect = v;
+              //         setState(() {});
+              //       }),
+              //   const Expanded(
+              //       child: Text(
+              //           'Autodetectar celdas nuevas y mantenerlas vivas (avisa al enganchar/desconectar)',
+              //           style: TextStyle(fontSize: 11, color: Colors.grey))),
+              // ]),
             ],
             if (_loading) ...[
               const SizedBox(height: 12),

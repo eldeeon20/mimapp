@@ -29,6 +29,9 @@ class _WebkTestScreenState extends State<WebkTestScreen> {
   bool _indiceListo = false;
   double _progreso = 1;
 
+  /// Pantalla completa: solo el WebView (sin botones ni log).
+  bool _pantallaCompleta = false;
+
   /// Llave de sesión para el puente JS→Dart (se inyecta en la página tras
   /// cargarla; el html estático nunca la contiene). Sin llave válida no
   /// hay autorización, aunque la página la pida.
@@ -52,8 +55,12 @@ class _WebkTestScreenState extends State<WebkTestScreen> {
         if (_log.length > 40) _log.removeAt(0);
       });
 
-  /// hola.html del asset; si falla, el respaldo embebido.
+  /// hola.html del asset + puerta/demo embebidos; si falla el asset,
+  /// el respaldo embebido.
   Future<void> _cargarIndice() async {
+    _indice.registrarTexto('puerta.html', kWebkPuerta);
+    _indice.registrarTexto('demo.html', kWebkDemo);
+    _add('✓ puerta.html + demo.html embebidos (puente verificado)');
     try {
       final html =
           await rootBundle.loadString('lib/services/webk/hola.html');
@@ -84,7 +91,11 @@ class _WebkTestScreenState extends State<WebkTestScreen> {
 
   /// Puente JS→Dart ('webk'): la página pide, Dart autentica y decide.
   /// - estado: lectura libre (stats del server).
+  /// - hora: lectura libre (reloj de Dart).
   /// - autorizar: SOLO con la llave de sesión inyectada; si falla → DENEGADO.
+  /// - abrir: "oye server, habilitame tal página" → Dart verifica la llave
+  ///   y si OK manda la señal + carga el html real. Sin puente verificado
+  ///   el contenido no se revela (en Chrome queda bloqueado).
   dynamic _onJs(List<dynamic> args) {
     final cmd = args.isNotEmpty && args[0] is Map
         ? Map<String, dynamic>.from(args[0] as Map)
@@ -96,6 +107,8 @@ class _WebkTestScreenState extends State<WebkTestScreen> {
           'rechazadas': _server.rechazadas,
           'puerto': _server.puerto,
         };
+      case 'hora':
+        return {'dart_ahora': DateTime.now().toIso8601String()};
       case 'autorizar':
         final ok = _llaveSesion.isNotEmpty &&
             cmd['llave']?.toString() == _llaveSesion;
@@ -106,8 +119,32 @@ class _WebkTestScreenState extends State<WebkTestScreen> {
         }
         if (ok) _server.autorizarUna();
         return ok ? 'OK' : 'DENEGADO';
+      case 'abrir':
+        final ok = _llaveSesion.isNotEmpty &&
+            cmd['llave']?.toString() == _llaveSesion;
+        final pagina = cmd['pagina']?.toString() ?? '';
+        if (!ok || !_indice.paginas.contains(pagina)) {
+          if (mounted) _add('✗ abrir "$pagina": DENEGADO (puente no verificado)');
+          return 'DENEGADO';
+        }
+        if (mounted) _add('· Dart habilita "$pagina" (puente OK)');
+        _server.autorizarUna();
+        _cargarPagina(pagina);
+        return 'OK';
       default:
         return 'CMD?';
+    }
+  }
+
+  /// Carga una página registrada en el WebView de ESTA ventana.
+  Future<void> _cargarPagina(String nombre) async {
+    if (_web == null) return;
+    try {
+      await _web!.loadUrl(
+        urlRequest: URLRequest(url: WebUri('${_server.baseUrl}/$nombre')),
+      );
+    } catch (e) {
+      _add('✗ cargar: $e');
     }
   }
 
@@ -116,14 +153,16 @@ class _WebkTestScreenState extends State<WebkTestScreen> {
     if (_busy || !_server.corriendo || _web == null) return;
     _server.autorizarUna();
     _add('· señal enviada (1 conexión autorizada)');
-    try {
-      await _web!.loadUrl(
-        urlRequest:
-            URLRequest(url: WebUri('${_server.baseUrl}/hola.html')),
-      );
-    } catch (e) {
-      _add('✗ cargar: $e');
-    }
+    await _cargarPagina('hola.html');
+  }
+
+  /// Puerta: carga el cargador; el CONTENIDO solo entra si el JS
+  /// comprueba el puente y Dart lo habilita ("oye server…" → "sí, aquí").
+  Future<void> _abrirPuerta() async {
+    if (_busy || !_server.corriendo || _web == null) return;
+    _server.autorizarUna();
+    _add('· puerta cargada (el contenido espera puente verificado)');
+    await _cargarPagina('puerta.html');
   }
 
   Future<void> _detener() async {
@@ -136,6 +175,7 @@ class _WebkTestScreenState extends State<WebkTestScreen> {
   @override
   Widget build(BuildContext context) {
     final corriendo = _server.corriendo;
+    if (_pantallaCompleta) return _webPantallaCompleta();
     return Column(
       children: [
         Padding(
@@ -185,6 +225,15 @@ class _WebkTestScreenState extends State<WebkTestScreen> {
                 label: const Text('Abrir hola',
                     style: TextStyle(fontSize: 13)),
               ),
+              FilledButton.tonalIcon(
+                onPressed: (!corriendo || !_indiceListo)
+                    ? null
+                    : _abrirPuerta,
+                icon: const Icon(Icons.verified_user_rounded,
+                    size: 18),
+                label: const Text('Puente demo',
+                    style: TextStyle(fontSize: 13)),
+              ),
               OutlinedButton.icon(
                 onPressed: corriendo
                     ? () {
@@ -202,55 +251,18 @@ class _WebkTestScreenState extends State<WebkTestScreen> {
                 label: const Text('Detener',
                     style: TextStyle(fontSize: 13)),
               ),
+              IconButton(
+                tooltip: 'Pantalla completa',
+                icon: const Icon(Icons.fullscreen_rounded, size: 20),
+                onPressed: _indiceListo
+                    ? () => setState(() => _pantallaCompleta = true)
+                    : null,
+              ),
             ],
           ),
         ),
         const SizedBox(height: 8),
-        Expanded(
-          child: Container(
-            margin: const EdgeInsets.fromLTRB(12, 0, 12, 0),
-            decoration: BoxDecoration(
-              border: Border.all(color: Colors.white12),
-              borderRadius: BorderRadius.circular(10),
-              color: Colors.black,
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: Stack(
-              children: [
-                InAppWebView(
-                  initialUrlRequest: URLRequest(
-                      url: WebUri('about:blank')),
-                  onWebViewCreated: (c) {
-                    _web = c;
-                    c.addJavaScriptHandler(
-                      handlerName: 'webk',
-                      callback: _onJs,
-                    );
-                  },
-                  onProgressChanged: (_, p) {
-                    if (mounted) {
-                      setState(() => _progreso = p / 100);
-                    }
-                  },
-                  onLoadStop: (_, url) async {
-                    // Llave de sesión a la página YA cargada (el html
-                    // estático nunca la trae escrita).
-                    if (_llaveSesion.isEmpty) return;
-                    try {
-                      await _web?.evaluateJavascript(
-                        source:
-                            "window.WEBK_LLAVE='$_llaveSesion';",
-                      );
-                    } catch (_) {}
-                  },
-                ),
-                if (_progreso < 1)
-                  const LinearProgressIndicator(
-                      value: null, minHeight: 2),
-              ],
-            ),
-          ),
-        ),
+        Expanded(child: _marcoWeb()),
         Container(
           height: 90,
           width: double.infinity,
@@ -271,6 +283,81 @@ class _WebkTestScreenState extends State<WebkTestScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  /// WebView a pantalla completa con botón para volver.
+  Widget _webPantallaCompleta() {
+    return Stack(
+      children: [
+        _marcoWeb(borde: false),
+        Positioned(
+          top: 8,
+          right: 8,
+          child: Material(
+            color: Colors.black54,
+            borderRadius: BorderRadius.circular(20),
+            child: IconButton(
+              tooltip: 'Salir de pantalla completa',
+              icon: const Icon(Icons.fullscreen_exit_rounded,
+                  color: Colors.white, size: 20),
+              onPressed: () =>
+                  setState(() => _pantallaCompleta = false),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Marco del WebView embebido (modo normal con borde, completo sin).
+  Widget _marcoWeb({bool borde = true}) {
+    return Container(
+      margin: borde
+          ? const EdgeInsets.fromLTRB(12, 0, 12, 0)
+          : EdgeInsets.zero,
+      decoration: borde
+          ? BoxDecoration(
+              border: Border.all(color: Colors.white12),
+              borderRadius: BorderRadius.circular(10),
+              color: Colors.black,
+            )
+          : const BoxDecoration(color: Colors.black),
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
+        children: [
+          InAppWebView(
+            initialUrlRequest: URLRequest(
+                url: WebUri('about:blank')),
+            onWebViewCreated: (c) {
+              _web = c;
+              c.addJavaScriptHandler(
+                handlerName: 'webk',
+                callback: _onJs,
+              );
+            },
+            onProgressChanged: (_, p) {
+              if (mounted) {
+                setState(() => _progreso = p / 100);
+              }
+            },
+            onLoadStop: (_, url) async {
+              // Llave de sesión a la página YA cargada (el html
+              // estático nunca la trae escrita).
+              if (_llaveSesion.isEmpty) return;
+              try {
+                await _web?.evaluateJavascript(
+                  source:
+                      "window.WEBK_LLAVE='$_llaveSesion';",
+                );
+              } catch (_) {}
+            },
+          ),
+          if (_progreso < 1)
+            const LinearProgressIndicator(
+                value: null, minHeight: 2),
+        ],
+      ),
     );
   }
 }

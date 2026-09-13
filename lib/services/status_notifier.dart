@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import '../ai/laurelia_chat.dart';
+import '../colab_cli/colab_keep_alive.dart';
 import '../services/colab_service.dart';
 import 'notification_service.dart';
 
@@ -62,15 +63,19 @@ class StatusNotifier {
   }
 
   /// Refresca con estado real (Colab, Laurelia) y re-pinta la notificación.
+  /// La línea de Colab lleva el contador de lo que pinea el SERVICIO
+  /// ("ACTIVO abc123 · 12m 40s · ping servicio") aunque la app esté en
+  /// fondo. La app NO pinea: solo muestra el espejo.
   void refresh() {
     final cs = ColabService();
     // Laurelia: tokens generados (contador estático).
     final tokens = LaureliaChat.generatedTokens;
 
-    final active = cs.keepAlive.isRunning;
+    final active = cs.pingActivo;
     final count = cs.activeSessionCount;
     final colabLine = active
-        ? 'Colab: ACTIVO (${cs.activeEndpoint ?? ''})'
+        ? 'Colab: ACTIVO (${cs.activeEndpoint ?? ''} · '
+            '${ColabKeepAlive.fmtDur(cs.espejoElapsed)} · ping servicio)'
         : (count > 0 ? 'Colab: $count sesión(es)' : 'Colab: inactivo');
 
     extra = '$colabLine · Laurelia: $tokens tokens';
@@ -80,6 +85,13 @@ class StatusNotifier {
   }
 
   Future<void> show() async => _safeShow();
+
+  /// Aviso sobre la notificación que YA existe (777): pisa el extra con
+  /// el mensaje y repinta. Sin crear notificaciones nuevas.
+  void aviso(String msg) {
+    extra = msg;
+    show();
+  }
 
   Future<void> _safeShow() async {
     // ↓/↑ solo si hay bytes reales; nada de números de mentira.
@@ -98,6 +110,23 @@ class StatusNotifier {
         ongoing: true,
         showWhen: false,
         styleInformation: BigTextStyleInformation(body),
+        // Botones en la notificación que YA existe (777): se postea desde
+        // la UI principal así los taps sí llegan. Abrir trae la app al
+        // frente; Salir = kill total (misma rutina que en segundo plano).
+        actions: const [
+          AndroidNotificationAction(
+            'abrir',
+            'Abrir',
+            showsUserInterface: true,
+            cancelNotification: false,
+          ),
+          AndroidNotificationAction(
+            'exit',
+            'Salir',
+            showsUserInterface: false,
+            cancelNotification: false,
+          ),
+        ],
       ),
     );
     try {

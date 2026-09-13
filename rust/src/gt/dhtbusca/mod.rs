@@ -74,6 +74,11 @@ pub struct Hallado {
     pub creation_date: String,
     #[serde(default)]
     pub comment: String,
+    /// Lista de archivos del torrent ("ruta/relativa · 1.2M"), máx 100.
+    /// rqbit ya trae los nombres sin bajar contenido; antes solo se
+    /// guardaba el conteo. Con `default` el JSON viejo sigue cargando.
+    #[serde(default)]
+    pub archivos_lista: Vec<String>,
 }
 
 /// Captura en vivo: cada hash interceptado por el spider, con estado de
@@ -98,6 +103,20 @@ fn ahora_ms() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
+}
+
+/// Tamaño legible para la lista de archivos ("1.2M"). Misma escala que
+/// la UI Dart (_tamano): B/K/M/G.
+fn fmt_tamano(n: u64) -> String {
+    if n < 1024 {
+        format!("{n}B")
+    } else if n < 1_048_576 {
+        format!("{:.1}K", n as f64 / 1024.0)
+    } else if n < 1_073_741_824 {
+        format!("{:.1}M", n as f64 / 1_048_576.0)
+    } else {
+        format!("{:.2}G", n as f64 / 1_073_741_824.0)
+    }
 }
 
 /// Ping KRPC find_node a cada semilla bootstrap: distingue en segundos
@@ -508,6 +527,8 @@ impl DhtBusca {
     }
 
     /// Búsqueda de texto por nombre sobre TODO el índice acumulado.
+    /// También matchea dentro de la lista de archivos (rqbit ya trae los
+    /// nombres): buscar "s01e02" encuentra el torrent que lo contiene.
     pub fn buscar(&self, texto: &str) -> Vec<Hallado> {
         let q = texto.trim().to_lowercase();
         if q.is_empty() {
@@ -517,7 +538,10 @@ impl DhtBusca {
         let mut hits: Vec<Hallado> = est
             .hallados
             .iter()
-            .filter(|h| h.nombre.to_lowercase().contains(&q))
+            .filter(|h| {
+                h.nombre.to_lowercase().contains(&q)
+                    || h.archivos_lista.iter().any(|a| a.to_lowercase().contains(&q))
+            })
             .cloned()
             .collect();
         hits.sort_by(|a, b| b.fecha_ms.cmp(&a.fecha_ms));
@@ -786,6 +810,23 @@ async fn meta_loop(
                         }
                         let tamano = meta.info.iter_file_lengths().sum::<u64>();
                         let archivos = meta.info.iter_file_lengths().count();
+                        // Nombres de archivos que rqbit ya resolvió (sin
+                        // bajar contenido): file_infos trae ruta relativa +
+                        // tamaño por archivo. Máx 100, nombres a 200 chars.
+                        let archivos_lista: Vec<String> = meta
+                            .file_infos
+                            .iter()
+                            .take(100)
+                            .map(|f| {
+                                let ruta: String = f
+                                    .relative_filename
+                                    .to_string_lossy()
+                                    .chars()
+                                    .take(200)
+                                    .collect();
+                                format!("{} · {}", ruta, fmt_tamano(f.len))
+                            })
+                            .collect();
                         let (creation_date, comment) =
                             parse_root_metadata(meta.torrent_bytes.as_ref());
                         Some(Hallado {
@@ -796,6 +837,7 @@ async fn meta_loop(
                             fecha_ms: ahora_ms(),
                             creation_date,
                             comment,
+                            archivos_lista,
                         })
                     })
                     .ok()
@@ -807,7 +849,20 @@ async fn meta_loop(
         });
         let cosechados = cosechados_celd.into_inner();
         for h in &cosechados {
-            pendientes.remove(&h.info_hash);
+            // Cuánto tardó rqbit en resolver ESTE hash: desde que entró a
+            // pendientes hasta que with_metadata ya lo trae. Sirve para
+            // responder "cuánto tiempo por hash" con datos reales.
+            if let Some(t0) = pendientes.remove(&h.info_hash) {
+                let secs = t0.elapsed().as_secs();
+                logs.push(format!(
+                    "✓ {} resuelto en {}s · {} arch",
+                    h.nombre.chars().take(60).collect::<String>(),
+                    secs,
+                    h.archivos
+                ));
+            } else {
+                pendientes.remove(&h.info_hash);
+            }
         }
         // Marcar en la base de capturas los que ya resolvieron su metadato.
         {

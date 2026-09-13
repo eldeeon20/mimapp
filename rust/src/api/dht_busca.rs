@@ -16,6 +16,9 @@ pub struct HalladoItem {
     pub fecha_ms: i64,
     pub creation_date: String,
     pub comment: String,
+    /// Nombres de archivos ("ruta · 1.2M"), máx 100. rqbit los resuelve
+    /// sin bajar contenido.
+    pub archivos_lista: Vec<String>,
 }
 
 /// Captura en vivo del spider: un info_hash interceptado, con estado de
@@ -51,6 +54,7 @@ fn mapear(h: HalladoInt) -> HalladoItem {
         fecha_ms: h.fecha_ms,
         creation_date: h.creation_date,
         comment: h.comment,
+        archivos_lista: h.archivos_lista,
     }
 }
 
