@@ -7,7 +7,6 @@ import 'package:path_provider/path_provider.dart';
 
 import '../colab_cli/colab_auth.dart';
 import '../colab_cli/colab_config.dart';
-import '../colab_cli/colab_keep_alive.dart';
 import '../colab_cli/colab_sessions.dart';
 // import 'notification_service.dart'; // COMENTADO: no usar, la activa ya existe (777).
 import 'status_notifier.dart';
@@ -65,7 +64,8 @@ class ColabService {
     espejoInicio = DateTime.now();
     espejoPings = 0;
     try {
-      await FlutterBackgroundService().invoke('startPing', {
+      // invoke es void en flutter_background_service 5.1.0: sin await.
+      FlutterBackgroundService().invoke('startPing', {
         'endpoint': endpoint,
         'accessToken': t.accessToken,
         'refreshToken': t.refreshToken,
@@ -80,7 +80,8 @@ class ColabService {
   /// Corta el ping del servicio (solo acción explícita del usuario).
   Future<void> stopKeepAlive() async {
     try {
-      await FlutterBackgroundService().invoke('stopPing');
+      // invoke es void en 5.1.0: sin await.
+      FlutterBackgroundService().invoke('stopPing');
     } catch (_) {}
     activeEndpoint = null;
     espejoInicio = null;
