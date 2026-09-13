@@ -1,18 +1,26 @@
 import 'dart:io';
 
 import 'package:flutter/services.dart';
-import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'status_notifier.dart';
 
+/// NOTIFICACIONES (archivo separado del servicio).
+/// Acá NO hay nada del servicio: para salir se usa el callback
+/// [onExitBg] que pone bootstrap (ServicioFondo.salir).
 /// Handler para cuando tocan "Salir" con la app EN SEGUNDO PLANO.
 /// Obligatorio top-level con vm:entry-point; sin esto el botón no hace
 /// nada salvo que la app esté abierta en primer plano.
 @pragma('vm:entry-point')
 void notificationBackgroundHandler(NotificationResponse response) {
   if (response.actionId == 'exit') {
-    NotificationService.exitApp();
+    final salir = NotificationService.salidaFondo;
+    if (salir != null) {
+      salir();
+    } else {
+      // Sin callback: al menos matar el proceso.
+      exit(0);
+    }
   }
 }
 
@@ -30,20 +38,15 @@ class NotificationService {
   /// el foregroundServiceNotificationId de flutter_background_service).
   static const serviceNotificationId = 888;
 
-  /// SALIR = KILL TOTAL. Detiene el servicio en primer plano, cancela
-  /// TODAS las notificaciones (servicio 888, estado 777, descargas 9000+)
-  /// y mata el proceso de la app. Funciona igual desde primer o segundo
-  /// plano (es static puro, sin UI).
-  static Future<void> exitApp() async {
-    // 1) parar el foreground service y ESPERAR a que procese stopSelf.
-    // Con 300ms no alcanzaba: Android veía un service STICKY muerto y lo
-    // resucitaba (la app volvía sola). 1500ms le da tiempo a suicidarse.
-    try {
-      FlutterBackgroundService().invoke('stop');
-    } catch (_) {}
-    await Future.delayed(const Duration(milliseconds: 1500));
+  /// Callback de salida que pone bootstrap (ServicioFondo.salir).
+  /// Así este archivo no importa nada del servicio.
+  static Future<void> Function()? salidaFondo;
 
-    // 2) cancelar todas las notificaciones persistentes conocidas
+  /// Da de baja todas las notificaciones persistentes conocidas.
+  /// La docu da de baja así: cancel(id) una por una. La 888 del
+  /// servicio NO sale con cancel mientras el servicio corre: por eso
+  /// ServicioFondo primero para el servicio y espera su confirmación.
+  static Future<void> cancelPersistentes() async {
     for (final id in [
       serviceNotificationId,
       StatusNotifier.notificationId,
@@ -53,8 +56,10 @@ class NotificationService {
         await _plugin.cancel(id: id);
       } catch (_) {}
     }
+  }
 
-    // 3) cerrar la app de verdad: quitar tarea + kill del proceso
+  /// Cierra la app de verdad: quitar tarea + kill del proceso.
+  static Future<void> matarProceso() async {
     try {
       await SystemNavigator.pop();
     } catch (_) {}
@@ -64,7 +69,9 @@ class NotificationService {
 
   static Future<void> init({
     Future<void> Function()? onExitAction,
+    Future<void> Function()? onExitBg,
   }) async {
+    salidaFondo = onExitBg;
     await _plugin.initialize(
       settings: const InitializationSettings(
         android: AndroidInitializationSettings('ic_bg_service_small'),
@@ -79,8 +86,8 @@ class NotificationService {
           // App en primer plano: mismo kill total.
           if (onExitAction != null) {
             onExitAction();
-          } else {
-            exitApp();
+          } else if (salidaFondo != null) {
+            salidaFondo!();
           }
         }
         // 'abrir' no hace nada acá: showsUserInterface:true ya trae la
@@ -138,35 +145,6 @@ class NotificationService {
   //     );
   //   } catch (_) {}
   // }
-
-  /// Notificación de servicio en primer plano con botón "Salir".
-  /// Debe mostrarse con el mismo id que usa flutter_background_service.
-  static Future<void> showServiceNotification() async {
-    const details = NotificationDetails(
-      android: AndroidNotificationDetails(
-        _serviceChannelId,
-        'Servicio',
-        channelDescription: 'Servicio en primer plano de la app',
-        importance: Importance.low,
-        priority: Priority.low,
-        ongoing: true,
-        showWhen: false,
-        actions: [
-          AndroidNotificationAction(
-            'exit',
-            '✕',
-            showsUserInterface: false,
-          ),
-        ],
-      ),
-    );
-    await _plugin.show(
-      id: serviceNotificationId,
-      title: 'Secure App',
-      body: 'Servicio activo · toca ✕ para salir',
-      notificationDetails: details,
-    );
-  }
 
   // ------------------------------------------------------------- descargas
 
