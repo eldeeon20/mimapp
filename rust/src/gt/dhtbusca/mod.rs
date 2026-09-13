@@ -36,13 +36,15 @@ use tokio::sync::Semaphore;
 
 use crate::gt::eventlog::EventLog;
 
-/// Hashes esperando metadatos se rinden pasado este tiempo (se libera el
-/// slot para nuevos; el torrent queda en la sesión y se indexa si resuelve).
-const PENDING_TIMEOUT: Duration = Duration::from_secs(180);
-/// Tope de espera por hash al pedir metadatos: si no resuelve en este
-/// tiempo, se suelta y sigue con el siguiente. Nunca nos quedamos colgados
-/// en un solo hash cuando hay varios en cola.
-const RESOLVE_TIMEOUT: Duration = Duration::from_secs(60);
+/// Hashes esperando metadatos: SIN límite de tiempo en cola (antes
+/// PENDING_TIMEOUT 180s). Si hay 300 hash, entran de a 8 en resolución y
+/// se marcan al resolver, aunque tarden. El tope es max_meta (300): si se
+/// llena, se saca el más viejo al insertar.
+// const PENDING_TIMEOUT: Duration = Duration::from_secs(180);
+/// Tope de espera por hash al pedir metadatos: 210s. Si no resuelve en
+/// este tiempo, se suelta y sigue con el siguiente. Nunca nos quedamos
+/// colgados en un solo hash cuando hay varios en cola.
+const RESOLVE_TIMEOUT: Duration = Duration::from_secs(210);
 /// Ritmo activo moderado (~10 consultas/seg) para no saturar la red.
 const TICK_ACTIVO: Duration = Duration::from_millis(100);
 /// Tope duro del índice en RAM (los más viejos se recortan al guardar).
@@ -786,9 +788,9 @@ async fn meta_loop(
             }
         }
 
-        // 2) evictar los atascados
-        let ahora = Instant::now();
-        pendientes.retain(|_, t| ahora.duration_since(*t) < PENDING_TIMEOUT);
+        // 2) sin evicción por tiempo: la cola no tiene límite (los 300
+        // hash esperan su turno de a 8 y se marcan al resolver).
+        // COMENTADO: pendientes.retain(|_, t| ahora.duration_since(*t) < PENDING_TIMEOUT);
 
         // 3) cosechar metadatos listos con with_torrents (API estable 9.x):
         // name/archivos/tamaño + torrent_bytes (creation_date/comentario).

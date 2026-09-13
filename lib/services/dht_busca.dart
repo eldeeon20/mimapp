@@ -30,7 +30,8 @@ class DhtBusca {
   static bool get corriendo => _corriendo;
 
   /// Crea el motor con caché en [dirCache]. No conecta todavía.
-  static Future<DhtBusca> crear(String dirCache, {int maxMeta = 300}) async {
+  /// maxMeta 2000: cada hash pasa una vez por rqbit (210s c/u, de a 8).
+  static Future<DhtBusca> crear(String dirCache, {int maxMeta = 2000}) async {
     final m =
         await rust.motorDhtNew(dirCache: dirCache, maxMeta: maxMeta);
     return DhtBusca._(m);

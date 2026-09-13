@@ -200,7 +200,8 @@ class ColabPingMotor {
 
   void arrancar() {
     _svc.on('startPing').listen((e) {
-      final m = (e is Map) ? e : <String, dynamic>{};
+      final m =
+          Map<String, dynamic>.from((e as Map?) ?? <String, dynamic>{});
       _empezar(
         endpoint: '${m['endpoint'] ?? ''}',
         access: '${m['accessToken'] ?? ''}',
