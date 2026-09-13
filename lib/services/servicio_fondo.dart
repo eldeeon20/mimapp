@@ -34,13 +34,16 @@ class ServicioFondo {
   /// Configura y arranca el servicio. Llamar una vez en initApp.
   /// [alListo] postea la 888 con ✕ desde la UI principal (los taps
   /// viven ahí; FLN no se inicializa en el fondo).
+  /// autoStart:false: el servicio NO corre siempre, solo cuando hay
+  /// celda en ping (lo prende startKeepAlive). Sin celda no hay
+  /// servicio ni 888.
   static Future<void> iniciar({required Future<void> Function() alListo}) async {
     try {
       final service = FlutterBackgroundService();
       await service.configure(
         androidConfiguration: AndroidConfiguration(
           onStart: onServiceStart,
-          autoStart: true,
+          autoStart: false,
           isForegroundMode: true,
           notificationChannelId: canalId,
           initialNotificationTitle: 'Secure App',
@@ -59,6 +62,23 @@ class ServicioFondo {
     }
   }
 
+  /// Prende el servicio a pedido (hay celda en ping).
+  static Future<void> prender() async {
+    try {
+      final service = FlutterBackgroundService();
+      if (!await service.isRunning()) await service.startService();
+    } catch (_) {}
+  }
+
+  /// true si el servicio está corriendo.
+  static Future<bool> corriendo() async {
+    try {
+      return await FlutterBackgroundService().isRunning();
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Archivo que el fondo escribe al procesar stopSelf.
   static Future<File> _flagStopFile() async {
     final dir = await getApplicationSupportDirectory();
@@ -66,7 +86,9 @@ class ServicioFondo {
   }
 
   /// Espera (poll 200ms, tope 6s) a que el fondo confirme el stop.
+  /// Si el servicio ni corre (sin celda), vuelve ya sin esperar.
   static Future<void> esperarStop() async {
+    if (!await corriendo()) return;
     for (var i = 0; i < 30; i++) {
       try {
         if (await (await _flagStopFile()).exists()) return;

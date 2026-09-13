@@ -9,6 +9,7 @@ import '../colab_cli/colab_auth.dart';
 import '../colab_cli/colab_config.dart';
 import '../colab_cli/colab_sessions.dart';
 // import 'notification_service.dart'; // COMENTADO: no usar, la activa ya existe (777).
+import 'servicio_fondo.dart';
 import 'status_notifier.dart';
 
 /// Servicio Colab: singleton que vive toda la vida de la app.
@@ -52,6 +53,7 @@ class ColabService {
       : Duration.zero;
 
   /// Ping MANUAL: le dice al servicio "mantené este endpoint en ping".
+  /// Prende el servicio a pedido (sin celda no hay servicio).
   /// Recarga tokens (el login del diálogo usa otra instancia de auth).
   Future<void> startKeepAlive(String endpoint) async {
     if (endpoint.isEmpty) return;
@@ -63,6 +65,10 @@ class ColabService {
     activeEndpoint = endpoint;
     espejoInicio = DateTime.now();
     espejoPings = 0;
+    // Sin servicio no hay ping: prenderlo primero, esperar que el
+    // fondo registre sus listeners y recién ordenarle.
+    await ServicioFondo.prender();
+    await Future.delayed(const Duration(milliseconds: 1500));
     try {
       // invoke es void en flutter_background_service 5.1.0: sin await.
       FlutterBackgroundService().invoke('startPing', {
@@ -77,16 +83,20 @@ class ColabService {
     StatusNotifier.instance.refresh();
   }
 
-  /// Corta el ping del servicio (solo acción explícita del usuario).
+  /// Corta el ping y APAGA el servicio (sin celda no queda nada).
+  /// Solo acción explícita del usuario.
   Future<void> stopKeepAlive() async {
     try {
-      // invoke es void en 5.1.0: sin await.
       FlutterBackgroundService().invoke('stopPing');
     } catch (_) {}
     activeEndpoint = null;
     espejoInicio = null;
     espejoPings = 0;
     StatusNotifier.instance.refresh();
+    // Sin celda el servicio no tiene por qué quedar: pararlo también.
+    try {
+      FlutterBackgroundService().invoke('stop');
+    } catch (_) {}
   }
 
   /// Inicializar: carga tokens y recupera el espejo de lo que el
