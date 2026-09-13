@@ -221,16 +221,15 @@ class _BrowserWebViewsHostState extends State<BrowserWebViewsHost>
     required VoidCallback onClose,
     Alignment alignment = Alignment.topRight,
   }) {
+    // Sin detector interno vacío: ese absorbía los taps de TODA la
+    // pantalla y el toque afuera nunca llegaba a onClose.
     return Material(
       color: Colors.black54,
       child: GestureDetector(
         onTap: onClose,
         child: Align(
           alignment: alignment,
-          child: GestureDetector(
-            onTap: () {}, // tocar el contenido no cierra
-            child: child,
-          ),
+          child: child,
         ),
       ),
     );

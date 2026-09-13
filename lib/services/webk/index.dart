@@ -170,3 +170,84 @@ function pedirAuth(){ llamar('autorizar', {llave: window.WEBK_LLAVE || ''}); }
 </body>
 </html>
 ''';
+
+/// Puerta: cargador que SOLO muestra el contenido si el puente Dart está
+/// verificado. En Chrome (sin flutter_inappwebview) se queda bloqueado y
+/// el contenido real nunca se revela ni se sirve sin señal.
+const kWebkPuerta = '''<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WebK · puerta</title>
+<style>
+body{font-family:sans-serif;text-align:center;padding-top:60px;background:#020617;color:#fff;margin:0}
+.card{display:inline-block;border:1px solid #B57CFF55;border-radius:12px;padding:24px 40px;background:#0B1220}
+#estado{color:#B57CFF}
+</style>
+</head>
+<body>
+<div class="card">
+<h1>Puerta WebK</h1>
+<p id="estado">comprobando puente…</p>
+</div>
+<script>
+(async function(){
+  var el = document.getElementById('estado');
+  if(!window.flutter_inappwebview){
+    el.textContent = 'BLOQUEADO: sin puente Dart (¿Chrome?). Contenido oculto.';
+    return;
+  }
+  el.textContent = 'puente detectado, pidiendo pase a Dart…';
+  try{
+    var r = await window.flutter_inappwebview.callHandler(
+      'webk', {cmd: 'abrir', pagina: 'demo.html', llave: window.WEBK_LLAVE || ''});
+    el.textContent = (r === 'OK')
+      ? 'pase OK: Dart carga el contenido…'
+      : 'DENEGADO por Dart: ' + r;
+  }catch(e){ el.textContent = 'error: ' + e; }
+})();
+</script>
+</body>
+</html>
+''';
+
+/// Segundo ejemplo: demo del puente (estado + hora del server Dart).
+const kWebkDemo = '''<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WebK · demo puente</title>
+<style>
+body{font-family:sans-serif;text-align:center;padding-top:40px;background:#020617;color:#fff;margin:0}
+h1{color:#4DD0E1}
+.card{display:inline-block;border:1px solid #4DD0E155;border-radius:12px;padding:24px 40px;background:#0B1220;max-width:90vw}
+button{margin:4px;padding:8px 14px;border-radius:8px;border:1px solid #4DD0E1;background:#0B1220;color:#fff}
+pre{text-align:left;background:#00000088;border-radius:8px;padding:12px;min-width:280px;white-space:pre-wrap}
+</style>
+</head>
+<body>
+<div class="card">
+<h1>Demo puente</h1>
+<p>Esta página solo se ve si Dart verificó el puente.</p>
+<p>
+<button onclick="llamar('estado')">Estado server</button>
+<button onclick="llamar('hora')">Hora Dart</button>
+<button onclick="pedirAuth()">Pedir autorización</button>
+</p>
+<pre id="out">puente: listo, tocá un botón…</pre>
+</div>
+<script>
+function out(t){ document.getElementById('out').textContent = t; }
+async function llamar(cmd, extra){
+  if(!window.flutter_inappwebview){ out('sin puente (página fuera de WebK)'); return; }
+  try{
+    const r = await window.flutter_inappwebview.callHandler(
+      'webk', Object.assign({cmd: cmd}, extra || {}));
+    out(typeof r === 'object' ? JSON.stringify(r, null, 1) : String(r));
+  }catch(e){ out('error: ' + e); }
+}
+function pedirAuth(){ llamar('autorizar', {llave: window.WEBK_LLAVE || ''}); }
+</script>
+</body>
+</html>
+''';

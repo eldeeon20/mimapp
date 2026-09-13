@@ -27,7 +27,30 @@ class _WebkTestScreenState extends State<WebkTestScreen> {
   final _log = <String>[];
   bool _busy = false;
   bool _indiceListo = false;
-  double _progreso = 1;
+
+  /// UNA sola vista web reutilizada en normal y maximizado: si se
+  /// reconstruye al cambiar de modo, el controlador muere y queda
+  /// en blanco (ese era el bug).
+  late final Widget _vistaWeb = InAppWebView(
+    initialUrlRequest: URLRequest(url: WebUri('about:blank')),
+    onWebViewCreated: (c) {
+      _web = c;
+      c.addJavaScriptHandler(
+        handlerName: 'webk',
+        callback: _onJs,
+      );
+    },
+    onLoadStop: (_, url) async {
+      // Llave de sesión a la página YA cargada (el html
+      // estático nunca la trae escrita).
+      if (_llaveSesion.isEmpty) return;
+      try {
+        await _web?.evaluateJavascript(
+          source: "window.WEBK_LLAVE='$_llaveSesion';",
+        );
+      } catch (_) {}
+    },
+  );
 
   /// Pantalla completa: solo el WebView (sin botones ni log).
   bool _pantallaCompleta = false;
@@ -149,20 +172,24 @@ class _WebkTestScreenState extends State<WebkTestScreen> {
   }
 
   /// Señal desde la app + carga en el WebView de ESTA ventana.
+  /// Abre maximizado (con Salir para volver a los ejemplos).
   Future<void> _abrirHola() async {
     if (_busy || !_server.corriendo || _web == null) return;
     _server.autorizarUna();
     _add('· señal enviada (1 conexión autorizada)');
     await _cargarPagina('hola.html');
+    if (mounted) setState(() => _pantallaCompleta = true);
   }
 
   /// Puerta: carga el cargador; el CONTENIDO solo entra si el JS
   /// comprueba el puente y Dart lo habilita ("oye server…" → "sí, aquí").
+  /// Abre maximizado (con Salir para volver a los ejemplos).
   Future<void> _abrirPuerta() async {
     if (_busy || !_server.corriendo || _web == null) return;
     _server.autorizarUna();
     _add('· puerta cargada (el contenido espera puente verificado)');
     await _cargarPagina('puerta.html');
+    if (mounted) setState(() => _pantallaCompleta = true);
   }
 
   Future<void> _detener() async {
@@ -251,13 +278,6 @@ class _WebkTestScreenState extends State<WebkTestScreen> {
                 label: const Text('Detener',
                     style: TextStyle(fontSize: 13)),
               ),
-              IconButton(
-                tooltip: 'Pantalla completa',
-                icon: const Icon(Icons.fullscreen_rounded, size: 20),
-                onPressed: _indiceListo
-                    ? () => setState(() => _pantallaCompleta = true)
-                    : null,
-              ),
             ],
           ),
         ),
@@ -286,7 +306,8 @@ class _WebkTestScreenState extends State<WebkTestScreen> {
     );
   }
 
-  /// WebView a pantalla completa con botón para volver.
+  /// Web maximizado con botón Salir para volver a los ejemplos.
+  /// Los ejemplos ("Abrir hola", "Puente demo") abren acá.
   Widget _webPantallaCompleta() {
     return Stack(
       children: [
@@ -297,13 +318,20 @@ class _WebkTestScreenState extends State<WebkTestScreen> {
           child: Material(
             color: Colors.black54,
             borderRadius: BorderRadius.circular(20),
-            child: IconButton(
-              tooltip: 'Salir de pantalla completa',
-              icon: const Icon(Icons.fullscreen_exit_rounded,
-                  color: Colors.white, size: 20),
-              onPressed: () =>
-                  setState(() => _pantallaCompleta = false),
-            ),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              const Padding(
+                padding: EdgeInsets.only(left: 12),
+                child: Text('Salir',
+                    style: TextStyle(color: Colors.white, fontSize: 13)),
+              ),
+              IconButton(
+                tooltip: 'Salir (volver a ejemplos)',
+                icon: const Icon(Icons.close_rounded,
+                    color: Colors.white, size: 20),
+                onPressed: () =>
+                    setState(() => _pantallaCompleta = false),
+              ),
+            ]),
           ),
         ),
       ],
@@ -311,6 +339,7 @@ class _WebkTestScreenState extends State<WebkTestScreen> {
   }
 
   /// Marco del WebView embebido (modo normal con borde, completo sin).
+  /// Usa la instancia única [_vistaWeb] para no perder la página.
   Widget _marcoWeb({bool borde = true}) {
     return Container(
       margin: borde
@@ -324,40 +353,7 @@ class _WebkTestScreenState extends State<WebkTestScreen> {
             )
           : const BoxDecoration(color: Colors.black),
       clipBehavior: Clip.antiAlias,
-      child: Stack(
-        children: [
-          InAppWebView(
-            initialUrlRequest: URLRequest(
-                url: WebUri('about:blank')),
-            onWebViewCreated: (c) {
-              _web = c;
-              c.addJavaScriptHandler(
-                handlerName: 'webk',
-                callback: _onJs,
-              );
-            },
-            onProgressChanged: (_, p) {
-              if (mounted) {
-                setState(() => _progreso = p / 100);
-              }
-            },
-            onLoadStop: (_, url) async {
-              // Llave de sesión a la página YA cargada (el html
-              // estático nunca la trae escrita).
-              if (_llaveSesion.isEmpty) return;
-              try {
-                await _web?.evaluateJavascript(
-                  source:
-                      "window.WEBK_LLAVE='$_llaveSesion';",
-                );
-              } catch (_) {}
-            },
-          ),
-          if (_progreso < 1)
-            const LinearProgressIndicator(
-                value: null, minHeight: 2),
-        ],
-      ),
+      child: _vistaWeb,
     );
   }
 }

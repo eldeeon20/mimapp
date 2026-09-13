@@ -1,26 +1,27 @@
 import 'dart:io';
+import 'dart:ui';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
+import 'servicio_fondo.dart';
 import 'status_notifier.dart';
 
 /// NOTIFICACIONES (archivo separado del servicio).
-/// Acá NO hay nada del servicio: para salir se usa el callback
-/// [onExitBg] que pone bootstrap (ServicioFondo.salir).
 /// Handler para cuando tocan "Salir" con la app EN SEGUNDO PLANO.
 /// Obligatorio top-level con vm:entry-point; sin esto el botón no hace
 /// nada salvo que la app esté abierta en primer plano.
+///
+/// OJO: esto corre en OTRO isolate (el de fondo de FLN): los static
+/// están vacíos acá. Por eso NO usa el callback [salidaFondo] (nulo
+/// en este isolate → antes caía al exit(0) pelado: mataba sin parar
+/// el servicio y Android lo resucitaba). Llama directo a
+/// ServicioFondo.salir con plugins registrados.
 @pragma('vm:entry-point')
 void notificationBackgroundHandler(NotificationResponse response) {
   if (response.actionId == 'exit') {
-    final salir = NotificationService.salidaFondo;
-    if (salir != null) {
-      salir();
-    } else {
-      // Sin callback: al menos matar el proceso.
-      exit(0);
-    }
+    DartPluginRegistrant.ensureInitialized();
+    ServicioFondo.salir();
   }
 }
 
