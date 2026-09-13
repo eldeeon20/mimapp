@@ -27,13 +27,20 @@ class TorService extends ChangeNotifier {
   bool _running = false;
   final _log = <String>[];
 
+  /// Proxy CONNECT local (127.0.0.1:puerto) por el circuito Tor.
+  /// Vacío = apagado.
+  String _proxyHostPort = '';
+
   bool get busy => _busy;
   String get state => _state;
   bool get running => _running;
   List<String> get log => List.unmodifiable(_log);
 
-  /// Sin puente local: el HTTP sale directo por arti desde Rust.
-  String? get proxyUrl => null;
+  /// Proxy listo para el WebView (null = apagado).
+  String? get proxyUrl => _proxyHostPort.isEmpty ? null : _proxyHostPort;
+
+  /// true si el proxy Tor está levantado (navegar sale por Tor).
+  bool get proxyOn => _proxyHostPort.isNotEmpty;
 
   void _say(String m) {
     debugPrint('[tor] $m');
@@ -52,6 +59,9 @@ class TorService extends ChangeNotifier {
     try {
       _running = await rust.torIsRunning();
       _fase = await rust.torEstado();
+      try {
+        _proxyHostPort = await rust.torProxyPuerto();
+      } catch (_) {}
     } catch (_) {}
     notifyListeners();
   }
@@ -85,13 +95,36 @@ class TorService extends ChangeNotifier {
   Future<void> stop() async {
     if (_busy) return;
     try {
+      await rust.torProxyStop();
+      _proxyHostPort = '';
       await rust.torStop();
       _state = 'apagado';
-      _say('detenido');
+      _say('detenido (proxy + cliente)');
     } catch (e) {
       _say('ERROR stop: $e');
     }
     await refresh();
+  }
+
+  /// Levanta solo el proxy CONNECT (requiere cliente corriendo).
+  /// Devuelve "127.0.0.1:puerto" o lanza.
+  Future<String> startProxy() async {
+    if (!_running) throw 'Tor no está corriendo: arrancalo primero';
+    final hp = await rust.torProxyStart();
+    _proxyHostPort = hp;
+    _say('proxy Tor en $hp (WebView sale por Tor)');
+    notifyListeners();
+    return hp;
+  }
+
+  /// Baja solo el proxy (el cliente sigue para la pantalla Tor).
+  Future<void> stopProxy() async {
+    try {
+      await rust.torProxyStop();
+    } catch (_) {}
+    _proxyHostPort = '';
+    _say('proxy Tor apagado (navegar vuelve a directo)');
+    notifyListeners();
   }
 
   Future<void> rebootstrap() async {

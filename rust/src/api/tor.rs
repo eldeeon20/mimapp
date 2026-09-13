@@ -203,3 +203,184 @@ pub fn tor_tcp_ping(host: String, puerto: i32) -> Result<String, String> {
     let ms = start.elapsed().as_millis();
     Ok(format!("OK {host}:{puerto} · {ms} ms por el circuito Tor"))
 }
+
+// ------------------------------------------------- proxy CONNECT local
+
+/// Proxy HTTP CONNECT en 127.0.0.1:puerto aleatorio que tuneliza por el
+/// circuito Tor. El WebView lo usa con ProxyOverride: el navegar normal
+/// pasa a salir por Tor en vez de directo. Solo loopback; sin auth.
+static PROXY_PARAR: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+static PROXY_PUERTO: std::sync::atomic::AtomicU16 =
+    std::sync::atomic::AtomicU16::new(0);
+
+/// "127.0.0.1:PUERTO" si el proxy está arriba, "" si no.
+#[flutter_rust_bridge::frb]
+pub fn tor_proxy_puerto() -> String {
+    let p = PROXY_PUERTO.load(std::sync::atomic::Ordering::Relaxed);
+    if p == 0 {
+        String::new()
+    } else {
+        format!("127.0.0.1:{p}")
+    }
+}
+
+/// Levanta el proxy (requiere Tor corriendo). Idempotente: si ya está,
+/// devuelve el mismo host:puerto.
+#[flutter_rust_bridge::frb]
+pub fn tor_proxy_start() -> Result<String, String> {
+    {
+        let g = CLIENT.lock().map_err(|_| "mutex cliente")?;
+        if g.is_none() {
+            return Err("Tor no está corriendo: arrancalo primero".into());
+        }
+    }
+    if PROXY_PUERTO.load(std::sync::atomic::Ordering::Relaxed) != 0 {
+        return Ok(tor_proxy_puerto());
+    }
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")
+        .map_err(|e| format!("proxy bind: {e}"))?;
+    listener
+        .set_nonblocking(true)
+        .map_err(|e| format!("proxy nonblock: {e}"))?;
+    let puerto = listener
+        .local_addr()
+        .map_err(|e| format!("proxy addr: {e}"))?
+        .port();
+    PROXY_PARAR.store(false, std::sync::atomic::Ordering::Relaxed);
+    PROXY_PUERTO.store(puerto, std::sync::atomic::Ordering::Relaxed);
+    std::thread::Builder::new()
+        .name("tor-proxy".into())
+        .spawn(move || {
+            while !PROXY_PARAR.load(std::sync::atomic::Ordering::Relaxed) {
+                match listener.accept() {
+                    Ok((s, _)) => {
+                        std::thread::Builder::new()
+                            .name("tor-proxy-conn".into())
+                            .spawn(move || atender_proxy(s))
+                            .ok();
+                    }
+                    Err(ref e)
+                        if e.kind() == std::io::ErrorKind::WouldBlock =>
+                    {
+                        std::thread::sleep(std::time::Duration::from_millis(100))
+                    }
+                    Err(_) => break,
+                }
+            }
+            PROXY_PUERTO.store(0, std::sync::atomic::Ordering::Relaxed);
+        })
+        .map_err(|e| format!("hilo proxy: {e}"))?;
+    Ok(format!("127.0.0.1:{puerto}"))
+}
+
+/// Baja el proxy. Idempotente (el cliente Tor sigue corriendo).
+#[flutter_rust_bridge::frb]
+pub fn tor_proxy_stop() -> Result<(), String> {
+    PROXY_PARAR.store(true, std::sync::atomic::Ordering::Relaxed);
+    PROXY_PUERTO.store(0, std::sync::atomic::Ordering::Relaxed);
+    Ok(())
+}
+
+/// Una conexión del WebView: CONNECT host:puerto o petición absoluta
+/// (GET http://host/...). Todo lo demás → 405 y cierre.
+fn atender_proxy(s: std::net::TcpStream) {
+    use std::io::{Read, Write};
+    let _ = s.set_read_timeout(Some(std::time::Duration::from_secs(15)));
+    // Leer cabecera completa (\r\n\r\n, máx 32KB) en bloqueante.
+    let mut head: Vec<u8> = Vec::new();
+    let mut buf = [0u8; 4096];
+    let mut sock = s;
+    let _ = sock.set_nonblocking(false);
+    loop {
+        match sock.read(&mut buf) {
+            Ok(0) => return,
+            Ok(n) => {
+                head.extend_from_slice(&buf[..n]);
+                if head.len() > 32768 {
+                    return;
+                }
+                if head.windows(4).any(|w| w == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            Err(_) => return,
+        }
+    }
+    let texto = String::from_utf8_lossy(&head);
+    let primera = texto.lines().next().unwrap_or("");
+    let mut partes = primera.split_whitespace();
+    let metodo = partes.next().unwrap_or("");
+    let objetivo = partes.next().unwrap_or("");
+    // Destino + bytes ya leídos a reenviar (forma absoluta).
+    let (destino, preenvio): (String, Vec<u8>) = if metodo == "CONNECT" {
+        (objetivo.to_string(), Vec::new())
+    } else if objetivo.starts_with("http://") || objetivo.starts_with("https://") {
+        let sin_esquema = objetivo
+            .split_once("://")
+            .map(|(_, r)| r)
+            .unwrap_or(objetivo);
+        let host = sin_esquema.split('/').next().unwrap_or("");
+        let es_https = objetivo.starts_with("https://");
+        let d = if host.contains(':') {
+            host.to_string()
+        } else if es_https {
+            format!("{host}:443")
+        } else {
+            format!("{host}:80")
+        };
+        (d, head.clone())
+    } else {
+        let _ = sock.write_all(b"HTTP/1.1 405 Solo proxy\r\nContent-Length: 0\r\n\r\n");
+        return;
+    };
+    let (host, puerto) = match destino.rsplit_once(':') {
+        Some((h, p)) => (h.to_string(), p.parse::<u16>().unwrap_or(443)),
+        None => (destino.clone(), 443),
+    };
+    if host.is_empty() {
+        return;
+    }
+    // Clonar el cliente arti para este hilo.
+    let cliente: Client = match CLIENT.lock() {
+        Ok(g) => match g.as_ref() {
+            Some(c) => c.clone(),
+            None => return,
+        },
+        Err(_) => return,
+    };
+    // Conectar por el circuito y tunelizar.
+    let mut tor_stream = match tor_rt().block_on(cliente.connect((host.clone(), puerto))) {
+        Ok(s) => s,
+        Err(_) => {
+            let _ = sock.write_all(b"HTTP/1.1 502 Tor no conecta\r\nContent-Length: 0\r\n\r\n");
+            return;
+        }
+    };
+    if metodo == "CONNECT" {
+        if sock.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n").is_err() {
+            return;
+        }
+    } else {
+        // Forma absoluta: el TLS lo negocia el WebView contra el destino;
+        // acá solo reenviamos los bytes ya leídos y tuneleamos.
+        use tokio::io::AsyncWriteExt as _;
+        if tor_rt()
+            .block_on(async { tor_stream.write_all(&preenvio).await })
+            .is_err()
+        {
+            return;
+        }
+    }
+    let _ = sock.set_nonblocking(true);
+    let mut tcp = match tokio::net::TcpStream::from_std(sock) {
+        Ok(t) => t,
+        Err(_) => return,
+    };
+    let _ = tor_rt().block_on(async {
+        use tokio::io::AsyncWriteExt as _;
+        let r = tokio::io::copy_bidirectional(&mut tcp, &mut tor_stream).await;
+        let _ = tor_stream.shutdown().await;
+        r
+    });
+}

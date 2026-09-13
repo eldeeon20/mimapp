@@ -224,8 +224,10 @@ class BrowserTabs extends ChangeNotifier {
   }
 
   /// Aplica (o quita) un proxy genérico a TODOS los WebViews de la app.
-  /// [scheme] es 'PROXY' (HTTP) o 'SOCKS'.
-  Future<bool> setProxy(bool enabled, String hostPort, String scheme) async {
+  /// [scheme] es 'PROXY' (HTTP) o 'SOCKS'. [bypass] deja hosts fuera
+  /// del proxy (loopback de WebK, etc.).
+  Future<bool> setProxy(bool enabled, String hostPort, String scheme,
+      {List<String> bypass = const []}) async {
     proxyEnabled = enabled;
     proxyHostPort = hostPort.trim();
     proxyScheme = scheme;
@@ -236,6 +238,7 @@ class BrowserTabs extends ChangeNotifier {
         await pc.setProxyOverride(
           settings: ProxySettings(
             proxyRules: [ProxyRule(url: '$scheme $proxyHostPort')],
+            bypassRules: bypass,
           ),
         );
       } else {

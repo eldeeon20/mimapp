@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
+import '../services/tor_service.dart';
 import 'browser_cookies.dart';
 import 'browser_tab.dart';
 import 'browser_tabs.dart';
@@ -35,6 +36,8 @@ class _BrowserWebViewsHostState extends State<BrowserWebViewsHost>
   String _proxyScheme = 'PROXY';
   List<WebHistoryItem>? _historyItems;
   bool _historyLoading = false;
+  bool _torBusy = false;
+  String? _torMsg;
 
   @override
   void initState() {
@@ -258,6 +261,7 @@ class _BrowserWebViewsHostState extends State<BrowserWebViewsHost>
               _settingsOpen = true;
             }),
           ),
+          _torToggle(tabs),
           ListTile(
             leading: const Icon(Icons.close),
             title: const Text('Cerrar Web'),
@@ -269,6 +273,69 @@ class _BrowserWebViewsHostState extends State<BrowserWebViewsHost>
         ]),
       ),
     );
+  }
+
+  /// Toggle Tor en el menú ⋮: ON = arranca cliente (si falta) + proxy
+  /// CONNECT local y manda todo el WebView por Tor; OFF = vuelve a
+  /// directo. La URL sigue normal, solo cambia por dónde sale.
+  Widget _torToggle(BrowserTabs tabs) {
+    final tor = TorService.instance;
+    return ListTile(
+      leading: Icon(
+        Icons.shield_rounded,
+        color: tor.proxyOn ? Colors.greenAccent : Colors.grey,
+      ),
+      title: const Text('Tor'),
+      subtitle: Text(
+        _torBusy
+            ? 'trabajando…'
+            : (_torMsg ??
+                (tor.proxyOn
+                    ? 'ON · sale por Tor (${tor.proxyUrl})'
+                    : 'OFF · navegar directo')),
+        style: const TextStyle(fontSize: 11, color: Colors.white54),
+      ),
+      trailing: Switch(
+        value: tor.proxyOn,
+        onChanged: _torBusy ? null : (_) => _cambiarTor(tabs),
+      ),
+      onTap: _torBusy ? null : () => _cambiarTor(tabs),
+    );
+  }
+
+  /// Prende/apaga la salida por Tor del navegador.
+  Future<void> _cambiarTor(BrowserTabs tabs) async {
+    final tor = TorService.instance;
+    setState(() {
+      _torBusy = true;
+      _torMsg = null;
+    });
+    try {
+      if (!tor.proxyOn) {
+        await tor.refresh();
+        if (!tor.running) {
+          setState(() => _torMsg = 'arrancando Tor (bootstrap)…');
+          await tor.start();
+          await tor.refresh();
+          if (!tor.running) {
+            throw 'Tor no arrancó: ${tor.state}';
+          }
+        }
+        final hp = await tor.startProxy();
+        final ok = await tabs.setProxy(true, hp, 'PROXY',
+            bypass: const ['127.0.0.1', 'localhost']);
+        if (!ok) throw 'el WebView no aceptó el proxy';
+        setState(() => _torMsg = 'ON · sale por Tor ($hp)');
+      } else {
+        await tabs.setProxy(false, '', 'PROXY');
+        await tor.stopProxy();
+        setState(() => _torMsg = 'OFF · navegar directo');
+      }
+    } catch (e) {
+      setState(() => _torMsg = 'ERROR: $e');
+    } finally {
+      if (mounted) setState(() => _torBusy = false);
+    }
   }
 
   Widget _settingsPanel(BrowserTabs tabs) {
