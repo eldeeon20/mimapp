@@ -10,6 +10,7 @@ import 'package:pr_app/src/rust/frb_generated.dart';
 import '../media/media_library.dart';
 import '../services/colab_service.dart';
 import '../services/nat_service.dart';
+import '../services/nativo.dart';
 import '../services/notification_service.dart';
 import '../services/servicio_fondo.dart';
 import '../services/settings.dart';
@@ -31,10 +32,10 @@ Future<void> initApp() async {
   try {
     await ServicioFondo.limpiarFlagStop();
   } catch (_) {}
-  // Servicio en primer plano (archivo separado servicio_fondo.dart):
-  // mantiene el proceso vivo en fondo para que el ping a Colab del
-  // isolate siga aunque la UI se cierre. Salir (777) mata vía
-  // ServicioFondo.salir (espera confirmación, sin revivir).
+  // Servicio NATIVO en primer plano (ServicioMimapp.kt): mantiene el
+  // proceso vivo en fondo para que el ping a Colab siga aunque la UI
+  // se cierre. X (888) DETIENE el servicio (la app sigue); Salir (777)
+  // cierra la app + baja la 777 (el servicio sigue).
   await _initBackgroundService();
   await _initRust();
   await _initColab();
@@ -103,20 +104,33 @@ Future<void> _initNotifications() async {
   try {
     await NotificationService.init(
       onExitAction: _handleExitAction,
-      onExitBg: ServicioFondo.salir,
+      onExitBg: Nativo.stop,
     );
   } catch (e) {
     debugPrint('NotificationService init error: $e');
   }
 }
 
-/// Botón "Salir" = KILL TOTAL de la app (servicio, todas las
-/// notificaciones y proceso). Vive en servicio_fondo.dart.
-Future<void> _handleExitAction() => ServicioFondo.salir();
+/// Botón "Salir" de la 777 = cierra la APP + baja la notificación.
+/// NO mata el proceso (el servicio nativo con el ping sigue): usa
+/// SystemNavigator.pop para cerrar la UI. Apaga el timer del panel y
+/// cancela la 777 también en el lado nativo.
+/// La X de la 888 DETIENE EL SERVICIO (Nativo.stop) y la app sigue.
+Future<void> _handleExitAction() async {
+  try {
+    await StatusNotifier.instance.cancel();
+  } catch (_) {}
+  try {
+    await Nativo.cerrarStatus();
+  } catch (_) {}
+  try {
+    await SystemNavigator.pop();
+  } catch (_) {}
+}
 
-/// Servicio en primer plano: vive en servicio_fondo.dart (archivo
-/// separado de las notificaciones). Solo configura; arranca a pedido
-/// con celda en ping (la 888 con ✕ sale recién ahí).
+/// Servicio en primer plano NATIVO (ServicioMimapp.kt; el configure
+/// legacy de servicio_fondo.dart se conserva sin usar). Solo configura;
+/// arranca a pedido con celda en ping (la 888 con ✕ sale recién ahí).
 Future<void> _initBackgroundService() => ServicioFondo.iniciar();
 
 Future<void> _initRust() async {
@@ -135,4 +149,5 @@ Future<void> _initColab() async {
   }
 }
 
-/// (El motor de ping vive en servicio_fondo.dart: ColabPingMotor.)
+/// (El motor de ping vive en el servicio NATIVO ServicioMimapp.kt;
+/// ColabPingMotor en servicio_fondo.dart queda legacy sin usar.)

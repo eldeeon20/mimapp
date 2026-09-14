@@ -4,24 +4,32 @@ import 'dart:ui';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
+import 'nativo.dart';
 import 'servicio_fondo.dart';
 import 'status_notifier.dart';
 
 /// NOTIFICACIONES (archivo separado del servicio).
-/// Handler para cuando tocan "Salir" con la app EN SEGUNDO PLANO.
-/// Obligatorio top-level con vm:entry-point; sin esto el botón no hace
-/// nada salvo que la app esté abierta en primer plano.
+/// Handler para cuando tocan botones con la app EN SEGUNDO PLANO.
+/// Obligatorio top-level con vm:entry-point.
 ///
-/// OJO: esto corre en OTRO isolate (el de fondo de FLN): los static
-/// están vacíos acá. Por eso NO usa el callback [salidaFondo] (nulo
-/// en este isolate → antes caía al exit(0) pelado: mataba sin parar
-/// el servicio y Android lo resucitaba). Llama directo a
-/// ServicioFondo.salir con plugins registrados.
+/// - 777 "Salir" (actionId 'exit'): baja la 777 (la app ya está en
+///   fondo, así que solo quita la notificación; el servicio sigue).
+///   Corre en OTRO isolate (el de fondo de FLN): solo cancela la 777.
+/// - 888 "X" legacy (actionId 'exit_total'): baja la 888. El servicio
+///   nativo real se detiene desde la UI (Nativo.stop); acá no hay
+///   MethodChannel, así que solo se quita lo visible.
 @pragma('vm:entry-point')
 void notificationBackgroundHandler(NotificationResponse response) {
-  if (response.actionId == 'exit') {
+  if (response.actionId == 'exit_total') {
     DartPluginRegistrant.ensureInitialized();
-    ServicioFondo.salir();
+    try {
+      NotificationService.plugin.cancel(NotificationService.serviceNotificationId);
+    } catch (_) {}
+  } else if (response.actionId == 'exit') {
+    DartPluginRegistrant.ensureInitialized();
+    try {
+      NotificationService.plugin.cancel(StatusNotifier.notificationId);
+    } catch (_) {}
   }
 }
 
@@ -39,14 +47,15 @@ class NotificationService {
   /// el foregroundServiceNotificationId de flutter_background_service).
   static const serviceNotificationId = 888;
 
-  /// Callback de salida que pone bootstrap (ServicioFondo.salir).
-  /// Así este archivo no importa nada del servicio.
+  /// Callback de respaldo que pone bootstrap (Nativo.stop: detiene el
+  /// servicio sin matar la app). Así este archivo no importa nada más.
   static Future<void> Function()? salidaFondo;
 
   /// Da de baja todas las notificaciones persistentes conocidas.
   /// La docu da de baja así: cancel(id) una por una. La 888 del
-  /// servicio NO sale con cancel mientras el servicio corre: por eso
-  /// ServicioFondo primero para el servicio y espera su confirmación.
+  /// servicio NATIVO no sale con cancel mientras el frente corre
+  /// (se detiene con Nativo.stop); este método solo se usa en el
+  /// camino legacy de ServicioFondo.salir.
   static Future<void> cancelPersistentes() async {
     for (final id in [
       serviceNotificationId,
@@ -83,12 +92,19 @@ class NotificationService {
         ),
       ),
       onDidReceiveNotificationResponse: (NotificationResponse response) {
-        if (response.actionId == 'exit') {
-          // App en primer plano: mismo kill total.
+        if (response.actionId == 'exit_total') {
+          // X de la 888 = DETIENE EL SERVICIO (la app sigue viva).
+          try {
+            Nativo.stop();
+          } catch (_) {}
+        } else if (response.actionId == 'exit') {
+          // Salir de la 777 = SOLO baja la notificación (no mata).
           if (onExitAction != null) {
             onExitAction();
-          } else if (salidaFondo != null) {
-            salidaFondo!();
+          } else {
+            try {
+              _plugin.cancel(StatusNotifier.notificationId);
+            } catch (_) {}
           }
         }
         // 'abrir' no hace nada acá: showsUserInterface:true ya trae la

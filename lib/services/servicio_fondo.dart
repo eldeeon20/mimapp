@@ -122,6 +122,8 @@ class ServicioFondo {
   /// se postea UNA vez desde la UI principal con la MISMA instancia
   /// de FLN (sin inicializar otra: eso robaría los taps). Mismo id
   /// que usa el plugin (888).
+  /// La ✕ usa actionId 'exit_total' = KILL TOTAL (distinto del 'exit'
+  /// de la 777, que SOLO baja la notificación).
   static Future<void> mostrarX() async {
     const details = NotificationDetails(
       android: AndroidNotificationDetails(
@@ -134,7 +136,7 @@ class ServicioFondo {
         showWhen: false,
         actions: [
           AndroidNotificationAction(
-            'exit',
+            'exit_total',
             '✕',
             showsUserInterface: false,
           ),
@@ -151,7 +153,10 @@ class ServicioFondo {
     } catch (_) {}
   }
 
-  /// SALIR = KILL TOTAL (vive acá, en el archivo del servicio).
+  /// SALIR legacy = KILL TOTAL (servicio FBS + notis + proceso).
+  /// Ya NO es el camino normal: la X de la 888 nativa DETIENE el
+  /// servicio (Nativo.stop, la app sigue) y Salir de la 777 cierra la
+  /// app sin matar el servicio. Se conserva sin borrar.
   /// 1) pide parada al fondo, 2) espera su confirmación por archivo
   /// (máx 6s) para que Android no resucite el STICKY, 3) da de baja
   /// las notificaciones, 4) mata el proceso.

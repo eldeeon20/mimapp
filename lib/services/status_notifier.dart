@@ -86,6 +86,16 @@ class StatusNotifier {
 
   Future<void> show() async => _safeShow();
 
+  /// Reaviva el panel tras un Salir (que apaga el timer): si ya estaba
+  /// inicializado y el timer murió, lo reenciende y repinta.
+  void reanudar() {
+    if (!_initialized || _timer != null) return;
+    _timer = Timer.periodic(const Duration(seconds: 3), (_) {
+      _safeShow();
+    });
+    show();
+  }
+
   /// Aviso sobre la notificación que YA existe (777): pisa el extra con
   /// el mensaje y repinta. Sin crear notificaciones nuevas.
   void aviso(String msg) {

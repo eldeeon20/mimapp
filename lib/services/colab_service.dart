@@ -2,14 +2,13 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../colab_cli/colab_auth.dart';
 import '../colab_cli/colab_config.dart';
 import '../colab_cli/colab_sessions.dart';
 // import 'notification_service.dart'; // COMENTADO: no usar, la activa ya existe (777).
-import 'servicio_fondo.dart';
+import 'nativo.dart';
 import 'status_notifier.dart';
 
 /// Servicio Colab: singleton que vive toda la vida de la app.
@@ -52,8 +51,9 @@ class ColabService {
       ? DateTime.now().difference(espejoInicio!)
       : Duration.zero;
 
-  /// Ping MANUAL: le dice al servicio "mantené este endpoint en ping".
-  /// Prende el servicio a pedido (sin celda no hay servicio).
+  /// Ping MANUAL: le dice al servicio NATIVO "mantené este endpoint
+  /// en ping" (HTTP keep-alive en Kotlin, igual que el CLI). Prende el
+  /// servicio a pedido (sin celda no hay servicio).
   /// Recarga tokens (el login del diálogo usa otra instancia de auth).
   Future<void> startKeepAlive(String endpoint) async {
     if (endpoint.isEmpty) return;
@@ -65,29 +65,29 @@ class ColabService {
     activeEndpoint = endpoint;
     espejoInicio = DateTime.now();
     espejoPings = 0;
-    // Sin servicio no hay ping: prenderlo primero, esperar que el
-    // fondo registre sus listeners y recién ordenarle.
-    await ServicioFondo.prender();
+    // Sin servicio no hay ping: prender el NATIVO primero, esperar que
+    // arranque y recién ordenarle el ping.
+    await Nativo.prender();
     await Future.delayed(const Duration(milliseconds: 1500));
     try {
-      // invoke es void en flutter_background_service 5.1.0: sin await.
-      FlutterBackgroundService().invoke('startPing', {
-        'endpoint': endpoint,
-        'accessToken': t.accessToken,
-        'refreshToken': t.refreshToken,
-        'expiry': t.expiry.toIso8601String(),
-        'clientId': ColabConfig.clientId,
-        'clientSecret': ColabConfig.clientSecret,
-      });
+      await Nativo.startPing(
+        endpoint: endpoint,
+        accessToken: t.accessToken,
+        refreshToken: t.refreshToken,
+        expiryIso: t.expiry.toIso8601String(),
+        clientId: ColabConfig.clientId,
+        clientSecret: ColabConfig.clientSecret,
+      );
     } catch (_) {}
+    StatusNotifier.instance.reanudar();
     StatusNotifier.instance.refresh();
   }
 
-  /// Corta el ping y APAGA el servicio (sin celda no queda nada).
-  /// Solo acción explícita del usuario.
+  /// Corta el ping y APAGA el servicio nativo (sin celda no queda nada).
+  /// Solo acción explícita del usuario. No mata la app.
   Future<void> stopKeepAlive() async {
     try {
-      FlutterBackgroundService().invoke('stopPing');
+      await Nativo.stopPing();
     } catch (_) {}
     activeEndpoint = null;
     espejoInicio = null;
@@ -95,7 +95,7 @@ class ColabService {
     StatusNotifier.instance.refresh();
     // Sin celda el servicio no tiene por qué quedar: pararlo también.
     try {
-      FlutterBackgroundService().invoke('stop');
+      await Nativo.stop();
     } catch (_) {}
   }
 
@@ -108,9 +108,22 @@ class ColabService {
     await _recuperarEspejo();
   }
 
-  /// Lee el estado que escribe el servicio: si sigue vivo, la 777 lo
-  /// muestra sin arrancar ningún ping en la app.
+  /// Lee el estado que escribe el servicio NATIVO: si sigue vivo, la
+  /// 777 lo muestra sin arrancar ningún ping en la app. Primero el
+  /// canal nativo (siempre fresco), después el archivo legacy.
   Future<void> _recuperarEspejo() async {
+    try {
+      final e = await Nativo.estado();
+      if (e['vivo'] == true && '${e['endpoint'] ?? ''}'.isNotEmpty) {
+        activeEndpoint = '${e['endpoint']}';
+        final ms = (e['inicioMs'] as int?) ?? 0;
+        espejoInicio = ms > 0
+            ? DateTime.fromMillisecondsSinceEpoch(ms)
+            : DateTime.now();
+        espejoPings = (e['pingsOk'] as int?) ?? 0;
+        return;
+      }
+    } catch (_) {}
     try {
       final dir = await getApplicationSupportDirectory();
       final f = File('${dir.path}/colab/colab_ping_estado.json');
