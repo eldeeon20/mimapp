@@ -24,7 +24,7 @@ class _TorTestScreenState extends State<TorTestScreen> {
       TextEditingController(text: 'https://check.torproject.org/api/ip');
   final _onionCtrl = TextEditingController(
       text:
-          'https://duckduckgogg42xjoc72x3sjasw76w7p7vgic3nbg4y7emtb6onir65lid.onion/');
+          'http://duckduckgogg42xjoc72x3sjasowoarfbgcmvfimaftt6twagswzczad.onion/');
   final _dlCtrl =
       TextEditingController(text: 'https://speed.hetzner.de/1MB.bin');
   bool _dormant = false;

@@ -163,8 +163,16 @@ pub fn tor_set_dormant(soft: bool) -> Result<(), String> {
 
 /// GET por el circuito Tor (CDNs, APIs, git smart-http): devuelve
 /// "HTTP <status>\n\n<cuerpo>".
+/// Los .onion en http:// NO pasan por ureq (resuelve DNS antes del
+/// transporte y mueren con "cannot be resolved"): salen por connect()
+/// directo de arti, que sí sabe onion.
 #[flutter_rust_bridge::frb]
 pub fn tor_http_get(url: String) -> Result<String, String> {
+    if es_onion_http(&url) {
+        let (estado, cuerpo) = bajar_onion_http(&url)?;
+        let texto = String::from_utf8_lossy(&cuerpo);
+        return Ok(format!("HTTP {estado}\n\n{texto}"));
+    }
     let c = agente()?;
     let mut r = c.get(&url).call().map_err(|e| format!("GET {url}: {e}"))?;
     let status = r.status();
@@ -177,7 +185,16 @@ pub fn tor_http_get(url: String) -> Result<String, String> {
 /// siempre con https:// (TLS extremo a extremo sobre el túnel).
 #[flutter_rust_bridge::frb]
 pub fn tor_download(url: String, dest_path: String) -> Result<u64, String> {
-    use std::io::{Read, Write};
+    use std::io::Write;
+    if es_onion_http(&url) {
+        let (_, cuerpo) = bajar_onion_http(&url)?;
+        let mut f = std::fs::File::create(&dest_path)
+            .map_err(|e| format!("crear {dest_path}: {e}"))?;
+        f.write_all(&cuerpo).map_err(|e| format!("escribir: {e}"))?;
+        f.flush().map_err(|e| format!("flush: {e}"))?;
+        return Ok(cuerpo.len() as u64);
+    }
+    use std::io::Read;
     let c = agente()?;
     let mut r = c.get(&url).call().map_err(|e| format!("GET {url}: {e}"))?;
     let mut reader = r.body_mut().as_reader();
@@ -188,6 +205,127 @@ pub fn tor_download(url: String, dest_path: String) -> Result<u64, String> {
     f.write_all(&buf).map_err(|e| format!("escribir: {e}"))?;
     f.flush().map_err(|e| format!("flush: {e}"))?;
     Ok(buf.len() as u64)
+}
+
+/// true si es http://<algo>.onion/... (https onion sigue por ureq).
+fn es_onion_http(url: &str) -> bool {
+    let min = url.to_lowercase();
+    let resto = match min.strip_prefix("http://") {
+        Some(r) => r,
+        None => return false,
+    };
+    let host = resto.split('/').next().unwrap_or("");
+    host.ends_with(".onion")
+}
+
+/// GET http://*.onion por connect() directo de arti (sin ureq, sin TLS:
+/// el .onion ya va cifrado por el circuito). Sigue un redirect (máx 3).
+/// Devuelve (status, cuerpo).
+fn bajar_onion_http(url: &str) -> Result<(u16, Vec<u8>), String> {
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+    let cliente: Client = match CLIENT.lock() {
+        Ok(g) => match g.as_ref() {
+            Some(c) => c.clone(),
+            None => return Err("Tor no está corriendo".into()),
+        },
+        Err(_) => return Err("mutex cliente".into()),
+    };
+    let mut actual = url.to_string();
+    for _ in 0..4 {
+        if actual.to_lowercase().starts_with("https://") {
+            return Err("onion https no va por GET manual (usa la web con proxy)".into());
+        }
+        let (host, puerto, ruta) = partir_http(&actual)?;
+        let hilo = tor_rt()
+            .block_on(cliente.connect((host.clone(), puerto)))
+            .map_err(|e| format!("connect onion {host}:{puerto}: {e}"))?;
+        let pedido = format!(
+            "GET {ruta} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\nUser-Agent: pr_app\r\nAccept: */*\r\n\r\n"
+        );
+        let crudo: Vec<u8> = tor_rt()
+            .block_on(async {
+                let (mut r, mut w) = tokio::io::split(hilo);
+                w.write_all(pedido.as_bytes()).await?;
+                w.flush().await?;
+                let mut todo = Vec::new();
+                r.read_to_end(&mut todo).await?;
+                Ok::<_, std::io::Error>(todo)
+            })
+            .map_err(|e| format!("http onion {host}: {e}"))?;
+        let (estado, cuerpo, location) = partir_respuesta(&crudo)?;
+        match location {
+            Some(loc) if (300..400).contains(&estado) => match resolver_redirect(&actual, &loc) {
+                Some(nueva) => {
+                    actual = nueva;
+                    continue;
+                }
+                None => return Ok((estado, cuerpo)),
+            },
+            _ => return Ok((estado, cuerpo)),
+        }
+    }
+    Err("onion: demasiados redirects".into())
+}
+
+/// Parte http(s)://host[:puerto][/ruta] en (host, puerto, ruta).
+fn partir_http(url: &str) -> Result<(String, u16, String), String> {
+    let resto = url
+        .split_once("://")
+        .map(|(_, r)| r)
+        .ok_or("URL onion sin esquema")?;
+    let (autoridad, ruta) = match resto.find('/') {
+        Some(i) => (&resto[..i], resto[i..].to_string()),
+        None => (resto, "/".to_string()),
+    };
+    let (host, puerto) = match autoridad.rsplit_once(':') {
+        Some((h, p)) => (
+            h.to_string(),
+            p.parse::<u16>().map_err(|_| format!("puerto malo: {p}"))?,
+        ),
+        None => (autoridad.to_string(), 80),
+    };
+    if host.is_empty() {
+        return Err("URL onion sin host".into());
+    }
+    Ok((host, puerto, ruta))
+}
+
+/// Separa status, cuerpo y Location de una respuesta cruda.
+fn partir_respuesta(crudo: &[u8]) -> Result<(u16, Vec<u8>, Option<String>), String> {
+    let fin = crudo
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .ok_or("onion: respuesta sin cabecera")?;
+    let cab = String::from_utf8_lossy(&crudo[..fin]);
+    let mut lineas = cab.lines();
+    let primera = lineas.next().unwrap_or("");
+    let estado: u16 = primera
+        .split_whitespace()
+        .nth(1)
+        .unwrap_or("0")
+        .parse()
+        .unwrap_or(0);
+    let mut location = None;
+    for l in lineas {
+        if let Some((k, v)) = l.split_once(':') {
+            if k.trim().eq_ignore_ascii_case("location") {
+                location = Some(v.trim().to_string());
+            }
+        }
+    }
+    Ok((estado, crudo[fin + 4..].to_vec(), location))
+}
+
+/// Resuelve un Location (absoluto o /ruta) contra la URL base.
+fn resolver_redirect(base: &str, loc: &str) -> Option<String> {
+    if loc.starts_with("http://") || loc.starts_with("https://") {
+        return Some(loc.to_string());
+    }
+    let ruta = loc.strip_prefix('/')?;
+    let sin_esquema = base.split_once("://")?.1;
+    let autoridad = sin_esquema.split('/').next()?;
+    let esquema = base.split_once("://")?.0;
+    Some(format!("{esquema}://{autoridad}/{ruta}"))
 }
 
 /// Ping TCP crudo por el circuito Tor: abre una conexión hacia host:puerto
