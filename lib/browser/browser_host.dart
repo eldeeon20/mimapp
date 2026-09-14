@@ -86,10 +86,10 @@ class _BrowserWebViewsHostState extends State<BrowserWebViewsHost>
     return true;
   }
 
-  /// FIX negro al volver: antes se hacía tabs.forgetAll() + desmontar a
-  /// SizedBox, lo que destruía el surface nativo y al volver quedaba
-  /// negro sin loadUrl. Ahora NO se desmonta: los WebViews quedan vivos
-  /// con Visibility(maintainState:true).
+  /// FIX negro al volver: NO se desmonta (los WebViews quedan vivos con
+  /// Visibility maintainState:true), pero al volver del fondo el surface
+  /// nativo queda rancio y hay que repintar con reload (conserva URL,
+  /// pierde scroll/JS como antes pero sin negro).
   @override
   void didChangeAppLifecycleState(AppLifecycleState estado) {
     // Código viejo dejado comentado (regla: no borrar):
@@ -105,6 +105,11 @@ class _BrowserWebViewsHostState extends State<BrowserWebViewsHost>
     if (estado == AppLifecycleState.resumed) {
       _enFondo = false;
       if (mounted) setState(() {});
+      // Repintar la vista activa: sin esto el surface vuelve negro.
+      try {
+        final tabs = BrowserTabs.instance;
+        if (tabs.isOpen) tabs.reload(tabs.active.id);
+      } catch (_) {}
     } else if (estado == AppLifecycleState.paused) {
       // No desmontar a propósito: mantener WebViews vivas.
       _enFondo = false;

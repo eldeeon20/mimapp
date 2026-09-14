@@ -451,7 +451,8 @@ pub fn tor_proxy_stop() -> Result<(), String> {
 /// (GET http://host/...). Todo lo demás → 405 y cierre.
 fn atender_proxy(s: std::net::TcpStream) {
     use std::io::{Read, Write};
-    let _ = s.set_read_timeout(Some(std::time::Duration::from_secs(15)));
+    // 30s: .onion (HSDir+introduce+rendezvous) tarda 10-30s vs 0.5s clearnet.
+    let _ = s.set_read_timeout(Some(std::time::Duration::from_secs(30)));
     // Leer cabecera completa (\r\n\r\n, máx 32KB) en bloqueante.
     let mut head: Vec<u8> = Vec::new();
     let mut buf = [0u8; 4096];
@@ -588,18 +589,26 @@ fn atender_proxy(s: std::net::TcpStream) {
     tor_rt().block_on(tunel(&host, puerto, tcp, tor_stream));
 }
 
-/// Copia bidireccional TCP<->Tor con flush en cada tramo hacia Tor.
-/// Al terminar deja el motivo en la bitácora (antes era mudo).
+/// Copia bidireccional TCP<->Tor con flush en ambos sentidos.
+/// El flush hacia WebView faltaba: ServerHello quedaba bufferizado en
+/// tokio y el WebView cortaba por ERR_TIMED_OUT (directo arti-ureq OK
+/// porque no usa este túnel). Deja bytes en bitácora para diagnosticar.
 async fn tunel(host: &str, puerto: u16, tcp: tokio::net::TcpStream, tor: arti_client::DataStream) {
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Arc;
+    let subidos = Arc::new(AtomicU64::new(0));
+    let bajados = Arc::new(AtomicU64::new(0));
     let (mut tor_r, mut tor_w) = tor.split();
     let (mut tcp_r, mut tcp_w) = tcp.into_split();
+    let sub2 = subidos.clone();
     let hacia_tor = async {
         let mut buf = [0u8; 32768];
         loop {
             match tcp_r.read(&mut buf).await {
                 Ok(0) => break,
                 Ok(n) => {
+                    sub2.fetch_add(n as u64, Ordering::Relaxed);
                     if tor_w.write_all(&buf[..n]).await.is_err() {
                         break;
                     }
@@ -609,20 +618,27 @@ async fn tunel(host: &str, puerto: u16, tcp: tokio::net::TcpStream, tor: arti_cl
             }
         }
     };
+    let baj2 = bajados.clone();
     let desde_tor = async {
         let mut buf = [0u8; 32768];
         loop {
             match tor_r.read(&mut buf).await {
                 Ok(0) => break,
                 Ok(n) => {
+                    baj2.fetch_add(n as u64, Ordering::Relaxed);
                     if tcp_w.write_all(&buf[..n]).await.is_err() {
                         break;
                     }
+                    // FIX TIMED_OUT: sin este flush el ServerHello nunca
+                    // llegaba al WebView y cortaba por timeout.
+                    let _ = tcp_w.flush().await;
                 }
                 Err(_) => break,
             }
         }
     };
     let _ = tokio::join!(hacia_tor, desde_tor);
-    plog(format!("túnel cerrado ← {host}:{puerto}"));
+    let up = subidos.load(Ordering::Relaxed);
+    let down = bajados.load(Ordering::Relaxed);
+    plog(format!("túnel cerrado ← {host}:{puerto} (↑{up}B ↓{down}B)"));
 }
