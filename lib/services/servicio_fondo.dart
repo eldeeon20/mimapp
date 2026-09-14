@@ -10,6 +10,7 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
 import 'notification_service.dart';
+import 'status_notifier.dart';
 
 /// SERVICIO en primer plano (archivo separado de las notificaciones).
 ///
@@ -157,11 +158,19 @@ class ServicioFondo {
   /// 1) pide parada al fondo, 2) espera su confirmación por archivo
   /// (máx 6s) para que Android no resucite el STICKY, 3) da de baja
   /// las notificaciones, 4) mata el proceso.
+  /// Escribe el progreso en la 777: si el texto cambia, el tap llegó;
+  /// si no cambia, el tap no llega a Dart (diagnóstico).
   static Future<void> salir() async {
+    try {
+      StatusNotifier.instance.aviso('Saliendo… parando servicio');
+    } catch (_) {}
     try {
       FlutterBackgroundService().invoke('stop');
     } catch (_) {}
     await esperarStop();
+    try {
+      StatusNotifier.instance.aviso('Saliendo… bajando notificaciones');
+    } catch (_) {}
     try {
       await NotificationService.cancelPersistentes();
     } catch (_) {}
