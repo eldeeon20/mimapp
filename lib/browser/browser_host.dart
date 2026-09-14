@@ -111,12 +111,11 @@ class _BrowserWebViewsHostState extends State<BrowserWebViewsHost>
       _enFondo = false;
       try {
         final tabs = BrowserTabs.instance;
-        if (tabs.isOpen) {
-          // Controladores muertos fuera + nueva generación de keys para
-          // que BrowserWebview se recree con tab.url (initialUrlRequest).
-          tabs.forgetAll();
-          _genVistas++;
-        }
+        // Siempre: esté Web abierta o cerrada (flecha atrás). Si solo se
+        // recrea con isOpen, al volver con Web cerrada el surface queda
+        // muerto y al reabrir queda negro.
+        tabs.forgetAll();
+        _genVistas++;
       } catch (_) {}
       if (mounted) setState(() {});
     } else if (estado == AppLifecycleState.paused) {
