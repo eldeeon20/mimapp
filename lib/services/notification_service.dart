@@ -23,12 +23,12 @@ void notificationBackgroundHandler(NotificationResponse response) {
   if (response.actionId == 'exit_total') {
     DartPluginRegistrant.ensureInitialized();
     try {
-      NotificationService.plugin.cancel(NotificationService.serviceNotificationId);
+      NotificationService.plugin.cancel(id: NotificationService.serviceNotificationId);
     } catch (_) {}
   } else if (response.actionId == 'exit') {
     DartPluginRegistrant.ensureInitialized();
     try {
-      NotificationService.plugin.cancel(StatusNotifier.notificationId);
+      NotificationService.plugin.cancel(id: StatusNotifier.notificationId);
     } catch (_) {}
   }
 }
@@ -103,7 +103,7 @@ class NotificationService {
             onExitAction();
           } else {
             try {
-              _plugin.cancel(StatusNotifier.notificationId);
+              _plugin.cancel(id: StatusNotifier.notificationId);
             } catch (_) {}
           }
         }
