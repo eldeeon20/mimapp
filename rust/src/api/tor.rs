@@ -411,6 +411,9 @@ pub fn tor_proxy_start() -> Result<String, String> {
         .port();
     PROXY_PARAR.store(false, std::sync::atomic::Ordering::Relaxed);
     PROXY_PUERTO.store(puerto, std::sync::atomic::Ordering::Relaxed);
+    plog(format!(
+        "proxy esperando en 127.0.0.1:{puerto} · CONNECT acá"
+    ));
     std::thread::Builder::new()
         .name("tor-proxy".into())
         .spawn(move || {
@@ -481,7 +484,7 @@ fn atender_proxy(s: std::net::TcpStream) {
     let mut partes = primera.split_whitespace();
     let metodo = partes.next().unwrap_or("");
     let objetivo = partes.next().unwrap_or("");
-    plog(format!("{metodo} {objetivo}"));
+    plog(format!("proxy CONNECT recibido: {metodo} {objetivo}"));
     // Destino + bytes ya leídos a reenviar (forma absoluta).
     let (destino, preenvio): (String, Vec<u8>) = if metodo == "CONNECT" {
         (objetivo.to_string(), Vec::new())
@@ -574,7 +577,7 @@ fn atender_proxy(s: std::net::TcpStream) {
     let tcp = match tokio::net::TcpStream::from_std(sock) {
         Ok(t) => t,
         Err(e) => {
-            eprintln!("[tor-proxy] 502: from_std falló ({e})");
+            plog(format!("502: from_std falló ({e})"));
             return;
         }
     };

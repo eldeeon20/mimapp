@@ -103,7 +103,12 @@ class _HomePageState extends State<HomePage> {
     ));
   }
 
-  void _openMedia(BuildContext context) {
+  void _openMedia(BuildContext context) async {
+    // Lazy: recién acá se levanta AudioService + su notificación.
+    try {
+      await MediaPlayer.ensureService();
+    } catch (_) {}
+    if (!context.mounted) return;
     Navigator.of(context).push(MaterialPageRoute(
       builder: (_) => Scaffold(
         appBar: AppBar(title: const Text('Media')),

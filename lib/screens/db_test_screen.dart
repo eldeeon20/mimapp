@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../db/caja_sql.dart';
 
@@ -152,8 +153,48 @@ class _DbTestScreenState extends State<DbTestScreen> {
       return;
     }
     try {
+      // Si la tabla no existe, crearla con ese campo (evita "no such table").
+      if (!_caja.tablas().contains(t)) {
+        _caja.crearTabla(t, {c: tipo});
+        _add('✓ tabla "$t" creada con "$c $tipo" → ${_caja.campos(t)}');
+        return;
+      }
       _caja.agregarCampo(t, c, tipo);
       _add('✓ campo "$c $tipo" en $t → ${_caja.campos(t)}');
+    } catch (e) {
+      _add('✗ $e');
+    }
+  }
+
+  /// Crea la tabla del campo con 2 columnas de ejemplo si está vacía.
+  void _crearTabla() {
+    final t = _tablaCtrl.text.trim();
+    if (t.isEmpty) {
+      _add('✗ poné nombre de tabla');
+      return;
+    }
+    try {
+      if (t == 'notas') {
+        _caja.crearTabla(
+            t, {'titulo': 'TEXT', 'cuerpo': 'TEXT', 'fecha': 'TEXT'});
+      } else {
+        _caja.crearTabla(t, {'nombre': 'TEXT', 'telefono': 'TEXT'});
+      }
+      _add('✓ tabla "$t" lista → ${_caja.campos(t)}');
+    } catch (e) {
+      _add('✗ $e');
+    }
+  }
+
+  void _borrarTabla() {
+    final t = _tablaCtrl.text.trim();
+    if (t.isEmpty) {
+      _add('✗ poné nombre de tabla');
+      return;
+    }
+    try {
+      _caja.borrarTabla(t);
+      _add('✓ tabla "$t" borrada · tablas: ${_caja.tablas()}');
     } catch (e) {
       _add('✗ $e');
     }
@@ -317,6 +358,8 @@ class _DbTestScreenState extends State<DbTestScreen> {
         _campo(_campoCtrl, 'Campo (para agregar/quitar)'),
         _campo(_tipoCtrl, 'Tipo (ej TEXT, INTEGER)'),
         Wrap(children: [
+          _boton('Crear tabla', _crearTabla),
+          _boton('Borrar tabla', _borrarTabla),
           _boton('Agregar campo', _agregarCampo),
           _boton('Quitar campo', _quitarCampo),
         ]),
@@ -348,7 +391,50 @@ class _DbTestScreenState extends State<DbTestScreen> {
           _boton('Quitar id', _quitar),
         ]),
         const Divider(),
-        for (final l in _log) Text(l, style: const TextStyle(fontSize: 12)),
+        // ---- bitácora copiable (igual que Tor: SelectableText + Copiar)
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(8),
+          color: Colors.black.withValues(alpha: .5),
+          child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [
+                  const Text('bitácora db',
+                      style: TextStyle(fontSize: 10, fontFamily: 'monospace')),
+                  const Spacer(),
+                  TextButton.icon(
+                    onPressed: () {
+                      final txt = _log.join('\n');
+                      if (txt.isNotEmpty) {
+                        Clipboard.setData(ClipboardData(text: txt));
+                      }
+                    },
+                    icon: const Icon(Icons.copy, size: 14),
+                    label: const Text('Copiar', style: TextStyle(fontSize: 11)),
+                  ),
+                  TextButton.icon(
+                    onPressed: () => setState(() => _log.clear()),
+                    icon: const Icon(Icons.delete, size: 14),
+                    label:
+                        const Text('Limpiar', style: TextStyle(fontSize: 11)),
+                  ),
+                ]),
+                SizedBox(
+                  height: 220,
+                  child: SingleChildScrollView(
+                    child: SelectableText(
+                        _log.isEmpty ? '· sin eventos ·' : _log.join('\n'),
+                        style: const TextStyle(
+                            fontSize: 11,
+                            fontFamily: 'monospace',
+                            color: Colors.lightGreenAccent)),
+                  ),
+                ),
+              ]),
+        ),
+        // Código viejo dejado comentado (regla: no borrar):
+        // for (final l in _log) Text(l, style: const TextStyle(fontSize: 12)),
       ],
     );
   }

@@ -19,6 +19,28 @@ class MediaPlayer extends BaseAudioHandler with SeekHandler {
 
   factory MediaPlayer() => instance;
 
+  /// AudioService se inicializa LAZY (solo al entrar a Media).
+  /// Si se hace en bootstrap, Android muestra la notificación
+  /// multimedia sin haber reproducido nada.
+  static bool audioListo = false;
+  static Future<void> ensureService() async {
+    if (audioListo) return;
+    try {
+      await AudioService.init(
+        builder: () => MediaPlayer.instance,
+        config: const AudioServiceConfig(
+          androidNotificationChannelId: 'pr_app_media',
+          androidNotificationChannelName: 'Reproducción de medios',
+          androidNotificationOngoing: true,
+          androidStopForegroundOnPause: true,
+        ),
+      );
+      audioListo = true;
+    } catch (e) {
+      // Sin servicio igual se puede usar el player local sin notificación.
+    }
+  }
+
   MediaPlayer._internal() : super() {
     _player = Player();
     _videoController = VideoController(_player);

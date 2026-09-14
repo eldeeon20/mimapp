@@ -25,7 +25,11 @@ Future<void> initApp() async {
   WidgetsFlutterBinding.ensureInitialized();
   await _initSystemUi();
   MediaKit.ensureInitialized();
-  await _initMediaService();
+  // FIX noti multimedia fantasma: antes se hacía AudioService.init acá
+  // al arrancar y Android mostraba la notificación pr_app_media sin
+  // haber entrado a Media ni reproducido nada. Ahora es lazy: se
+  // inicializa al entrar a Media (MediaPlayer.ensureService).
+  // await _initMediaService();
   await _initServiceChannel();
   await _initNotifications();
   // Limpia el flag de stop viejo (un stop anterior no vale).
@@ -66,6 +70,8 @@ Future<void> _initSystemUi() async {
 }
 
 /// Servicio de medios: playlist + notificación con controles.
+/// LAZY: solo se llama al entrar a Media (ver MediaPlayer.ensureService).
+/// No llamar en initApp o aparece la notificación sin reproducir nada.
 Future<void> _initMediaService() async {
   try {
     await AudioService.init(

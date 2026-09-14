@@ -39,8 +39,8 @@ class _BrowserWebViewsHostState extends State<BrowserWebViewsHost>
   bool _torBusy = false;
   String? _torMsg;
 
-  /// true mientras la app está en fondo: las vistas web se desmontan
-  /// (ver didChangeAppLifecycleState) y se recrean al volver.
+  /// Flag histórico: YA NO desmonta vistas (fix negro al volver).
+  /// Se deja en false siempre; antes true desmontaba a SizedBox.
   bool _enFondo = false;
 
   @override
@@ -86,21 +86,28 @@ class _BrowserWebViewsHostState extends State<BrowserWebViewsHost>
     return true;
   }
 
-  /// App a fondo / de vuelta: las WebViews vivas (aunque ocultas con
-  /// tamaño cero) dejan la superficie nativa rancia y al volver la app
-  /// entera queda en negro. Se desmontan al ir a fondo (olvidando sus
-  /// controladores) y se recrean al volver con la URL de cada pestaña.
-  /// El estado JS/scroll de la sesión en fondo se pierde; la URL no.
+  /// FIX negro al volver: antes se hacía tabs.forgetAll() + desmontar a
+  /// SizedBox, lo que destruía el surface nativo y al volver quedaba
+  /// negro sin loadUrl. Ahora NO se desmonta: los WebViews quedan vivos
+  /// con Visibility(maintainState:true).
   @override
   void didChangeAppLifecycleState(AppLifecycleState estado) {
-    final tabs = BrowserTabs.instance;
-    if (estado == AppLifecycleState.paused) {
-      tabs.forgetAll();
-      _enFondo = true;
-      if (mounted) setState(() {});
-    } else if (estado == AppLifecycleState.resumed) {
+    // Código viejo dejado comentado (regla: no borrar):
+    // final tabs = BrowserTabs.instance;
+    // if (estado == AppLifecycleState.paused) {
+    //   tabs.forgetAll();
+    //   _enFondo = true;
+    //   if (mounted) setState(() {});
+    // } else if (estado == AppLifecycleState.resumed) {
+    //   _enFondo = false;
+    //   if (mounted) setState(() {});
+    // }
+    if (estado == AppLifecycleState.resumed) {
       _enFondo = false;
       if (mounted) setState(() {});
+    } else if (estado == AppLifecycleState.paused) {
+      // No desmontar a propósito: mantener WebViews vivas.
+      _enFondo = false;
     }
   }
 
@@ -162,11 +169,9 @@ class _BrowserWebViewsHostState extends State<BrowserWebViewsHost>
                 Column(children: [
                   _bar(tabs, active),
                   Expanded(
-                    // En fondo no se monta ninguna vista web (pantalla
-                    // negra al volver); al volver se recrean solas.
-                    child: _enFondo
-                        ? const SizedBox.shrink()
-                        : Stack(
+                    // FIX negro al volver: siempre montadas (maintainState).
+                    // Viejo: _enFondo ? SizedBox.shrink() : Stack(...)
+                    child: Stack(
                             children: [
                               for (final t in tabs.tabs)
                                 Visibility(
@@ -323,6 +328,8 @@ class _BrowserWebViewsHostState extends State<BrowserWebViewsHost>
   }
 
   /// Prende/apaga la salida por Tor del navegador.
+  /// Orden: start cliente → startProxy (hp aleatorio) → setProxy → reload
+  /// (los WebViews vivos no re-leen proxy hasta recargar).
   Future<void> _cambiarTor(BrowserTabs tabs) async {
     final tor = TorService.instance;
     setState(() {
@@ -344,10 +351,17 @@ class _BrowserWebViewsHostState extends State<BrowserWebViewsHost>
         final ok = await tabs.setProxy(true, hp, 'PROXY',
             bypass: const ['127.0.0.1', 'localhost']);
         if (!ok) throw 'el WebView no aceptó el proxy';
+        // Los WebViews ya creados no aplican el override hasta recargar.
+        try {
+          await tabs.reload(tabs.active.id);
+        } catch (_) {}
         setState(() => _torMsg = 'ON · sale por Tor ($hp)');
       } else {
         await tabs.setProxy(false, '', 'PROXY');
         await tor.stopProxy();
+        try {
+          await tabs.reload(tabs.active.id);
+        } catch (_) {}
         setState(() => _torMsg = 'OFF · navegar directo');
       }
     } catch (e) {

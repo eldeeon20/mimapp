@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../build_info.dart';
@@ -254,30 +255,46 @@ class _TorTestScreenState extends State<TorTestScreen> {
           ),
         ],
         const SizedBox(height: 10),
-        // ---- log
+        // ---- log bootstrap (copiable: SelectableText + botón copiar)
         Container(
-          height: 130,
           width: double.infinity,
-          color: Colors.black.withValues(alpha: .5),
           padding: const EdgeInsets.all(8),
-          child: ListView.builder(
-            itemCount: s.log.length,
-            itemBuilder: (_, i) => Text(s.log[i],
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                    fontSize: 9.5,
-                    fontFamily: 'monospace',
-                    color: s.log[i].startsWith('ERROR')
-                        ? Colors.redAccent
-                        : Colors.greenAccent.withValues(alpha: .7))),
-          ),
+          color: Colors.black.withValues(alpha: .5),
+          child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [
+                  const Text('bitácora tor',
+                      style: TextStyle(fontSize: 10, fontFamily: 'monospace')),
+                  const Spacer(),
+                  TextButton.icon(
+                    onPressed: () {
+                      final txt = s.log.join('\n');
+                      if (txt.isNotEmpty) {
+                        Clipboard.setData(ClipboardData(text: txt));
+                      }
+                    },
+                    icon: const Icon(Icons.copy, size: 14),
+                    label: const Text('Copiar', style: TextStyle(fontSize: 11)),
+                  ),
+                ]),
+                SizedBox(
+                  height: 130,
+                  child: SingleChildScrollView(
+                    child: SelectableText(
+                        s.log.isEmpty ? '· sin eventos ·' : s.log.join('\n'),
+                        style: TextStyle(
+                            fontSize: 9.5,
+                            fontFamily: 'monospace',
+                            color: Colors.greenAccent.withValues(alpha: .7))),
+                  ),
+                ),
+              ]),
         ),
         const SizedBox(height: 10),
         // ---- bitácora del proxy (qué pidió el WebView y por qué cortó)
         Container(
           width: double.infinity,
-          constraints: const BoxConstraints(maxHeight: 160),
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
               color: Colors.black.withValues(alpha: .5),
@@ -285,18 +302,39 @@ class _TorTestScreenState extends State<TorTestScreen> {
           child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                    'proxy: ${s.proxyUrl ?? 'apagado'} (entra a Tor para refrescar)',
-                    style: const TextStyle(
-                        fontSize: 10, fontFamily: 'monospace')),
+                Row(children: [
+                  Expanded(
+                    child: SelectableText(
+                        'proxy: ${s.proxyUrl ?? 'apagado'} (entra a Tor para refrescar)',
+                        style: const TextStyle(
+                            fontSize: 10, fontFamily: 'monospace')),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.refresh, size: 16),
+                    tooltip: 'Refrescar proxy',
+                    onPressed: () => s.refresh(),
+                  ),
+                  TextButton.icon(
+                    onPressed: () {
+                      final txt =
+                          'proxy: ${s.proxyUrl ?? 'apagado'}\n${s.proxyLog}';
+                      Clipboard.setData(ClipboardData(text: txt));
+                    },
+                    icon: const Icon(Icons.copy, size: 14),
+                    label: const Text('Copiar', style: TextStyle(fontSize: 11)),
+                  ),
+                ]),
                 const SizedBox(height: 4),
-                SingleChildScrollView(
-                  child: SelectableText(
-                      s.proxyLog.isEmpty ? '· sin conexiones ·' : s.proxyLog,
-                      style: const TextStyle(
-                          fontSize: 9.5,
-                          fontFamily: 'monospace',
-                          color: Colors.orangeAccent)),
+                SizedBox(
+                  height: 120,
+                  child: SingleChildScrollView(
+                    child: SelectableText(
+                        s.proxyLog.isEmpty ? '· sin conexiones ·' : s.proxyLog,
+                        style: const TextStyle(
+                            fontSize: 9.5,
+                            fontFamily: 'monospace',
+                            color: Colors.orangeAccent)),
+                  ),
                 ),
               ]),
         ),
