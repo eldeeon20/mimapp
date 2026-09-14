@@ -43,6 +43,11 @@ class _BrowserWebViewsHostState extends State<BrowserWebViewsHost>
   /// Se deja en false siempre; antes true desmontaba a SizedBox.
   bool _enFondo = false;
 
+  /// Generación de vistas: al volver del fondo se incrementa para forzar
+  /// que Flutter recree el InAppWebView nativo con la URL de la pestaña
+  /// (el surface viejo queda muerto y sin esto vuelve negro).
+  int _genVistas = 0;
+
   @override
   void initState() {
     super.initState();
@@ -86,10 +91,10 @@ class _BrowserWebViewsHostState extends State<BrowserWebViewsHost>
     return true;
   }
 
-  /// FIX negro al volver: NO se desmonta (los WebViews quedan vivos con
-  /// Visibility maintainState:true), pero al volver del fondo el surface
-  /// nativo queda rancio y hay que repintar con reload (conserva URL,
-  /// pierde scroll/JS como antes pero sin negro).
+  /// FIX negro al volver: NO se desmonta al ir a fondo, pero al volver
+  /// se fuerza recreación del WebView nativo (surface muerto) con la URL
+  /// de cada pestaña. Sin recrear, el surface rancio vuelve negro; sin
+  /// URL (forgetAll sin load) también negro. Esto hace ambas.
   @override
   void didChangeAppLifecycleState(AppLifecycleState estado) {
     // Código viejo dejado comentado (regla: no borrar):
@@ -104,12 +109,16 @@ class _BrowserWebViewsHostState extends State<BrowserWebViewsHost>
     // }
     if (estado == AppLifecycleState.resumed) {
       _enFondo = false;
-      if (mounted) setState(() {});
-      // Repintar la vista activa: sin esto el surface vuelve negro.
       try {
         final tabs = BrowserTabs.instance;
-        if (tabs.isOpen) tabs.reload(tabs.active.id);
+        if (tabs.isOpen) {
+          // Controladores muertos fuera + nueva generación de keys para
+          // que BrowserWebview se recree con tab.url (initialUrlRequest).
+          tabs.forgetAll();
+          _genVistas++;
+        }
       } catch (_) {}
+      if (mounted) setState(() {});
     } else if (estado == AppLifecycleState.paused) {
       // No desmontar a propósito: mantener WebViews vivas.
       _enFondo = false;
@@ -174,17 +183,18 @@ class _BrowserWebViewsHostState extends State<BrowserWebViewsHost>
                 Column(children: [
                   _bar(tabs, active),
                   Expanded(
-                    // FIX negro al volver: siempre montadas (maintainState).
+                    // FIX negro al volver: siempre montadas + recreación con
+                    // _genVistas al volver del fondo (surface nuevo con URL).
                     // Viejo: _enFondo ? SizedBox.shrink() : Stack(...)
                     child: Stack(
                             children: [
                               for (final t in tabs.tabs)
                                 Visibility(
-                                  key: ValueKey(t.id),
+                                  key: ValueKey('${t.id}-$_genVistas'),
                                   visible: t.id == active.id,
                                   maintainState: true,
                                   child: BrowserWebview(
-                                      key: ValueKey(t.id),
+                                      key: ValueKey('${t.id}-$_genVistas'),
                                       tabs: tabs,
                                       tab: t),
                                 ),
