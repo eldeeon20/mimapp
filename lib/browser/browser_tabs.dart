@@ -42,7 +42,12 @@ class BrowserTabs extends ChangeNotifier {
 
   final ValueNotifier<bool> _open = ValueNotifier(false);
   bool get isOpen => _open.value;
-  void openBrowser() {
+
+  /// El host registra acá cómo cerrar sus paneles (menú ⋮ / pestañas /
+  /// ajustes / historial). Devuelve true si había algo abierto. Lo usa
+  /// el botón atrás (PopScope en pr_app.dart): primero paneles, después
+  /// la web, nunca la app.
+  bool Function()? closePanels;  void openBrowser() {
     _open.value = true;
     notifyListeners();
   }
@@ -68,6 +73,10 @@ class BrowserTabs extends ChangeNotifier {
   }
 
   void forgetController(int tabId) => _controllers.remove(tabId);
+
+  /// Olvida TODOS los controladores (la app fue a fondo: las vistas
+  /// nativas se desmontan y se recrean al volver con tab.url).
+  void forgetAll() => _controllers.clear();
 
   void activate(int index) {
     if (index < 0 || index >= tabs.length) return;

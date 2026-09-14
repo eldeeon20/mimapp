@@ -39,6 +39,10 @@ class _BrowserWebViewsHostState extends State<BrowserWebViewsHost>
   bool _torBusy = false;
   String? _torMsg;
 
+  /// true mientras la app está en fondo: las vistas web se desmontan
+  /// (ver didChangeAppLifecycleState) y se recrean al volver.
+  bool _enFondo = false;
+
   @override
   void initState() {
     super.initState();
@@ -47,12 +51,15 @@ class _BrowserWebViewsHostState extends State<BrowserWebViewsHost>
     _proxyCtrl.text = t.proxyHostPort;
     _proxyScheme = t.proxyScheme;
     t.addListener(_syncUrl);
+    t.closePanels = _cerrarPaneles;
     WidgetsBinding.instance.addObserver(this);
   }
 
   @override
   void dispose() {
-    BrowserTabs.instance.removeListener(_syncUrl);
+    final tabs = BrowserTabs.instance;
+    tabs.removeListener(_syncUrl);
+    if (tabs.closePanels == _cerrarPaneles) tabs.closePanels = null;
     WidgetsBinding.instance.removeObserver(this);
     _urlCtrl.dispose();
     _proxyCtrl.dispose();
@@ -60,37 +67,41 @@ class _BrowserWebViewsHostState extends State<BrowserWebViewsHost>
   }
 
   /// El botón atrás del celular NO cierra la app nunca (decisión del usuario).
-  /// Cerramos primero cualquier popup; si el browser está abierto lo ocultamos
-  /// (las WebViews siguen vivas); si no queda nada, bloqueamos la salida.
-  @override
-  Future<bool> didRequestPopRoute() async {
-    // Si hay una pantalla apilada (sub-ruta), dejamos que el Navigator la
-    // cierre normalmente: no bloqueamos la navegación de la app.
-    if (Navigator.of(context, rootNavigator: true).canPop()) {
+/// El atrás lo atiende el PopScope de pr_app.dart, que llama a
+/// [BrowserTabs.closePanels] (registrado acá abajo): primero se cierran
+/// los paneles (menú/pestañas/ajustes/historial), recién después la web.
+/// (El WidgetsBindingObserver anterior usaba `didRequestPopRoute`, que no
+/// existe en Flutter: ese código nunca se ejecutaba y el atrás se
+/// comía la web entera.)
+  bool _cerrarPaneles() {
+    if (!(_tabsOpen || _menuOpen || _settingsOpen || _historyOpen)) {
       return false;
     }
-    if (_historyOpen) {
-      setState(() => _historyOpen = false);
-      return true;
-    }
-    if (_settingsOpen) {
-      setState(() => _settingsOpen = false);
-      return true;
-    }
-    if (_menuOpen) {
-      setState(() => _menuOpen = false);
-      return true;
-    }
-    if (_tabsOpen) {
-      setState(() => _tabsOpen = false);
-      return true;
-    }
+    setState(() {
+      _tabsOpen = false;
+      _menuOpen = false;
+      _settingsOpen = false;
+      _historyOpen = false;
+    });
+    return true;
+  }
+
+  /// App a fondo / de vuelta: las WebViews vivas (aunque ocultas con
+  /// tamaño cero) dejan la superficie nativa rancia y al volver la app
+  /// entera queda en negro. Se desmontan al ir a fondo (olvidando sus
+  /// controladores) y se recrean al volver con la URL de cada pestaña.
+  /// El estado JS/scroll de la sesión en fondo se pierde; la URL no.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState estado) {
     final tabs = BrowserTabs.instance;
-    if (tabs.isOpen) {
-      tabs.closeBrowser();
-      return true;
+    if (estado == AppLifecycleState.paused) {
+      tabs.forgetAll();
+      _enFondo = true;
+      if (mounted) setState(() {});
+    } else if (estado == AppLifecycleState.resumed) {
+      _enFondo = false;
+      if (mounted) setState(() {});
     }
-    return true; // nunca cerrar la app con atrás
   }
 
   void _syncUrl() {
@@ -151,18 +162,24 @@ class _BrowserWebViewsHostState extends State<BrowserWebViewsHost>
                 Column(children: [
                   _bar(tabs, active),
                   Expanded(
-                    child: Stack(
-                      children: [
-                        for (final t in tabs.tabs)
-                          Visibility(
-                            key: ValueKey(t.id),
-                            visible: t.id == active.id,
-                            maintainState: true,
-                            child: BrowserWebview(
-                                key: ValueKey(t.id), tabs: tabs, tab: t),
+                    // En fondo no se monta ninguna vista web (pantalla
+                    // negra al volver); al volver se recrean solas.
+                    child: _enFondo
+                        ? const SizedBox.shrink()
+                        : Stack(
+                            children: [
+                              for (final t in tabs.tabs)
+                                Visibility(
+                                  key: ValueKey(t.id),
+                                  visible: t.id == active.id,
+                                  maintainState: true,
+                                  child: BrowserWebview(
+                                      key: ValueKey(t.id),
+                                      tabs: tabs,
+                                      tab: t),
+                                ),
+                            ],
                           ),
-                      ],
-                    ),
                   ),
                 ]),
                 if (_tabsOpen) _tabsPanel(tabs),
@@ -223,9 +240,12 @@ class _BrowserWebViewsHostState extends State<BrowserWebViewsHost>
   }) {
     // Sin detector interno vacío: ese absorbía los taps de TODA la
     // pantalla y el toque afuera nunca llegaba a onClose.
+    // behavior.opaque: el área oscura (sin hijo dibujado) también
+    // recibe el tap; con deferToChild el toque afuera no cerraba.
     return Material(
       color: Colors.black54,
       child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
         onTap: onClose,
         child: Align(
           alignment: alignment,
@@ -520,6 +540,7 @@ class _BrowserWebViewsHostState extends State<BrowserWebViewsHost>
     return Material(
       color: Colors.black54,
       child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
         onTap: () => setState(() => _tabsOpen = false),
         child: Align(
           alignment: Alignment.topCenter,

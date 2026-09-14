@@ -31,6 +31,11 @@ class TorService extends ChangeNotifier {
   /// Vacío = apagado.
   String _proxyHostPort = '';
 
+  /// Bitácora del proxy nativo (una línea por conexión: qué pidió el
+  /// WebView y por qué se cortó). Para diagnosticar en la pantalla Tor.
+  String _proxyLog = '';
+  String get proxyLog => _proxyLog;
+
   bool get busy => _busy;
   String get state => _state;
   bool get running => _running;
@@ -61,6 +66,9 @@ class TorService extends ChangeNotifier {
       _fase = await rust.torEstado();
       try {
         _proxyHostPort = await rust.torProxyPuerto();
+      } catch (_) {}
+      try {
+        _proxyLog = await rust.torProxyLog();
       } catch (_) {}
     } catch (_) {}
     notifyListeners();

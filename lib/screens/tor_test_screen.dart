@@ -273,6 +273,33 @@ class _TorTestScreenState extends State<TorTestScreen> {
                         : Colors.greenAccent.withValues(alpha: .7))),
           ),
         ),
+        const SizedBox(height: 10),
+        // ---- bitácora del proxy (qué pidió el WebView y por qué cortó)
+        Container(
+          width: double.infinity,
+          constraints: const BoxConstraints(maxHeight: 160),
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: .5),
+              borderRadius: BorderRadius.circular(8)),
+          child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                    'proxy: ${s.proxyUrl ?? 'apagado'} (entra a Tor para refrescar)',
+                    style: const TextStyle(
+                        fontSize: 10, fontFamily: 'monospace')),
+                const SizedBox(height: 4),
+                SingleChildScrollView(
+                  child: SelectableText(
+                      s.proxyLog.isEmpty ? '· sin conexiones ·' : s.proxyLog,
+                      style: const TextStyle(
+                          fontSize: 9.5,
+                          fontFamily: 'monospace',
+                          color: Colors.orangeAccent)),
+                ),
+              ]),
+        ),
       ]),
     );
   }

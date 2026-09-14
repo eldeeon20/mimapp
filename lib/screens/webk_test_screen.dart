@@ -202,139 +202,159 @@ class _WebkTestScreenState extends State<WebkTestScreen> {
   @override
   Widget build(BuildContext context) {
     final corriendo = _server.corriendo;
-    if (_pantallaCompleta) return _webPantallaCompleta();
-    return Column(
+    // _vistaWeb vive SIEMPRE en el mismo slot del árbol: moverla a otro
+    // padre (ej. overlay de pantalla completa) destruye la vista nativa
+    // y queda en blanco. En completo se OCULTAN botones/log (mismo slot,
+    // tamaño cero) y el Expanded la estira; la pastilla Salir va overlay.
+    return Stack(
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-          child: Row(
-            children: [
-              Icon(
-                corriendo ? Icons.lock_rounded : Icons.lock_open_rounded,
-                color: corriendo ? Colors.greenAccent : Colors.grey,
-                size: 20,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  corriendo ? _server.baseUrl : 'server detenido',
-                  style: const TextStyle(
-                      fontSize: 12, fontFamily: 'monospace'),
-                  overflow: TextOverflow.ellipsis,
+        Column(
+          children: [
+            Visibility(
+              visible: !_pantallaCompleta,
+              maintainState: true,
+              maintainSize: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                child: Row(
+                  children: [
+                    Icon(
+                      corriendo
+                          ? Icons.lock_rounded
+                          : Icons.lock_open_rounded,
+                      color: corriendo ? Colors.greenAccent : Colors.grey,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        corriendo ? _server.baseUrl : 'server detenido',
+                        style: const TextStyle(
+                            fontSize: 12, fontFamily: 'monospace'),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    Text(
+                      'srv ${_server.servidas} · rej ${_server.rechazadas}',
+                      style: const TextStyle(
+                          fontSize: 10, color: Colors.grey),
+                    ),
+                  ],
                 ),
               ),
-              Text(
-                'srv ${_server.servidas} · rej ${_server.rechazadas}',
-                style: const TextStyle(
-                    fontSize: 10, color: Colors.grey),
-              ),
-            ],
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-          child: Wrap(
-            spacing: 8,
-            runSpacing: 4,
-            children: [
-              FilledButton.icon(
-                onPressed: (_busy || corriendo) ? null : _iniciar,
-                icon: const Icon(Icons.play_arrow_rounded, size: 18),
-                label: const Text('Iniciar',
-                    style: TextStyle(fontSize: 13)),
-              ),
-              FilledButton.icon(
-                onPressed: (!corriendo || !_indiceListo)
-                    ? null
-                    : _abrirHola,
-                icon: const Icon(Icons.open_in_browser_rounded,
-                    size: 18),
-                label: const Text('Abrir hola',
-                    style: TextStyle(fontSize: 13)),
-              ),
-              FilledButton.tonalIcon(
-                onPressed: (!corriendo || !_indiceListo)
-                    ? null
-                    : _abrirPuerta,
-                icon: const Icon(Icons.verified_user_rounded,
-                    size: 18),
-                label: const Text('Puente demo',
-                    style: TextStyle(fontSize: 13)),
-              ),
-              OutlinedButton.icon(
-                onPressed: corriendo
-                    ? () {
-                        _server.autorizarUna();
-                        _add('· señal extra (1 conexión más)');
-                      }
-                    : null,
-                icon: const Icon(Icons.key_rounded, size: 18),
-                label: const Text('Autorizar otra',
-                    style: TextStyle(fontSize: 13)),
-              ),
-              OutlinedButton.icon(
-                onPressed: corriendo ? _detener : null,
-                icon: const Icon(Icons.stop_rounded, size: 18),
-                label: const Text('Detener',
-                    style: TextStyle(fontSize: 13)),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 8),
-        Expanded(child: _marcoWeb()),
-        Container(
-          height: 90,
-          width: double.infinity,
-          margin: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: Colors.black,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.grey[800]!),
-          ),
-          child: SingleChildScrollView(
-            reverse: true,
-            child: SelectableText(
-              _log.isEmpty ? '· log ·' : _log.join('\n'),
-              style: const TextStyle(
-                  fontSize: 11, fontFamily: 'monospace'),
             ),
-          ),
+            Visibility(
+              visible: !_pantallaCompleta,
+              maintainState: true,
+              maintainSize: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  children: [
+                    FilledButton.icon(
+                      onPressed:
+                          (_busy || corriendo) ? null : _iniciar,
+                      icon: const Icon(Icons.play_arrow_rounded, size: 18),
+                      label: const Text('Iniciar',
+                          style: TextStyle(fontSize: 13)),
+                    ),
+                    FilledButton.icon(
+                      onPressed: (!corriendo || !_indiceListo)
+                          ? null
+                          : _abrirHola,
+                      icon: const Icon(Icons.open_in_browser_rounded,
+                          size: 18),
+                      label: const Text('Abrir hola',
+                          style: TextStyle(fontSize: 13)),
+                    ),
+                    FilledButton.tonalIcon(
+                      onPressed: (!corriendo || !_indiceListo)
+                          ? null
+                          : _abrirPuerta,
+                      icon: const Icon(Icons.verified_user_rounded,
+                          size: 18),
+                      label: const Text('Puente demo',
+                          style: TextStyle(fontSize: 13)),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: corriendo
+                          ? () {
+                              _server.autorizarUna();
+                              _add('· señal extra (1 conexión más)');
+                            }
+                          : null,
+                      icon: const Icon(Icons.key_rounded, size: 18),
+                      label: const Text('Autorizar otra',
+                          style: TextStyle(fontSize: 13)),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: corriendo ? _detener : null,
+                      icon: const Icon(Icons.stop_rounded, size: 18),
+                      label: const Text('Detener',
+                          style: TextStyle(fontSize: 13)),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Expanded(child: _marcoWeb(borde: !_pantallaCompleta)),
+            Visibility(
+              visible: !_pantallaCompleta,
+              maintainState: true,
+              maintainSize: false,
+              child: Container(
+                height: 90,
+                width: double.infinity,
+                margin: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.black,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.grey[800]!),
+                ),
+                child: SingleChildScrollView(
+                  reverse: true,
+                  child: SelectableText(
+                    _log.isEmpty ? '· log ·' : _log.join('\n'),
+                    style: const TextStyle(
+                        fontSize: 11, fontFamily: 'monospace'),
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
+        if (_pantallaCompleta) _pastillaSalir(),
       ],
     );
   }
 
-  /// Web maximizado con botón Salir para volver a los ejemplos.
-  /// Los ejemplos ("Abrir hola", "Puente demo") abren acá.
-  Widget _webPantallaCompleta() {
-    return Stack(
-      children: [
-        _marcoWeb(borde: false),
-        Positioned(
-          top: 8,
-          right: 8,
-          child: Material(
-            color: Colors.black54,
-            borderRadius: BorderRadius.circular(20),
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              const Padding(
-                padding: EdgeInsets.only(left: 12),
-                child: Text('Salir',
-                    style: TextStyle(color: Colors.white, fontSize: 13)),
-              ),
-              IconButton(
-                tooltip: 'Salir (volver a ejemplos)',
-                icon: const Icon(Icons.close_rounded,
-                    color: Colors.white, size: 20),
-                onPressed: () =>
-                    setState(() => _pantallaCompleta = false),
-              ),
-            ]),
+  /// Pastilla Salir overlay para el modo completo (no toca el WebView).
+  Widget _pastillaSalir() {
+    return Positioned(
+      top: 8,
+      right: 8,
+      child: Material(
+        color: Colors.black54,
+        borderRadius: BorderRadius.circular(20),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          const Padding(
+            padding: EdgeInsets.only(left: 12),
+            child: Text('Salir',
+                style: TextStyle(color: Colors.white, fontSize: 13)),
           ),
-        ),
-      ],
+          IconButton(
+            tooltip: 'Salir (volver a ejemplos)',
+            icon: const Icon(Icons.close_rounded,
+                color: Colors.white, size: 20),
+            onPressed: () =>
+                setState(() => _pantallaCompleta = false),
+          ),
+        ]),
+      ),
     );
   }
 

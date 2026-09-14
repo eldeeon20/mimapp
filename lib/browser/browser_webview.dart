@@ -25,6 +25,14 @@ class _BrowserWebviewState extends State<BrowserWebview> {
   double _progress = 1;
 
   @override
+  void dispose() {
+    // Sin esto el gestor guarda controladores muertos y loadUrl/reload
+    // no hacen nada tras recrear la vista (fondo → volver).
+    widget.tabs.forgetController(widget.tab.id);
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Stack(children: [
       Column(children: [

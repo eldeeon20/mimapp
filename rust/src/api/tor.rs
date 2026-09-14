@@ -214,6 +214,30 @@ static PROXY_PARAR: std::sync::atomic::AtomicBool =
 static PROXY_PUERTO: std::sync::atomic::AtomicU16 =
     std::sync::atomic::AtomicU16::new(0);
 
+/// Bitácora del proxy (últimas 40 líneas): cada conexión que el WebView
+/// abre/cierra deja su motivo acá. Se lee desde la pantalla Tor con
+/// [tor_proxy_log] (el ERR_CONNECTION_CLOSED era un cierre mudo).
+static PROXY_LOG: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+fn plog(m: String) {
+    eprintln!("[tor-proxy] {m}");
+    if let Ok(mut g) = PROXY_LOG.lock() {
+        g.push(m);
+        while g.len() > 40 {
+            g.remove(0);
+        }
+    }
+}
+
+/// Bitácora del proxy para la UI (una línea por renglón).
+#[flutter_rust_bridge::frb]
+pub fn tor_proxy_log() -> String {
+    match PROXY_LOG.lock() {
+        Ok(g) => g.join("\n"),
+        Err(_) => String::new(),
+    }
+}
+
 /// "127.0.0.1:PUERTO" si el proxy está arriba, "" si no.
 #[flutter_rust_bridge::frb]
 pub fn tor_proxy_puerto() -> String {
@@ -294,17 +318,24 @@ fn atender_proxy(s: std::net::TcpStream) {
     let _ = sock.set_nonblocking(false);
     loop {
         match sock.read(&mut buf) {
-            Ok(0) => return,
+            Ok(0) => {
+                plog("cierre: web cortó antes de pedir".into());
+                return;
+            }
             Ok(n) => {
                 head.extend_from_slice(&buf[..n]);
                 if head.len() > 32768 {
+                    plog("cierre: cabecera >32KB".into());
                     return;
                 }
                 if head.windows(4).any(|w| w == b"\r\n\r\n") {
                     break;
                 }
             }
-            Err(_) => return,
+            Err(e) => {
+                plog(format!("cierre: no leyó cabecera ({e})"));
+                return;
+            }
         }
     }
     let texto = String::from_utf8_lossy(&head);
@@ -312,6 +343,7 @@ fn atender_proxy(s: std::net::TcpStream) {
     let mut partes = primera.split_whitespace();
     let metodo = partes.next().unwrap_or("");
     let objetivo = partes.next().unwrap_or("");
+    plog(format!("{metodo} {objetivo}"));
     // Destino + bytes ya leídos a reenviar (forma absoluta).
     let (destino, preenvio): (String, Vec<u8>) = if metodo == "CONNECT" {
         (objetivo.to_string(), Vec::new())
@@ -331,6 +363,7 @@ fn atender_proxy(s: std::net::TcpStream) {
         };
         (d, head.clone())
     } else {
+        plog(format!("405: método/forma no proxy ({primera})"));
         let _ = sock.write_all(b"HTTP/1.1 405 Solo proxy\r\nContent-Length: 0\r\n\r\n");
         return;
     };
@@ -339,53 +372,84 @@ fn atender_proxy(s: std::net::TcpStream) {
         None => (destino.clone(), 443),
     };
     if host.is_empty() {
+        plog("cierre: destino vacío".into());
         return;
     }
     // Clonar el cliente arti para este hilo.
     let cliente: Client = match CLIENT.lock() {
         Ok(g) => match g.as_ref() {
             Some(c) => c.clone(),
-            None => return,
+            None => {
+                plog("cierre: Tor apagado a mitad".into());
+                return;
+            }
         },
-        Err(_) => return,
+        Err(_) => {
+            plog("cierre: mutex cliente".into());
+            return;
+        }
     };
     // Conectar por el circuito y tunelizar.
     let mut tor_stream = match tor_rt().block_on(cliente.connect((host.clone(), puerto))) {
-        Ok(s) => s,
-        Err(_) => {
+        Ok(s) => {
+            plog(format!("circuito OK → {host}:{puerto}"));
+            s
+        }
+        Err(e) => {
+            plog(format!("502: Tor no conecta a {host}:{puerto} ({e})"));
             let _ = sock.write_all(b"HTTP/1.1 502 Tor no conecta\r\nContent-Length: 0\r\n\r\n");
             return;
         }
     };
     if metodo == "CONNECT" {
         if sock.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n").is_err() {
+            plog("cierre: no salió el 200".into());
             return;
         }
     } else {
         // Forma absoluta: el TLS lo negocia el WebView contra el destino;
-        // acá solo reenviamos los bytes ya leídos y tuneleamos.
+        // acá solo reenviamos los bytes ya leídos y tuneleamos (con flush:
+        // DataStream bufferiza y sin flush el server nunca responde).
         use tokio::io::AsyncWriteExt as _;
         if tor_rt()
-            .block_on(async { tor_stream.write_all(&preenvio).await })
+            .block_on(async {
+                tor_stream.write_all(&preenvio).await?;
+                tor_stream.flush().await
+            })
             .is_err()
         {
+            plog("cierre: no salió el preenvío".into());
             return;
         }
     }
-    let _ = sock.set_nonblocking(true);
+    // Pasar a tokio: sin timeouts de std (solo valen en bloqueante y
+    // confunden al convertir) y chequeando el nonblocking de verdad
+    // (antes se ignoraba y un from_std fallido cerraba mudo → el
+    // ERR_CONNECTION_CLOSED justo tras el 200).
+    let _ = sock.set_read_timeout(None);
+    let _ = sock.set_write_timeout(None);
+    if let Err(e) = sock.set_nonblocking(true) {
+        plog(format!("502: nonblocking falló ({e})"));
+        let _ = sock.write_all(b"HTTP/1.1 502 Proxy interno\r\nContent-Length: 0\r\n\r\n");
+        return;
+    }
     let tcp = match tokio::net::TcpStream::from_std(sock) {
         Ok(t) => t,
-        Err(_) => return,
+        Err(e) => {
+            eprintln!("[tor-proxy] 502: from_std falló ({e})");
+            return;
+        }
     };
     // Túnel con flush tras cada escritura hacia Tor: DataStream
     // bufferiza (doc arti: "Remember to call flush!") y con
     // copy_bidirectional el ClientHello quedaba atascado en el buffer
     // → el server nunca respondía → ERR_CONNECTION_RESET.
-    tor_rt().block_on(tunel(tcp, tor_stream));
+    tor_rt().block_on(tunel(&host, puerto, tcp, tor_stream));
 }
 
 /// Copia bidireccional TCP<->Tor con flush en cada tramo hacia Tor.
-async fn tunel(tcp: tokio::net::TcpStream, tor: arti_client::DataStream) {
+/// Al terminar deja el motivo en la bitácora (antes era mudo).
+async fn tunel(host: &str, puerto: u16, tcp: tokio::net::TcpStream, tor: arti_client::DataStream) {
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
     let (mut tor_r, mut tor_w) = tor.split();
     let (mut tcp_r, mut tcp_w) = tcp.into_split();
@@ -419,4 +483,5 @@ async fn tunel(tcp: tokio::net::TcpStream, tor: arti_client::DataStream) {
         }
     };
     let _ = tokio::join!(hacia_tor, desde_tor);
+    plog(format!("túnel cerrado ← {host}:{puerto}"));
 }
