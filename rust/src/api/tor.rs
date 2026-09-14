@@ -373,14 +373,50 @@ fn atender_proxy(s: std::net::TcpStream) {
         }
     }
     let _ = sock.set_nonblocking(true);
-    let mut tcp = match tokio::net::TcpStream::from_std(sock) {
+    let tcp = match tokio::net::TcpStream::from_std(sock) {
         Ok(t) => t,
         Err(_) => return,
     };
-    let _ = tor_rt().block_on(async {
-        use tokio::io::AsyncWriteExt as _;
-        let r = tokio::io::copy_bidirectional(&mut tcp, &mut tor_stream).await;
-        let _ = tor_stream.shutdown().await;
-        r
-    });
+    // Túnel con flush tras cada escritura hacia Tor: DataStream
+    // bufferiza (doc arti: "Remember to call flush!") y con
+    // copy_bidirectional el ClientHello quedaba atascado en el buffer
+    // → el server nunca respondía → ERR_CONNECTION_RESET.
+    tor_rt().block_on(tunel(tcp, tor_stream));
+}
+
+/// Copia bidireccional TCP<->Tor con flush en cada tramo hacia Tor.
+async fn tunel(tcp: tokio::net::TcpStream, tor: arti_client::DataStream) {
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+    let (mut tor_r, mut tor_w) = tor.split();
+    let (mut tcp_r, mut tcp_w) = tcp.into_split();
+    let hacia_tor = async {
+        let mut buf = [0u8; 32768];
+        loop {
+            match tcp_r.read(&mut buf).await {
+                Ok(0) => break,
+                Ok(n) => {
+                    if tor_w.write_all(&buf[..n]).await.is_err() {
+                        break;
+                    }
+                    let _ = tor_w.flush().await;
+                }
+                Err(_) => break,
+            }
+        }
+    };
+    let desde_tor = async {
+        let mut buf = [0u8; 32768];
+        loop {
+            match tor_r.read(&mut buf).await {
+                Ok(0) => break,
+                Ok(n) => {
+                    if tcp_w.write_all(&buf[..n]).await.is_err() {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    };
+    let _ = tokio::join!(hacia_tor, desde_tor);
 }

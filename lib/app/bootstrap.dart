@@ -115,9 +115,9 @@ Future<void> _initNotifications() async {
 Future<void> _handleExitAction() => ServicioFondo.salir();
 
 /// Servicio en primer plano: vive en servicio_fondo.dart (archivo
-/// separado de las notificaciones). La 888 lleva su ✕ (servicio con X).
-Future<void> _initBackgroundService() =>
-    ServicioFondo.iniciar(alListo: ServicioFondo.mostrarX);
+/// separado de las notificaciones). Solo configura; arranca a pedido
+/// con celda en ping (la 888 con ✕ sale recién ahí).
+Future<void> _initBackgroundService() => ServicioFondo.iniciar();
 
 Future<void> _initRust() async {
   try {

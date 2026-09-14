@@ -32,13 +32,9 @@ class ServicioFondo {
   static const canalNombre = 'pr_app';
   static const notifId = 888;
 
-  /// Configura y arranca el servicio. Llamar una vez en initApp.
-  /// [alListo] postea la 888 con ✕ desde la UI principal (los taps
-  /// viven ahí; FLN no se inicializa en el fondo).
-  /// autoStart:false: el servicio NO corre siempre, solo cuando hay
-  /// celda en ping (lo prende startKeepAlive). Sin celda no hay
-  /// servicio ni 888.
-  static Future<void> iniciar({required Future<void> Function() alListo}) async {
+  /// Configura el servicio (una vez en initApp). NO lo arranca ni
+  /// postea nada: sin celda no hay servicio ni 888.
+  static Future<void> iniciar() async {
     try {
       final service = FlutterBackgroundService();
       await service.configure(
@@ -56,18 +52,19 @@ class ServicioFondo {
           onForeground: onServiceStart,
         ),
       );
-      await Future.delayed(const Duration(milliseconds: 1200));
-      await alListo();
     } catch (e) {
       debugPrint('ServicioFondo init error: $e');
     }
   }
 
-  /// Prende el servicio a pedido (hay celda en ping).
+  /// Prende el servicio a pedido (hay celda en ping) y postea la 888
+  /// con ✕ desde la UI principal (los taps viven ahí).
   static Future<void> prender() async {
     try {
       final service = FlutterBackgroundService();
       if (!await service.isRunning()) await service.startService();
+      await Future.delayed(const Duration(milliseconds: 1200));
+      await mostrarX();
     } catch (_) {}
   }
 
