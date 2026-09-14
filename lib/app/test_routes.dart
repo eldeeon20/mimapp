@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../screens/agenda_test_screen.dart';
 import '../screens/ai_screen.dart';
+import '../screens/db_test_screen.dart';
 import '../screens/dht_busca_screen.dart';
 import '../screens/downloads_test_screen.dart';
 import '../screens/filosoia_screen.dart';
@@ -122,6 +123,10 @@ const Map<String, TestRoute> kTestRoutes = {
     titulo: 'Agenda · notas cifradas',
     pagina: _age,
   ),
+  'db': (
+    titulo: 'Base SQL · SQLite ChaCha20',
+    pagina: _db,
+  ),
 };
 
 Widget _dm(BuildContext _) => const NostrDmTestScreen();
@@ -147,3 +152,4 @@ Widget _dh(BuildContext _) => const DhtBuscaScreen();
 Widget _ic(BuildContext _) => const IrohChatScreen();
 Widget _ir(BuildContext _) => const IrohTestScreen();
 Widget _age(BuildContext _) => const AgendaTestScreen();
+Widget _db(BuildContext _) => const DbTestScreen();

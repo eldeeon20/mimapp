@@ -21,6 +21,16 @@ version: 1.0.0+1
 environment:
   sdk: ^3.6.2
 
+# sqlite3 v3 con cifrado sqlite3mc (ChaCha20, SIN OpenSSL): el hook
+# baja/compila el SQLite con múltiples cifradores. NO usar
+# source: sqlcipher (ese build linkea OpenSSL en Android/Linux/Windows).
+# En Dart se elige con PRAGMA cipher = 'chacha20'
+# (ver lib/db/caja_sql.dart).
+hooks:
+  user_defines:
+    sqlite3:
+      source: sqlite3mc
+
 # Dependencies specify other packages that your package needs in order to work.
 # To automatically upgrade your package dependencies to the latest versions
 # consider running `flutter pub upgrade --major-versions`. Alternatively,
@@ -54,6 +64,7 @@ dependencies:
   cryptography: ^2.7.0
   saf_util: ^3.1.0
   saf_stream: ^4.0.1
+  sqlite3: ^3.0.0
   web_socket_channel: ^3.0.1
   audio_service: ^0.18.15
   koni_archive: ^0.9.0
