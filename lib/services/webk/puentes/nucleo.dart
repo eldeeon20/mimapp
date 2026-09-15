@@ -37,6 +37,7 @@ class PuenteNucleo extends WebkConector {
           'rechazadas': server.rechazadas,
           'retosActivos': server.retosActivos,
           'retosCaidos': server.retosCaidos,
+          'rechazo': server.ultimoRechazo,
           'puerto': server.puerto,
         };
       case 'hora':

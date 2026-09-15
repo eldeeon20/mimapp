@@ -104,24 +104,43 @@ class ColabKeepAlive {
     }
 
     try {
-      final headers = await _auth.authHeaders();
-      headers['X-Colab-Tunnel'] = 'Google';
-      final params = {'authuser': '0'};
+      // Formato EXACTO del CLI: Bearer + X-Colab-Tunnel, nada más
+      // (cookies/XSRF/agent de más → 400; sin Bearer → 401).
+      final token = await _auth.getToken();
       final url = Uri.https(
         ColabConfig.colabHost,
         '/tun/m/$ep/keep-alive/',
-        params,
       );
 
-      final response =
-          await http.get(url, headers: headers).timeout(ColabConfig.keepAliveTimeout);
+      final response = await http.get(url, headers: {
+        'Authorization': 'Bearer $token',
+        'X-Colab-Tunnel': 'Google',
+      }).timeout(ColabConfig.keepAliveTimeout);
 
-      if (response.statusCode >= 400 && response.statusCode < 500) {
+      if (response.statusCode == 401) {
+        stop(avisar: false);
+        try {
+          onDesconectado?.call(ep, 'Colab 401: reautenticar');
+        } catch (_) {}
+        return;
+      }
+      if (response.statusCode == 404) {
         _consecutive4xx++;
         if (_consecutive4xx >= 2) {
           stop(avisar: false);
           try {
-            onDesconectado?.call(ep, 'Colab devolvió ${response.statusCode} (celda muerta)');
+            onDesconectado?.call(ep, 'Colab 404: celda muerta');
+          } catch (_) {}
+          return;
+        }
+      } else if (response.statusCode >= 400 &&
+          response.statusCode < 500) {
+        _consecutive4xx++;
+        if (_consecutive4xx >= 2) {
+          stop(avisar: false);
+          try {
+            onDesconectado?.call(
+                ep, 'Colab devolvió ${response.statusCode} (celda muerta)');
           } catch (_) {}
           return;
         }

@@ -217,16 +217,19 @@ class ColabSessions {
   // Keep-alive
   // ===========================================================================
 
-  /// Keep-alive manual (un solo ping). Igual que el CLI: timeout de lectura
-  /// se considera éxito (TFE registra la actividad al llegar).
+  /// Keep-alive manual (un solo ping). Formato EXACTO del CLI: Bearer +
+  /// X-Colab-Tunnel, nada más (el _colabUri con ?authuser y los headers
+  /// con cookies daban 400). Timeout de lectura = éxito (el TFE anota
+  /// la actividad al llegar).
   Future<bool> keepAlivePing(String endpoint) async {
     try {
-      final headers = await _headers();
-      headers['X-Colab-Tunnel'] = 'Google';
-
-      final url = _colabUri('/tun/m/$endpoint/keep-alive/');
-      final response =
-          await http.get(url, headers: headers).timeout(ColabConfig.keepAliveTimeout);
+      final token = await _auth.getToken();
+      final url = Uri.https(
+          ColabConfig.colabHost, '/tun/m/$endpoint/keep-alive/');
+      final response = await http.get(url, headers: {
+        'Authorization': 'Bearer $token',
+        'X-Colab-Tunnel': 'Google',
+      }).timeout(ColabConfig.keepAliveTimeout);
       return response.statusCode < 400;
     } catch (_) {
       // Timeout de lectura = keep-alive exitoso según el CLI.

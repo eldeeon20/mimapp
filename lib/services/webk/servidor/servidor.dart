@@ -39,6 +39,9 @@ class WebkServer {
   int retosCaidos = 0;
   int get retosActivos => _retos.length;
 
+  /// Último pase rechazado (diagnóstico visible en 'estado').
+  String ultimoRechazo = '';
+
   final _retos = <String, RetoPendiente>{};
   final _pases = <String, PaseUnico>{};
   final _rnd = Random.secure();
@@ -123,9 +126,23 @@ class WebkServer {
     }
 
     // Pase de un ping ya respondido: ÉL es la señal, no consume otra.
+    // Si el pase llegó pero no vale (carrera/doble pedido): NO se 403
+    // (eso dejaba la página muerta con error). Se manda un reto FRESCO
+    // y la página reintenta el ping sola → se auto-recupera. Tope 50
+    // pendientes para que nadie inunde.
     final pase = req.uri.queryParameters['pase'] ?? '';
-    if (pase.isNotEmpty && _usarPase(pase, ruta)) {
-      await _servirReal(req, ruta);
+    if (pase.isNotEmpty) {
+      if (_usarPase(pase, ruta)) {
+        await _servirReal(req, ruta);
+        return;
+      }
+      ultimoRechazo = 'pase inválido para "$ruta"';
+      if (_retos.length < 50) {
+        await _servirReto(req, ruta);
+        return;
+      }
+      rechazadas++;
+      await _cerrar(req, HttpStatus.forbidden);
       return;
     }
 
@@ -135,8 +152,11 @@ class WebkServer {
       return;
     }
     _autorizado = false; // una sola conexión: se consume acá
+    await _servirReto(req, ruta);
+  }
 
-    // El html NO sale directo: se manda el js de prueba y se espera el ping.
+  /// Manda el js de prueba y espera el ping (el html nunca sale directo).
+  Future<void> _servirReto(HttpRequest req, String ruta) async {
     final nonce = _token();
     _retos[nonce] = RetoPendiente(
       ruta,

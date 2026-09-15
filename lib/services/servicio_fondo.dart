@@ -296,18 +296,27 @@ class ColabPingMotor {
           DateTime.now().isAfter(_expiry!.subtract(const Duration(seconds: 60)))) {
         token = await _refrescar();
       }
+      // Formato EXACTO del CLI: Bearer + X-Colab-Tunnel, nada más
+      // (headers de más → 400). Sin ?authuser (el CLI no lo manda).
       final url = Uri.https(
         'colab.research.google.com',
         '/tun/m/$ep/keep-alive/',
-        {'authuser': '0'},
       );
       final r = await http.get(url, headers: {
         'Authorization': 'Bearer $token',
-        'Accept': 'application/json',
-        'X-Colab-Client-Agent': 'pr_app',
         'X-Colab-Tunnel': 'Google',
       }).timeout(_timeout);
-      if (r.statusCode >= 400 && r.statusCode < 500) {
+      if (r.statusCode == 401) {
+        _parar(origen: 'reauth 401: reautenticar en Colab');
+        return;
+      }
+      if (r.statusCode == 404) {
+        _consec4xx++;
+        if (_consec4xx >= 2) {
+          _parar(origen: 'celda muerta (404)');
+          return;
+        }
+      } else if (r.statusCode >= 400 && r.statusCode < 500) {
         _consec4xx++;
         if (_consec4xx >= 2) {
           _parar(origen: 'celda muerta (${r.statusCode})');
