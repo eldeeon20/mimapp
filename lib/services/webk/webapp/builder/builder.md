@@ -16,6 +16,10 @@ previsualizás y guardás la web como **3 archivos separados**
 - **⬇ Archivos**: descarga los 3 sueltos (navegador).
 - **⬇ ZIP**: empaqueta los 3 en `mi-web.zip` (writer propio, sin
   librerías ni internet: método store + CRC32 a mano).
+- **📂 Cargar**: mete un ZIP de vuelta al lienzo para seguir editando
+  (lector propio en `js/cargar.js`, solo store). El css/js del zip pasan
+  a ser los del sitio (próximo guardado los usa); 🗑 vuelve al base.
+  Lo no editable se filtra con `analizarElemento()` (ver abajo).
 - **💾 WebK**: guarda el sitio triple en `webapp/sitio/<nombre>/`
   (index con cargador + css + js) y lo abre ahí mismo.
 - **📂 Sitios**: lista lo guardado en el índice y lo abre.
@@ -44,6 +48,8 @@ builder/
     zipsql.js      ← b64DeBlob/blobDeB64, zipGuardarSQL/Listar/Bajar/Borrar
     paginasdb.js   ← bdGuardar/Listar/Ver/Borrar (versiones)
     preview.js     ← previewWeb(), cerrarPrevia()
+    cargar.js      ← 📂 Cargar: leerZip() (store), reconstruirDesdeHtml(),
+                     analizarElemento(), SITIO_CSS/SITIO_JS
 ```
 
 El `builder.html` NO usa `<script src>` común: el servidor respondería
@@ -107,6 +113,13 @@ y atender `mi_cmd` en un conector (`puentes/`, ver `webk.md`).
   sin CDNs. Todo lo que la web generada necesite debe ir inline o no ir.
 - **ZIP sin compresión** (store): empaqueta, no achica. DEFLATE real =
   escribir LZ77+Huffman a mano (~300 líneas) o vendorizar librería.
+  El lector tampoco infla: un ZIP deflateado avisa y no entra
+  (los que salen de SQL 💾 salen en store y entran).
+- **Cargar filtra lo no editable**: `analizarElemento()` saltea
+  `SCRIPT/STYLE/LINK/META/HEAD/TITLE/NOSCRIPT/TEMPLATE` y lo que esté
+  dentro de ellos; además se les arrancan los descendientes de ese tipo.
+  Una web externa entra como contenido visible editable; su lógica
+  original no (a propósito: el js del sitio lo pone el editor).
 - **ZIP sin cifrado**: el `.zip` descargado lo abre cualquiera. Lo
   cifrado son las db (`sitios`, `paginas`); el transporte WebK
   (reto+ping+pase+llave).

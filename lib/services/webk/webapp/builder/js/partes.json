@@ -7,5 +7,6 @@
   "sitios.js",
   "zipsql.js",
   "paginasdb.js",
+  "cargar.js",
   "preview.js"
 ]
