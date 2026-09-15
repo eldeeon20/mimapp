@@ -125,6 +125,26 @@ class BrowserTabs extends ChangeNotifier {
 
   InAppWebViewController? controllerOf(int tabId) => _controllers[tabId];
 
+  /// Aparca TODOS los WebViews vivos (fondo con web cerrada): paran
+  /// GPU/timers pero guardan DOM/scroll/historial. Sin desmontar ni
+  /// recargar: al reanudar todo sigue intacto.
+  Future<void> pausarTodos() async {
+    for (final c in _controllers.values) {
+      try {
+        await c.pause();
+      } catch (_) {}
+    }
+  }
+
+  /// Reanuda lo aparcado por [pausarTodos] (al volver/abrir).
+  Future<void> reanudarTodos() async {
+    for (final c in _controllers.values) {
+      try {
+        await c.resume();
+      } catch (_) {}
+    }
+  }
+
   /// Pestañas cuyo renderer nativo murió (onRenderProcessGone: Android
   /// mata el renderer en fondo y la vista queda negra para siempre).
   /// Solo esas se recrean (con su URL); las sanas NO se tocan ni se

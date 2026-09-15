@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
@@ -102,11 +104,11 @@ class _BrowserWebViewsHostState extends State<BrowserWebViewsHost>
     return true;
   }
 
-  /// Al volver del fondo NO se toca nada: las vistas vivas (abiertas o
-  /// cerradas) se quedan como están, sin recargar. La web se mantiene.
-  /// La única muerte real es el renderer asesinado por Android en fondo
-  /// (onRenderProcessGone): esa pestaña la marca el WebView y se recrea
-  /// solo ella (al abrir si estaba cerrada, en el acto si visible).
+  /// FIX negro toda la app al volver del fondo con web cerrada: las
+  /// vistas ocultas rompen la superficie al reenganchar. Sin desmontar
+  /// ni recrear ni recargar: se APARCAN (pause: paran GPU/timers y
+  /// guardan todo) y se REANUDAN (resume) al volver/abrir. Páginas
+  /// intactas siempre. Con web abierta no se toca (ya vuelve bien).
   @override
   void didChangeAppLifecycleState(AppLifecycleState estado) {
     // Código viejo dejado comentado (regla: no borrar):
@@ -152,6 +154,14 @@ class _BrowserWebViewsHostState extends State<BrowserWebViewsHost>
       // A propósito no se desmonta ni se olvida nada: mantener WebViews
       // y controladores vivos tal cual.
       _enFondo = false;
+      final tabs = BrowserTabs.instance;
+      if (estado == AppLifecycleState.paused && !tabs.isOpen) {
+        // Web cerrada al ir a fondo: aparcar (sin recargar).
+        unawaited(tabs.pausarTodos());
+      } else if (estado == AppLifecycleState.resumed) {
+        // Al volver: reanudar lo aparcado (sano o no, resume es seguro).
+        unawaited(tabs.reanudarTodos());
+      }
     }
   }
 
