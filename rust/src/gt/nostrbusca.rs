@@ -271,7 +271,7 @@ pub fn relays_fetch(
 
     if let Some(ev) = ev65 {
         for t in ev.tags.iter() {
-            let v = t.to_vec();
+            let v = t.clone().to_vec(); // to_vec consume: clonar primero
             if v.first().map(|s| s.as_str()) != Some("r") {
                 continue;
             }
