@@ -144,9 +144,8 @@ jobs:
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
       # ------------------------------------------------------------- build
-      - name: Set up Android SDK
-        if: matrix.target == 'android'
-        uses: android-actions/setup-android@v4
+      # set-android@v4 obsoleto: pide sdkmanager tools (Google lo borró).
+      # El SDK Android ya viene con flutter-action; solo instalamos NDK.
 
       - name: Accept Android licenses and install NDK
         if: matrix.target == 'android'
