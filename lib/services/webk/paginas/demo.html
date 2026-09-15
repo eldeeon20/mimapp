@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WebK · demo puente</title>
+<style>
+body{font-family:sans-serif;text-align:center;padding-top:40px;background:#020617;color:#fff;margin:0}
+h1{color:#4DD0E1}
+.card{display:inline-block;border:1px solid #4DD0E155;border-radius:12px;padding:24px 40px;background:#0B1220;max-width:90vw}
+button{margin:4px;padding:8px 14px;border-radius:8px;border:1px solid #4DD0E1;background:#0B1220;color:#fff}
+pre{text-align:left;background:#00000088;border-radius:8px;padding:12px;min-width:280px;white-space:pre-wrap}
+</style>
+</head>
+<body>
+<div class="card">
+<h1>Demo puente</h1>
+<p>Esta página solo se ve si Dart verificó el puente.</p>
+<p>
+<button onclick="llamar('estado')">Estado server</button>
+<button onclick="llamar('hora')">Hora Dart</button>
+<button onclick="pedirAuth()">Pedir autorización</button>
+<button onclick="incrustar()">Incrustar pagina2</button>
+</p>
+<iframe id="marco" title="pagina2" style="width:100%;height:140px;border:1px solid #4DD0E155;border-radius:8px;background:#00000088"></iframe>
+<pre id="out">puente: listo, tocá un botón…</pre>
+</div>
+<script>
+function out(t){ document.getElementById('out').textContent = t; }
+async function llamar(cmd, extra){
+  if(!window.flutter_inappwebview){ out('sin puente (página fuera de WebK)'); return; }
+  try{
+    const r = await window.flutter_inappwebview.callHandler(
+      'webk', Object.assign({cmd: cmd}, extra || {}));
+    out(typeof r === 'object' ? JSON.stringify(r, null, 1) : String(r));
+  }catch(e){ out('error: ' + e); }
+}
+function pedirAuth(){ llamar('autorizar', {llave: window.WEBK_LLAVE || ''}); }
+// Composición interna: pide pases de una sola vez por el puente (JS→Dart)
+// e incrusta pagina2 por iframe y por fetch (cada carga quema su pase).
+async function pasePara(pagina){
+  const r = await window.flutter_inappwebview.callHandler(
+    'webk', {cmd: 'pase', pagina: pagina, llave: window.WEBK_LLAVE || ''});
+  return (typeof r === 'string') ? r : '';
+}
+async function incrustar(){
+  if(!window.flutter_inappwebview){ out('sin puente (página fuera de WebK)'); return; }
+  try{
+    const p1 = await pasePara('pagina2.html');
+    if(!p1 || p1 === 'DENEGADO'){ out('DENEGADO'); return; }
+    document.getElementById('marco').src =
+      '/pagina2.html?pase=' + encodeURIComponent(p1);
+    const p2 = await pasePara('pagina2.html');
+    const html = await fetch(
+      '/pagina2.html?pase=' + encodeURIComponent(p2)).then(function(r){ return r.text(); });
+    out('fetch OK (' + html.length + ' chars):\n' + html.slice(0, 200));
+  }catch(e){ out('error: ' + e); }
+}
+</script>
+</body>
+</html>

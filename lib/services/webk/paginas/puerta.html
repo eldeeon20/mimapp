@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WebK · puerta</title>
+<style>
+body{font-family:sans-serif;text-align:center;padding-top:60px;background:#020617;color:#fff;margin:0}
+.card{display:inline-block;border:1px solid #B57CFF55;border-radius:12px;padding:24px 40px;background:#0B1220}
+#estado{color:#B57CFF}
+</style>
+</head>
+<body>
+<div class="card">
+<h1>Puerta WebK</h1>
+<p id="estado">comprobando puente…</p>
+</div>
+<script>
+(async function(){
+  var el = document.getElementById('estado');
+  if(!window.flutter_inappwebview){
+    el.textContent = 'BLOQUEADO: sin puente Dart (¿Chrome?). Contenido oculto.';
+    return;
+  }
+  el.textContent = 'puente detectado, pidiendo pase a Dart…';
+  try{
+    var r = await window.flutter_inappwebview.callHandler(
+      'webk', {cmd: 'abrir', pagina: 'demo.html', llave: window.WEBK_LLAVE || ''});
+    el.textContent = (r === 'OK')
+      ? 'pase OK: Dart carga el contenido…'
+      : 'DENEGADO por Dart: ' + r;
+  }catch(e){ el.textContent = 'error: ' + e; }
+})();
+</script>
+</body>
+</html>

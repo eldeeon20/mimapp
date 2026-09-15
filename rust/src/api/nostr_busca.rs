@@ -1,7 +1,8 @@
 /// Nostr Busca: perfiles y búsqueda de usuarios (B1 npub→kind 0,
 /// B2 NIP-50 por texto). Wrapper FRB fino sobre `gt::nostrbusca`.
 use crate::gt::nostrbusca::{
-    buscar_posts, buscar_usuarios, notificaciones_fetch, perfil_fetch, posts_fetch, Perfil,
+    buscar_posts, buscar_usuarios, notificaciones_fetch, perfil_fetch, posts_fetch, relays_fetch,
+    Perfil,
 };
 
 /// Perfil de usuario Nostr serializable a Dart.
@@ -146,6 +147,38 @@ pub fn nostr_buscar_posts(
         timeout_secs.max(1) as u64,
     )
     .map(a_post)
+    .map_err(|e| format!("{e:#}"))
+}
+
+/// Lista de relays del usuario (NIP-65 kind 10002 + fallback NIP-02 kind 3).
+#[flutter_rust_bridge::frb]
+#[derive(Clone)]
+pub struct RelayItem {
+    pub url: String,
+    pub lectura: bool,
+    pub escritura: bool,
+}
+
+#[flutter_rust_bridge::frb]
+pub fn nostr_relays_fetch(
+    npub: String,
+    relays: Vec<String>,
+    timeout_secs: i64,
+) -> Result<Vec<RelayItem>, String> {
+    relays_fetch(
+        &npub,
+        &a_relays(relays),
+        timeout_secs.max(1) as u64,
+    )
+    .map(|v| {
+        v.into_iter()
+            .map(|r| RelayItem {
+                url: r.url,
+                lectura: r.lectura,
+                escritura: r.escritura,
+            })
+            .collect()
+    })
     .map_err(|e| format!("{e:#}"))
 }
 

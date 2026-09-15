@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WebK · agenda SQL</title>
+<style>
+body{font-family:sans-serif;background:#020617;color:#fff;margin:0;padding:0}
+header{padding:10px 14px;background:#0B1220;border-bottom:1px solid #4DD0E133;position:sticky;top:0}
+header h1{font-size:16px;margin:0;color:#4DD0E1}
+#app{padding:14px;max-width:640px;margin:auto}
+.card{border:1px solid #4DD0E155;border-radius:12px;padding:14px;background:#0B1220;margin-bottom:12px}
+input,textarea{width:100%;box-sizing:border-box;background:#020617;border:1px solid #4DD0E155;color:#fff;border-radius:8px;padding:9px;margin-top:6px;font-size:14px}
+textarea{min-height:64px;resize:vertical}
+button{background:#9146ff;color:#fff;border:0;border-radius:8px;padding:9px 16px;font-weight:bold;margin:8px 6px 0 0}
+button.gris{background:#2c2c31;color:#fff}
+button.rojo{background:#b3261e}
+.item{border:1px solid #ffffff22;border-radius:8px;padding:10px;margin-top:8px}
+.item b{color:#4DD0E1}
+.item small{color:#8a8a95}
+.item p{margin:6px 0;white-space:pre-wrap}
+#estado{font-size:12px;color:#B57CFF;min-height:18px}
+footer{color:#53535f;font-size:11px;text-align:center;padding:14px}
+</style>
+</head>
+<body>
+<header><h1>Agenda SQL (SQLite cifrado)</h1></header>
+<div id="app">
+<div class="card">
+<p id="estado">sin agenda abierta</p>
+<input id="nombre" placeholder="Nombre de agenda (nueva o existente)">
+<input id="pass" type="password" placeholder="Pass (clave del .db)">
+<br><button onclick="abrir()">Abrir</button><button class="gris" onclick="cerrar()">Cerrar</button><button class="gris" onclick="bases()">Ver agendas</button>
+</div>
+<div class="card">
+<input id="buscar" placeholder="Buscar en entradas…" oninput="listar()">
+<div id="lista"></div>
+</div>
+<div class="card">
+<input id="titulo" placeholder="Título">
+<textarea id="cuerpo" placeholder="Cuerpo"></textarea>
+<input id="fecha" placeholder="Fecha (texto libre, ej. 2026-09-20 10:00)">
+<br><button onclick="agregar()">Agregar entrada</button>
+</div>
+</div>
+<footer>WebK · puente JS↔Dart · tabla <b>entradas</b></footer>
+<script>
+function puente(){ return window.flutter_inappwebview; }
+function llave(){ return window.WEBK_LLAVE || ''; }
+function decir(t){ document.getElementById('estado').textContent = t; }
+async function llamar(cmd, extra){
+ if(!puente()){ decir('sin puente (página fuera de WebK)'); return null; }
+ try{
+  const r = await puente().callHandler('webk', Object.assign({cmd: cmd, llave: llave()}, extra || {}));
+  return r;
+ }catch(e){ decir('error: ' + e); return null; }
+}
+async function abrir(){
+ const r = await llamar('agenda_abrir', {nombre: document.getElementById('nombre').value, pass: document.getElementById('pass').value});
+ if(r === 'OK'){ decir('agenda abierta ✓'); listar(); }
+ else if(r){ decir(r); }
+}
+async function cerrar(){
+ const r = await llamar('agenda_cerrar');
+ decir(r === 'OK' ? 'agenda cerrada' : String(r));
+ document.getElementById('lista').innerHTML = '';
+}
+async function bases(){
+ const r = await llamar('agenda_bases');
+ if(r && typeof r === 'object' && r.bases){ decir('agendas: ' + (r.bases.join(', ') || '(ninguna)')); }
+ else if(r){ decir(r); }
+}
+async function listar(){
+ const q = document.getElementById('buscar').value;
+ const r = await llamar('agenda_listar', {buscar: q});
+ if(r && typeof r === 'object' && r.items){ pintar(r.items); }
+ else if(typeof r === 'string'){ decir(r); }
+}
+function esc(t){ return String(t == null ? '' : t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function pintar(items){
+ var h = items.length ? '' : '<p><small>sin entradas</small></p>';
+ items.forEach(function(it){
+  h += '<div class="item"><b>#' + it.id + ' ' + esc(it.titulo) + '</b><br>'
+   + '<small>' + esc(it.fecha || '') + '</small><p>' + esc(it.cuerpo) + '</p>'
+   + '<button class="rojo" onclick="borrar(' + it.id + ')">Borrar</button></div>';
+ });
+ document.getElementById('lista').innerHTML = h;
+ decir(items.length + ' entradas');
+}
+async function agregar(){
+ const r = await llamar('agenda_agregar', {
+  titulo: document.getElementById('titulo').value,
+  cuerpo: document.getElementById('cuerpo').value,
+  fecha: document.getElementById('fecha').value});
+ if(r && typeof r === 'object' && r.id){
+  document.getElementById('titulo').value = '';
+  document.getElementById('cuerpo').value = '';
+  listar();
+ }else if(r){ decir(String(r)); }
+}
+async function borrar(id){
+ if(!confirm('¿Borrar entrada #' + id + '?')) return;
+ const r = await llamar('agenda_borrar', {id: id});
+ if(r === 'OK'){ listar(); }else if(r){ decir(String(r)); }
+}
+</script>
+</body>
+</html>

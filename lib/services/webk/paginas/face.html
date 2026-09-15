@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Caralibro</title>
+<style>
+*{box-sizing:border-box}
+body{font-family:sans-serif;background:#f0f2f5;color:#050505;margin:0}
+header{display:flex;align-items:center;gap:10px;background:#fff;padding:8px 14px;box-shadow:0 1px 4px #0002;position:sticky;top:0;z-index:5}
+.logo{background:#1877f2;color:#fff;font-weight:900;font-size:22px;width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center}
+#buscar{background:#f0f2f5;border:0;border-radius:20px;padding:8px 14px;flex:1;max-width:280px}
+.iconos{margin-left:auto;font-size:20px}
+.iconos span{background:#e4e6eb;border-radius:50%;width:36px;height:36px;display:inline-flex;align-items:center;justify-content:center;margin-left:6px}
+.cuerpo{display:flex;gap:12px;max-width:1100px;margin:auto;padding:12px}
+aside{width:220px;font-size:14px}
+aside p{padding:6px 8px;border-radius:8px;margin:2px 0}
+aside p:hover{background:#e4e6eb}
+.centro{flex:1;min-width:0;max-width:560px}
+.stories{display:flex;gap:8px;margin-bottom:12px}
+.story{flex:1;height:150px;border-radius:10px;color:#fff;font-size:12px;font-weight:bold;display:flex;align-items:flex-end;padding:8px;background:linear-gradient(180deg,#0000,#000a),linear-gradient(135deg,#1877f2,#9b51e0)}
+.tarjeta{background:#fff;border-radius:10px;padding:12px;margin-bottom:12px;box-shadow:0 1px 2px #0001}
+.fila{display:flex;gap:8px;align-items:center}
+.avatar{width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#1877f2,#9b51e0);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:bold}
+.avatar.chico{width:28px;height:28px;font-size:12px}
+input[type=text]{background:#f0f2f5;border:0;border-radius:20px;padding:9px 14px;flex:1}
+button{background:#1877f2;color:#fff;border:0;border-radius:6px;padding:8px 14px;font-weight:bold}
+button.gris{background:#e4e6eb;color:#050505}
+.mini{color:#65676b;font-size:12px}
+.acciones{display:flex;border-top:1px solid #e4e6eb;margin-top:8px;padding-top:6px}
+.acciones button{flex:1;background:none;color:#65676b}
+.acciones button.liked{color:#1877f2}
+.coment{background:#f0f2f5;border-radius:12px;padding:6px 10px;margin:6px 0;font-size:13px}
+.contactos{width:220px;font-size:14px}
+.contactos li{list-style:none;padding:6px 4px;display:flex;gap:8px;align-items:center}
+.punto{width:8px;height:8px;background:#31a24c;border-radius:50%;margin-left:auto}
+ul{padding:0}
+footer{color:#65676b;font-size:11px;text-align:center;padding:14px}
+@media(max-width:900px){aside,.contactos{display:none}.cuerpo{justify-content:center}}
+</style>
+</head>
+<body>
+<header>
+<span class="logo">c</span>
+<input id="buscar" type="text" placeholder="Buscar en Caralibro" oninput="filtrar()">
+<div class="iconos"><span>⌂</span><span>◉</span><span>✉</span><span>🔔</span></div>
+</header>
+<div class="cuerpo">
+<aside>
+<p>👤 Tu perfil</p><p>👥 Amigos</p><p>🕘 Recuerdos</p><p>💾 Guardados</p><p>📺 Video</p><p>🏪 Marketplace</p>
+</aside>
+<div class="centro">
+<div class="stories">
+<div class="story">Tu historia</div><div class="story">Sofi</div><div class="story">El profe</div><div class="story">Nodo</div>
+</div>
+<div class="tarjeta">
+<div class="fila"><span class="avatar">W</span><input id="postIn" type="text" placeholder="¿Qué estás pensando?"></div>
+<div class="fila" style="margin-top:8px;justify-content:flex-end"><button class="gris" onclick="puente()">Hora Dart</button><button onclick="publicar()">Publicar</button></div>
+</div>
+<div id="feed"></div>
+</div>
+<div class="contactos"><div class="tarjeta"><b>Contactos</b><ul id="contactos"></ul></div></div>
+</div>
+<footer id="pie">puente: verificando…</footer>
+<script>
+var posts=[
+ {a:'Sofi',t:'Ayer armé mi primer servidor local, qué emoción ♥',likes:12,liked:false,coms:['Felicitaciones!']},
+ {a:'El profe',t:'Recuerden: el html nunca sale sin pase. Repitan conmigo.',likes:34,liked:false,coms:[]},
+ {a:'Nodo',t:'Foto del atardecer desde la terraza (sin filtro)',likes:58,liked:false,coms:['Tremenda','Dónde es?']}];
+var contactos=['Sofi','El profe','Nodo','Cami','Tomy','Valen'];
+function pintar(f){
+ var feed=document.getElementById('feed'); feed.innerHTML='';
+ posts.filter(function(p){return (p.a+p.t).toLowerCase().indexOf((f||'').toLowerCase())>=0;})
+ .forEach(function(p,i){
+  var d=document.createElement('div'); d.className='tarjeta';
+  var h='<div class="fila"><span class="avatar chico">'+p.a[0]+'</span><b>'+p.a+'</b></div><p>'+p.t+'</p>';
+  h+='<p class="mini">👍 <span id="lk'+i+'">'+p.likes+'</span></p><div class="acciones">';
+  h+='<button id="bl'+i+'" class="'+(p.liked?'liked':'')+'" onclick="megusta('+i+')">'+(p.liked?'👍 Te gusta':'👍 Me gusta')+'</button>';
+  h+='<button onclick="comentar('+i+')">💬 Comentar</button><button onclick="return false">↗ Compartir</button></div><div id="cm'+i+'">';
+  p.coms.forEach(function(c){ h+='<div class="coment">'+c+'</div>'; });
+  h+='</div>';
+  d.innerHTML=h; feed.appendChild(d);});
+ var ul=document.getElementById('contactos'); ul.innerHTML='';
+ contactos.forEach(function(c){ ul.innerHTML+='<li><span class="avatar chico">'+c[0]+'</span>'+c+'<span class="punto"></span></li>'; });
+}
+function filtrar(){ pintar(document.getElementById('buscar').value); }
+function megusta(i){ posts[i].liked=!posts[i].liked; posts[i].likes+=posts[i].liked?1:-1; pintar(document.getElementById('buscar').value); }
+function comentar(i){ var t=prompt('Tu comentario:'); if(t){ posts[i].coms.push('<b>vos:</b> '+t); pintar(document.getElementById('buscar').value); } }
+function publicar(){ var v=document.getElementById('postIn').value.trim(); if(!v) return;
+ posts.unshift({a:'vos',t:v,likes:0,liked:false,coms:[]});
+ document.getElementById('postIn').value=''; pintar(''); }
+async function puente(){
+ var p=document.getElementById('pie');
+ if(!window.flutter_inappwebview){ p.textContent='puente: fuera de WebK'; return; }
+ try{
+  const r=await window.flutter_inappwebview.callHandler('webk',{cmd:'hora'});
+  p.textContent='puente OK · Dart dice: '+JSON.stringify(r);
+ }catch(e){ p.textContent='puente: error '+e; } }
+pintar('');
+</script>
+</body>
+</html>

@@ -60,6 +60,18 @@ class NostrBusca {
         timeoutSecs: timeoutSecs,
       );
 
+  /// Relés del usuario (NIP-65 kind 10002 + fallback kind 3).
+  Future<List<rust.RelayItem>> relays({
+    required String npub,
+    required List<String> relays,
+    int timeoutSecs = 8,
+  }) =>
+      rust.nostrRelaysFetch(
+        npub: npub,
+        relays: relays,
+        timeoutSecs: timeoutSecs,
+      );
+
   /// Notificaciones: kind 1 dirigidos a mi npub (respuestas/menciones).
   Future<List<rust.PostItem>> notificaciones({
     required String miNpub,

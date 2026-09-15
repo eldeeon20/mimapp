@@ -148,8 +148,44 @@ class _NostrBuscaScreenState extends State<NostrBuscaScreen> {
               icon: const Icon(Icons.copy_rounded),
               label: const Text('Copiar npub'),
             ),
+            const SizedBox(height: 8),
+            FilledButton.tonalIcon(
+              onPressed: () {
+                Navigator.of(context).pop();
+                _verReles(p);
+              },
+              icon: const Icon(Icons.hub_rounded),
+              label: const Text('Ver relés'),
+            ),
           ],
         ),
+      ),
+    );
+  }
+
+  Future<void> _verReles(rust.PerfilItem p) async {
+    final ctx = context;
+    // hoja de carga → resultado
+    showModalBottomSheet<void>(
+      context: ctx,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (_) => _HojaReles(
+        npub: p.npub,
+        nombre: p.displayName.isNotEmpty ? p.displayName : p.name,
+        busca: _busca,
+        relaysConsulta: [..._relays],
+        onUsar: (urls) {
+          final seen = <String>{};
+          final merged = <String>[];
+          for (final u in [...urls, ..._relays]) {
+            if (seen.add(u)) merged.add(u);
+          }
+          setState(() => _relays = merged);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('${urls.length} relés cargados al editor')),
+          );
+        },
       ),
     );
   }
@@ -221,6 +257,7 @@ class _NostrBuscaScreenState extends State<NostrBuscaScreen> {
           ]),
         ),
         RelayEditor(
+          key: ValueKey(_relays.join(',')),
           initial: _relays,
           onChanged: (r) => setState(() => _relays = [...r]),
         ),
@@ -317,5 +354,141 @@ class _NostrBuscaScreenState extends State<NostrBuscaScreen> {
   void dispose() {
     _qCtrl.dispose();
     super.dispose();
+  }
+}
+
+/// Hoja de relés: trae NIP-65 + fallback NIP-02 y muestra lista.
+class _HojaReles extends StatefulWidget {
+  final String npub;
+  final String nombre;
+  final NostrBusca busca;
+  final List<String> relaysConsulta;
+  final ValueChanged<List<String>> onUsar;
+  const _HojaReles({
+    required this.npub,
+    required this.nombre,
+    required this.busca,
+    required this.relaysConsulta,
+    required this.onUsar,
+  });
+  @override
+  State<_HojaReles> createState() => _HojaRelesState();
+}
+
+class _HojaRelesState extends State<_HojaReles> {
+  List<rust.RelayItem>? _reles;
+  String _estado = 'cargando relés…';
+  bool _error = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _cargar();
+  }
+
+  Future<void> _cargar() async {
+    try {
+      final r = await widget.busca.relays(
+        npub: widget.npub,
+        relays: widget.relaysConsulta,
+      );
+      if (!mounted) return;
+      setState(() {
+        _reles = r;
+        _estado = r.isEmpty ? 'sin relés publicados' : '${r.length} relés';
+        _error = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _estado = 'ERROR: $e';
+        _error = true;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final reles = _reles;
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              widget.nombre.isEmpty
+                  ? 'Relés'
+                  : 'Relés de ${widget.nombre}',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 4),
+            Text(_estado,
+                style: TextStyle(
+                    fontSize: 12,
+                    color: _error ? Colors.redAccent : Colors.grey[400])),
+            const SizedBox(height: 12),
+            if (reles == null)
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(24),
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              )
+            else if (reles.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 16),
+                child: Text('el usuario no publicó lista de relés (NIP-65 ni NIP-02)',
+                    style: TextStyle(color: Colors.white54)),
+              )
+            else
+              Flexible(
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: reles.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  itemBuilder: (_, i) {
+                    final r = reles[i];
+                    final tags = [
+                      if (r.lectura) 'lectura',
+                      if (r.escritura) 'escritura',
+                    ].join(' · ');
+                    return ListTile(
+                      dense: true,
+                      title: SelectableText(r.url,
+                          style: const TextStyle(fontSize: 12)),
+                      subtitle: Text(
+                          tags.isEmpty ? '—' : tags,
+                          style: const TextStyle(fontSize: 10, color: Colors.white54)),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.copy_rounded, size: 18),
+                        tooltip: 'copiar',
+                        onPressed: () {
+                          Clipboard.setData(ClipboardData(text: r.url));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('copiado')));
+                        },
+                      ),
+                    );
+                  },
+                ),
+              ),
+            if (reles != null && reles.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              FilledButton.icon(
+                onPressed: () {
+                  final urls = reles.map((e) => e.url).toList();
+                  widget.onUsar(urls);
+                  Navigator.of(context).pop();
+                },
+                icon: const Icon(Icons.input_rounded),
+                label: const Text('Usar en editor'),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
   }
 }

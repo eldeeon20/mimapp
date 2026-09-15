@@ -233,6 +233,129 @@ pub fn buscar_posts(
     res
 }
 
+/// Relay del usuario (NIP-65 kind 10002 + fallback NIP-02 kind 3).
+pub struct RelayInfo {
+    pub url: String,
+    pub lectura: bool,
+    pub escritura: bool,
+}
+
+/// Lista de relays del usuario: kind 10002 (NIP-65) con fallback a kind 3.
+/// Deduplica por url y ordena alfabeticamente.
+pub fn relays_fetch(
+    npub: &str,
+    relays: &[String],
+    timeout_secs: u64,
+) -> Result<Vec<RelayInfo>> {
+    let pk = parsear_npub(npub)?;
+    let rt = nuevo_runtime()?;
+    let client = rt.block_on(cliente_readonly(relays));
+
+    // 1) NIP-65 kind 10002
+    let filtro65 = Filter::new()
+        .author(pk)
+        .kind(Kind::RelayList)
+        .limit(1);
+    let ev65: Option<Event> = rt.block_on(async {
+        let evs = client
+            .fetch_events(filtro65, Duration::from_secs(timeout_secs))
+            .await
+            .context("consulta relays 10002 falló")?;
+        Ok::<Option<Event>, anyhow::Error>(
+            evs.iter().max_by_key(|e| e.created_at.as_u64()).cloned(),
+        )
+    })?;
+
+    let mut mapa: std::collections::BTreeMap<String, (bool, bool)> =
+        std::collections::BTreeMap::new();
+
+    if let Some(ev) = ev65 {
+        for t in ev.tags.iter() {
+            let v = t.to_vec();
+            if v.first().map(|s| s.as_str()) != Some("r") {
+                continue;
+            }
+            let Some(url) = v.get(1).map(|s| s.trim().to_string()) else {
+                continue;
+            };
+            if url.is_empty() {
+                continue;
+            }
+            let (lec, esc) = match v.get(2).map(|s| s.as_str()) {
+                Some("read") => (true, false),
+                Some("write") => (false, true),
+                _ => (true, true),
+            };
+            // si ya existe, OR de flags
+            let e = mapa.entry(url).or_insert((false, false));
+            e.0 |= lec;
+            e.1 |= esc;
+        }
+    }
+
+    if !mapa.is_empty() {
+        let _ = rt.block_on(client.disconnect());
+        return Ok(mapa
+            .into_iter()
+            .map(|(url, (lectura, escritura))| RelayInfo {
+                url,
+                lectura,
+                escritura,
+            })
+            .collect());
+    }
+
+    // 2) Fallback NIP-02 kind 3: content JSON {url:{read,write}}
+    let filtro3 = Filter::new()
+        .author(pk)
+        .kind(Kind::ContactList)
+        .limit(1);
+    let ev3: Option<Event> = rt.block_on(async {
+        let evs = client
+            .fetch_events(filtro3, Duration::from_secs(timeout_secs))
+            .await
+            .context("consulta relays kind 3 falló")?;
+        Ok::<Option<Event>, anyhow::Error>(
+            evs.iter().max_by_key(|e| e.created_at.as_u64()).cloned(),
+        )
+    })?;
+    let _ = rt.block_on(client.disconnect());
+
+    if let Some(ev) = ev3 {
+        let txt = ev.content.trim();
+        if !txt.is_empty() && txt != "{}" {
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(txt) {
+                if let Some(obj) = val.as_object() {
+                    for (url, v) in obj {
+                        let lec = v
+                            .get("read")
+                            .and_then(|x| x.as_bool())
+                            .unwrap_or(true);
+                        let esc = v
+                            .get("write")
+                            .and_then(|x| x.as_bool())
+                            .unwrap_or(true);
+                        // filtrar entradas que no parecen url
+                        if !url.starts_with("ws://") && !url.starts_with("wss://") {
+                            continue;
+                        }
+                        mapa.insert(url.clone(), (lec, esc));
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(mapa
+        .into_iter()
+        .map(|(url, (lectura, escritura))| RelayInfo {
+            url,
+            lectura,
+            escritura,
+        })
+        .collect())
+}
+
 /// Notificaciones básicas: kind 1 dirigidos a mí (p tag) → respuestas
 /// y menciones. Read-only con el npub alcanza; no necesita claves.
 pub fn notificaciones_fetch(

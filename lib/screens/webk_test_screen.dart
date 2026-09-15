@@ -4,15 +4,25 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
-import '../services/webk/index.dart';
-import '../services/webk/server.dart';
+import '../services/webk/webk.dart';
+import 'webk/caja_log.dart';
+import 'webk/controles_webk.dart';
+import 'webk/marco_web.dart';
+import 'webk/menu_paginas.dart';
+import 'webk/pastilla_salir.dart';
 
 /// Test de WebK: servidor HTTP local + WebView EMBEBIDO en esta ventana
 /// (no usa el browser overlay del botón Web).
 ///
-/// Flujo: Iniciar server → "Abrir hola" (manda la señal [autorizarUna] y
-/// carga la página en el WebView de acá). Cada conexión necesita su señal;
-/// sin señal el server responde 403 y cierra (sordo al sondeo).
+/// Flujo: Iniciar server → menú "Páginas" (manda la señal [autorizarUna]
+/// y carga la página en el WebView de acá). El server manda el reto js,
+/// espera el ping y recién ahí sirve el html; sin señal responde 403.
+///
+/// Esta pantalla es SOLO estado + cableado: server, índice, llave,
+/// conectores (puentes/), historial y ajustes. La UI vive en webk/
+/// (controles, menú, log, pastilla, marco) y las páginas en
+/// services/webk/paginas/. El puente JS→Dart vive en
+/// services/webk/puentes/ (un conector por archivo).
 class WebkTestScreen extends StatefulWidget {
   const WebkTestScreen({super.key});
 
@@ -31,8 +41,45 @@ class _WebkTestScreenState extends State<WebkTestScreen> {
   /// UNA sola vista web reutilizada en normal y maximizado: si se
   /// reconstruye al cambiar de modo, el controlador muere y queda
   /// en blanco (ese era el bug).
+  /// Ajustes vivos del WebView (imágenes/cookies): se mutan y re-aplican
+  /// sin recrear la vista.
+  final _ajustesWeb = InAppWebViewSettings(
+    javaScriptEnabled: true,
+    mediaPlaybackRequiresUserGesture: false,
+  );
+
+  /// Menú de páginas: overlay que se cierra al tocar fuera o con atrás.
+  bool _menuAbierto = false;
+
+  /// Historial de visitas (solo memoria; se borra al salir/detener).
+  final _historial = <Map<String, String>>[];
+
+  bool _bloqImg = false;
+  bool _bloqCookies3ros = false;
+
+  /// Conectores del puente JS→Dart (uno por archivo en puentes/):
+  /// la pantalla SOLO registra; cada conector atiende sus comandos.
+  /// 1000 páginas = 1000 archivos, este archivo no crece.
+  late final _puentes = RegistroPuentes()
+    ..registrar(PuenteNucleo(
+      server: _server,
+      indice: _indice,
+      leerLlave: () => _llaveSesion,
+      log: _logPuente,
+      cargar: _cargarPagina,
+    ))
+    ..registrar(PuenteAgenda(
+      leerLlave: () => _llaveSesion,
+      log: _logPuente,
+    ));
+
+  void _logPuente(String s) {
+    if (mounted) _add(s);
+  }
+
   late final Widget _vistaWeb = InAppWebView(
     initialUrlRequest: URLRequest(url: WebUri('about:blank')),
+    initialSettings: _ajustesWeb,
     onWebViewCreated: (c) {
       _web = c;
       c.addJavaScriptHandler(
@@ -69,6 +116,7 @@ class _WebkTestScreenState extends State<WebkTestScreen> {
 
   @override
   void dispose() {
+    _puentes.cerrarTodos();
     _server.detener();
     super.dispose();
   }
@@ -78,22 +126,33 @@ class _WebkTestScreenState extends State<WebkTestScreen> {
         if (_log.length > 40) _log.removeAt(0);
       });
 
-  /// hola.html del asset + puerta/demo embebidos; si falla el asset,
-  /// el respaldo embebido.
+  /// Páginas como ARCHIVOS en paginas/ (a futuro serán muchas):
+  /// se cargan del asset al índice; nada de html suelto en Dart.
+  static const _archivos = [
+    'hola.html',
+    'puerta.html',
+    'demo.html',
+    'pagina2.html',
+    'app.html',
+    'twitch.html',
+    'face.html',
+    'agenda-sql.html',
+  ];
+
   Future<void> _cargarIndice() async {
-    _indice.registrarTexto('puerta.html', kWebkPuerta);
-    _indice.registrarTexto('demo.html', kWebkDemo);
-    _add('✓ puerta.html + demo.html embebidos (puente verificado)');
-    try {
-      final html =
-          await rootBundle.loadString('lib/services/webk/hola.html');
-      _indice.registrarTexto('hola.html', html);
-      _add('✓ hola.html cargado del asset (${html.length} chars)');
-    } catch (e) {
-      _indice.registrarTexto('hola.html', kWebkHolaRespaldo);
-      _add('⚠ asset no cargó ($e), uso respaldo embebido');
+    var ok = 0;
+    for (final n in _archivos) {
+      try {
+        final texto = await rootBundle
+            .loadString('lib/services/webk/paginas/$n');
+        _indice.registrarTexto(n, texto);
+        ok++;
+      } catch (e) {
+        _add('✗ asset $n no cargó ($e)');
+      }
     }
-    if (mounted) setState(() => _indiceListo = true);
+    _add('✓ índice: $ok/${_archivos.length} páginas (reto+ping antes de servir)');
+    if (mounted) setState(() => _indiceListo = ok > 0);
   }
 
   Future<void> _iniciar() async {
@@ -104,6 +163,7 @@ class _WebkTestScreenState extends State<WebkTestScreen> {
       _llaveSesion =
           '${DateTime.now().microsecondsSinceEpoch.toRadixString(16)}'
           '${math.Random().nextInt(1 << 32).toRadixString(16)}';
+      _server.llaveSesion = _llaveSesion; // el ping del reto la exige
       _add('✓ server en ${_server.baseUrl} (puerto $puerto, loopback)');
     } catch (e) {
       _add('✗ iniciar: $e');
@@ -112,51 +172,13 @@ class _WebkTestScreenState extends State<WebkTestScreen> {
     }
   }
 
-  /// Puente JS→Dart ('webk'): la página pide, Dart autentica y decide.
-  /// - estado: lectura libre (stats del server).
-  /// - hora: lectura libre (reloj de Dart).
-  /// - autorizar: SOLO con la llave de sesión inyectada; si falla → DENEGADO.
-  /// - abrir: "oye server, habilitame tal página" → Dart verifica la llave
-  ///   y si OK manda la señal + carga el html real. Sin puente verificado
-  ///   el contenido no se revela (en Chrome queda bloqueado).
-  dynamic _onJs(List<dynamic> args) {
+  /// Puente JS→Dart ('webk'): deriva a SU conector (puentes/).
+  /// Acá NO hay lógica de comandos: cada conector atiende lo suyo.
+  Future<dynamic> _onJs(List<dynamic> args) async {
     final cmd = args.isNotEmpty && args[0] is Map
         ? Map<String, dynamic>.from(args[0] as Map)
         : <String, dynamic>{};
-    switch (cmd['cmd']?.toString() ?? '') {
-      case 'estado':
-        return {
-          'servidas': _server.servidas,
-          'rechazadas': _server.rechazadas,
-          'puerto': _server.puerto,
-        };
-      case 'hora':
-        return {'dart_ahora': DateTime.now().toIso8601String()};
-      case 'autorizar':
-        final ok = _llaveSesion.isNotEmpty &&
-            cmd['llave']?.toString() == _llaveSesion;
-        if (mounted) {
-          _add(ok
-              ? '· la página pidió autorización (llave OK)'
-              : '✗ la página pidió autorización (llave MAL)');
-        }
-        if (ok) _server.autorizarUna();
-        return ok ? 'OK' : 'DENEGADO';
-      case 'abrir':
-        final ok = _llaveSesion.isNotEmpty &&
-            cmd['llave']?.toString() == _llaveSesion;
-        final pagina = cmd['pagina']?.toString() ?? '';
-        if (!ok || !_indice.paginas.contains(pagina)) {
-          if (mounted) _add('✗ abrir "$pagina": DENEGADO (puente no verificado)');
-          return 'DENEGADO';
-        }
-        if (mounted) _add('· Dart habilita "$pagina" (puente OK)');
-        _server.autorizarUna();
-        _cargarPagina(pagina);
-        return 'OK';
-      default:
-        return 'CMD?';
-    }
+    return _puentes.atender(cmd);
   }
 
   /// Carga una página registrada en el WebView de ESTA ventana.
@@ -172,40 +194,97 @@ class _WebkTestScreenState extends State<WebkTestScreen> {
   }
 
   /// Señal desde la app + carga en el WebView de ESTA ventana.
+  /// El server manda el reto js, espera el ping y recién ahí sirve el html.
   /// Abre maximizado (con Salir para volver a los ejemplos).
-  Future<void> _abrirHola() async {
+  Future<void> _abrirPagina(String nombre) async {
     if (_busy || !_server.corriendo || _web == null) return;
     _server.autorizarUna();
-    _add('· señal enviada (1 conexión autorizada)');
-    await _cargarPagina('hola.html');
+    _add('· "$nombre": señal enviada (reto+ping antes del html)');
+    if (_historial.isEmpty || _historial.last['pagina'] != nombre) {
+      _historial.add({
+        'pagina': nombre,
+        'cuando': DateTime.now().toString().substring(11, 19),
+      });
+      if (_historial.length > 30) _historial.removeAt(0);
+    }
+    if (_menuAbierto) setState(() => _menuAbierto = false);
+    await _cargarPagina(nombre);
     if (mounted) setState(() => _pantallaCompleta = true);
   }
 
-  /// Puerta: carga el cargador; el CONTENIDO solo entra si el JS
-  /// comprueba el puente y Dart lo habilita ("oye server…" → "sí, aquí").
-  /// Abre maximizado (con Salir para volver a los ejemplos).
-  Future<void> _abrirPuerta() async {
-    if (_busy || !_server.corriendo || _web == null) return;
+  /// Señal extra sin abrir nada (para que Chrome la gaste, no existe):
+  /// habilita UNA conexión más.
+  void _autorizarOtra() {
     _server.autorizarUna();
-    _add('· puerta cargada (el contenido espera puente verificado)');
-    await _cargarPagina('puerta.html');
-    if (mounted) setState(() => _pantallaCompleta = true);
+    _add('· señal extra (1 conexión más)');
   }
 
+  /// Imágenes sí/no (como web): re-aplica ajustes sin recrear la vista.
+  Future<void> _cambiarImg(bool v) async {
+    setState(() => _bloqImg = v);
+    _ajustesWeb.blockNetworkImage = v;
+    try {
+      await _web?.setSettings(settings: _ajustesWeb);
+    } catch (_) {}
+    _add(v ? '· imágenes bloqueadas' : '· imágenes permitidas');
+  }
+
+  /// Cookies de terceros sí/no (como web).
+  Future<void> _cambiarCookies3ros(bool v) async {
+    setState(() => _bloqCookies3ros = v);
+    _ajustesWeb.thirdPartyCookiesEnabled = !v;
+    try {
+      await _web?.setSettings(settings: _ajustesWeb);
+    } catch (_) {}
+    _add(v ? '· cookies de terceros bloqueadas' : '· cookies de terceros permitidas');
+  }
+
+  /// Borra TODAS las cookies del WebView (al salir no queda nada).
+  Future<void> _limpiarCookies() async {
+    try {
+      await CookieManager.instance().deleteAllCookies();
+      _add('· cookies borradas');
+    } catch (e) {
+      _add('✗ cookies: $e');
+    }
+  }
+
+  /// Prueba: SIN segundo plano (no como web). Al salir se detiene el
+  /// server + se borran cookies e historial (no queda nada).
   Future<void> _detener() async {
+    await _limpiarCookies();
+    _historial.clear();
+    _puentes.cerrarTodos(); // conectores con algo abierto (agenda-sql)
     await _server.detener();
     _llaveSesion = '';
-    _add('· server detenido (llave de sesión quemada)');
+    _add('· server detenido (llave quemada, cookies e historial fuera)');
     if (mounted) setState(() {});
   }
 
   @override
   Widget build(BuildContext context) {
     final corriendo = _server.corriendo;
+    return _cuerpo(corriendo);
+  }
+
+  /// Cuerpo con PopScope: si el menú está abierto, atrás lo cierra
+  /// (no sale de la pantalla). Tocar fuera del menú también lo cierra.
+  Widget _cuerpo(bool corriendo) {
+    return PopScope(
+      canPop: !_menuAbierto,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && _menuAbierto) {
+          setState(() => _menuAbierto = false);
+        }
+      },
+      child: _pila(corriendo),
+    );
+  }
+
+  Widget _pila(bool corriendo) {
     // _vistaWeb vive SIEMPRE en el mismo slot del árbol: moverla a otro
-    // padre (ej. overlay de pantalla completa) destruye la vista nativa
-    // y queda en blanco. En completo se OCULTAN botones/log (mismo slot,
-    // tamaño cero) y el Expanded la estira; la pastilla Salir va overlay.
+    // padre destruye la vista nativa y queda en blanco. En completo se
+    // OCULTAN controles/log y el Expanded la estira.
     return Stack(
       children: [
         Column(
@@ -214,166 +293,49 @@ class _WebkTestScreenState extends State<WebkTestScreen> {
               visible: !_pantallaCompleta,
               maintainState: true,
               maintainSize: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-                child: Row(
-                  children: [
-                    Icon(
-                      corriendo
-                          ? Icons.lock_rounded
-                          : Icons.lock_open_rounded,
-                      color: corriendo ? Colors.greenAccent : Colors.grey,
-                      size: 20,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        corriendo ? _server.baseUrl : 'server detenido',
-                        style: const TextStyle(
-                            fontSize: 12, fontFamily: 'monospace'),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    Text(
-                      'srv ${_server.servidas} · rej ${_server.rechazadas}',
-                      style: const TextStyle(
-                          fontSize: 10, color: Colors.grey),
-                    ),
-                  ],
-                ),
+              child: ControlesWebk(
+                corriendo: corriendo,
+                busy: _busy,
+                indiceListo: _indiceListo,
+                baseUrl: _server.baseUrl,
+                stats:
+                    'srv ${_server.servidas} · rej ${_server.rechazadas} · reto ${_server.retosCaidos}',
+                bloqImg: _bloqImg,
+                bloqCookies3ros: _bloqCookies3ros,
+                onIniciar: _iniciar,
+                onPaginas: () => setState(() => _menuAbierto = true),
+                onAutorizarOtra: _autorizarOtra,
+                onDetener: _detener,
+                onCambiarImg: () => _cambiarImg(!_bloqImg),
+                onCambiarCookies3ros: () =>
+                    _cambiarCookies3ros(!_bloqCookies3ros),
+                onLimpiarCookies: _limpiarCookies,
               ),
             ),
+            const SizedBox(height: 4),
+            Expanded(
+                child: MarcoWeb(
+                    vista: _vistaWeb, borde: !_pantallaCompleta)),
             Visibility(
               visible: !_pantallaCompleta,
               maintainState: true,
               maintainSize: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 4,
-                  children: [
-                    FilledButton.icon(
-                      onPressed:
-                          (_busy || corriendo) ? null : _iniciar,
-                      icon: const Icon(Icons.play_arrow_rounded, size: 18),
-                      label: const Text('Iniciar',
-                          style: TextStyle(fontSize: 13)),
-                    ),
-                    FilledButton.icon(
-                      onPressed: (!corriendo || !_indiceListo)
-                          ? null
-                          : _abrirHola,
-                      icon: const Icon(Icons.open_in_browser_rounded,
-                          size: 18),
-                      label: const Text('Abrir hola',
-                          style: TextStyle(fontSize: 13)),
-                    ),
-                    FilledButton.tonalIcon(
-                      onPressed: (!corriendo || !_indiceListo)
-                          ? null
-                          : _abrirPuerta,
-                      icon: const Icon(Icons.verified_user_rounded,
-                          size: 18),
-                      label: const Text('Puente demo',
-                          style: TextStyle(fontSize: 13)),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: corriendo
-                          ? () {
-                              _server.autorizarUna();
-                              _add('· señal extra (1 conexión más)');
-                            }
-                          : null,
-                      icon: const Icon(Icons.key_rounded, size: 18),
-                      label: const Text('Autorizar otra',
-                          style: TextStyle(fontSize: 13)),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: corriendo ? _detener : null,
-                      icon: const Icon(Icons.stop_rounded, size: 18),
-                      label: const Text('Detener',
-                          style: TextStyle(fontSize: 13)),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Expanded(child: _marcoWeb(borde: !_pantallaCompleta)),
-            Visibility(
-              visible: !_pantallaCompleta,
-              maintainState: true,
-              maintainSize: false,
-              child: Container(
-                height: 90,
-                width: double.infinity,
-                margin: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.black,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.grey[800]!),
-                ),
-                child: SingleChildScrollView(
-                  reverse: true,
-                  child: SelectableText(
-                    _log.isEmpty ? '· log ·' : _log.join('\n'),
-                    style: const TextStyle(
-                        fontSize: 11, fontFamily: 'monospace'),
-                  ),
-                ),
-              ),
+              child: CajaLog(lineas: _log),
             ),
           ],
         ),
-        if (_pantallaCompleta) _pastillaSalir(),
+        if (_pantallaCompleta)
+          PastillaSalir(
+              onSalir: () => setState(() => _pantallaCompleta = false)),
+        if (_menuAbierto)
+          MenuPaginas(
+            paginas: _indice.paginas,
+            historial: _historial,
+            onElegir: _abrirPagina,
+            onCerrar: () => setState(() => _menuAbierto = false),
+            onBorrarHistorial: () => setState(() => _historial.clear()),
+          ),
       ],
-    );
-  }
-
-  /// Pastilla Salir overlay para el modo completo (no toca el WebView).
-  Widget _pastillaSalir() {
-    return Positioned(
-      top: 8,
-      right: 8,
-      child: Material(
-        color: Colors.black54,
-        borderRadius: BorderRadius.circular(20),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          const Padding(
-            padding: EdgeInsets.only(left: 12),
-            child: Text('Salir',
-                style: TextStyle(color: Colors.white, fontSize: 13)),
-          ),
-          IconButton(
-            tooltip: 'Salir (volver a ejemplos)',
-            icon: const Icon(Icons.close_rounded,
-                color: Colors.white, size: 20),
-            onPressed: () =>
-                setState(() => _pantallaCompleta = false),
-          ),
-        ]),
-      ),
-    );
-  }
-
-  /// Marco del WebView embebido (modo normal con borde, completo sin).
-  /// Usa la instancia única [_vistaWeb] para no perder la página.
-  Widget _marcoWeb({bool borde = true}) {
-    return Container(
-      margin: borde
-          ? const EdgeInsets.fromLTRB(12, 0, 12, 0)
-          : EdgeInsets.zero,
-      decoration: borde
-          ? BoxDecoration(
-              border: Border.all(color: Colors.white12),
-              borderRadius: BorderRadius.circular(10),
-              color: Colors.black,
-            )
-          : const BoxDecoration(color: Colors.black),
-      clipBehavior: Clip.antiAlias,
-      child: _vistaWeb,
     );
   }
 }

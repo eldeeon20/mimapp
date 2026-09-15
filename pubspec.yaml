@@ -94,7 +94,8 @@ flutter:
   uses-material-design: true
 
   assets:
-    - lib/services/webk/hola.html
+    # Toda la carpeta: las páginas nuevas entran solas, sin tocar acá.
+    - lib/services/webk/paginas/
 
   # To add assets to your application, add an assets section, like this:
   # assets:

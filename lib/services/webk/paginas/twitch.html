@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WebK Live</title>
+<style>
+*{box-sizing:border-box}
+body{font-family:sans-serif;background:#0e0e10;color:#efeff1;margin:0}
+header{display:flex;align-items:center;gap:12px;padding:8px 14px;background:#18181b;border-bottom:1px solid #2c2c31;position:sticky;top:0;z-index:5}
+.logo{color:#9146ff;font-weight:900;font-size:20px}
+nav a{color:#bf94ff;text-decoration:none;margin:0 8px;font-size:14px}
+#buscar{margin-left:auto;background:#2c2c31;border:1px solid #3a3a40;color:#fff;border-radius:6px;padding:6px 10px;width:180px}
+.user{background:#3a3a40;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-weight:bold}
+main{display:flex;gap:12px;padding:12px;max-width:1200px;margin:auto}
+.col{flex:1;min-width:0}
+.player{position:relative;background:linear-gradient(135deg,#1f1033,#3b1470 60%,#0e0e10);border-radius:10px;aspect-ratio:16/9;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.vivo{position:absolute;top:10px;left:10px;background:#eb0400;border-radius:4px;padding:2px 8px;font-size:12px;font-weight:bold}
+.espec{position:absolute;bottom:10px;left:10px;background:#000000aa;border-radius:4px;padding:2px 8px;font-size:12px}
+.play{font-size:56px;opacity:.85}
+.titulo{margin:10px 0 4px;font-size:18px}
+.meta{color:#adadb8;font-size:13px}
+button{background:#9146ff;color:#fff;border:0;border-radius:6px;padding:8px 14px;margin:6px 4px 0 0;font-weight:bold}
+button.apagado{background:#2c2c31;color:#bf94ff}
+.chat{width:300px;background:#1f1f23;border-radius:10px;display:flex;flex-direction:column;max-height:80vh}
+.chat h3{margin:0;padding:10px;border-bottom:1px solid #2c2c31;font-size:14px}
+#msgs{flex:1;overflow-y:auto;padding:10px;font-size:13px;min-height:200px}
+#msgs p{margin:6px 0}
+.nick{color:#bf94ff;font-weight:bold}
+.fila{display:flex;gap:6px;padding:10px}
+#chatIn{flex:1;background:#2c2c31;border:1px solid #3a3a40;color:#fff;border-radius:6px;padding:8px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-top:14px}
+.card{background:#1f1f23;border-radius:8px;overflow:hidden}
+.thumb{height:84px;background:linear-gradient(135deg,#392e5c,#9146ff)}
+.card div{padding:8px;font-size:13px}
+.card small{color:#adadb8}
+h2{font-size:16px;color:#bf94ff}
+footer{color:#53535f;font-size:11px;text-align:center;padding:14px}
+footer button{padding:4px 10px;font-size:11px}
+@media(max-width:800px){.chat{display:none}}
+</style>
+</head>
+<body>
+<header>
+<span class="logo">WebK&nbsp;Live</span>
+<nav><a href="#" onclick="return false">Siguiendo</a><a href="#" onclick="return false">Explorar</a></nav>
+<input id="buscar" placeholder="Buscar canal…" oninput="filtrar()">
+<span class="user">W</span>
+</header>
+<main>
+<div class="col">
+<div class="player"><span class="vivo">EN VIVO</span><span class="play">▶</span><span class="espec" id="espec">12.408 espectadores</span></div>
+<p class="titulo">Armando la web cifrada desde cero — día 4</p>
+<p class="meta">canaLoca · Programación · español</p>
+<button id="btnSeguir" onclick="seguir()">Seguir</button>
+<button class="apagado" onclick="puente()">Hora Dart</button>
+<h2>Canales en vivo que te pueden gustar</h2>
+<div class="grid" id="grid"></div>
+</div>
+<aside class="chat">
+<h3>Chat del stream</h3>
+<div id="msgs"></div>
+<div class="fila"><input id="chatIn" placeholder="Enviar un mensaje" onkeydown="if(event.key==='Enter')enviar()"><button onclick="enviar()">➤</button></div>
+</aside>
+</main>
+<footer id="pie">puente: verificando…</footer>
+<script>
+var canales=[
+ {n:'canaLoca',j:'Programación',v:12408,c:['#392e5c','#9146ff']},
+ {n:'mateFeroz',j:'Charlando',v:8321,c:['#0f3b2e','#14b866']},
+ {n:'pixelera',j:'Retro',v:5120,c:['#4a1033','#e91e63']},
+ {n:'tartaDev',j:'Cocina + código',v:2874,c:['#3d2b00','#ff9800']},
+ {n:'nocheNodo',j:'Música',v:1930,c:['#101a3d','#3f51b5']},
+ {n:'fondoBits',j:'Ciencia',v:764,c:['#082f3d','#00bcd4']}];
+var siguiendo=false, espec=12408;
+function pintar(f){
+ var g=document.getElementById('grid'); g.innerHTML='';
+ canales.filter(function(c){return c.n.toLowerCase().indexOf((f||'').toLowerCase())>=0;})
+ .forEach(function(c){
+  var d=document.createElement('div'); d.className='card';
+  d.innerHTML='<div class="thumb" style="background:linear-gradient(135deg,'+c.c[0]+','+c.c[1]+')"></div><div><b>'+c.n+'</b><br><small>'+c.j+' · '+c.v.toLocaleString()+' espec.</small></div>';
+  g.appendChild(d);});
+}
+function filtrar(){ pintar(document.getElementById('buscar').value); }
+function seguir(){ siguiendo=!siguiendo;
+ var b=document.getElementById('btnSeguir');
+ b.textContent=siguiendo?'Siguiendo ✓':'Seguir';
+ b.className=siguiendo?'apagado':''; }
+function msg(nick,txt){
+ var m=document.getElementById('msgs'), p=document.createElement('p');
+ p.innerHTML='<span class="nick">'+nick+':</span> '+txt;
+ m.appendChild(p); m.scrollTop=m.scrollHeight; }
+function enviar(){ var i=document.getElementById('chatIn');
+ if(i.value.trim()){ msg('vos', i.value.trim()); i.value=''; } }
+var bots=['jaja qué grande','ese bug lo tuve ayer','saludos desde Córdoba','clip it!','qué tema es ese?','GG','alguien más con lag?','tremendo setup'];
+var bn=['lu_','sofi','elprofe','nodito','cami','rile','tomyx','valen'];
+setInterval(function(){
+ msg(bn[Math.floor(Math.random()*bn.length)], bots[Math.floor(Math.random()*bots.length)]);
+ espec+=Math.floor(Math.random()*40-12);
+ document.getElementById('espec').textContent=espec.toLocaleString()+' espectadores';
+},4000);
+async function puente(){
+ var p=document.getElementById('pie');
+ if(!window.flutter_inappwebview){ p.textContent='puente: fuera de WebK'; return; }
+ try{
+  const r=await window.flutter_inappwebview.callHandler('webk',{cmd:'hora'});
+  p.textContent='puente OK · Dart dice: '+JSON.stringify(r);
+ }catch(e){ p.textContent='puente: error '+e; } }
+pintar(''); msg('nightbot','bienvenidos al chat, sean amables ♥');
+</script>
+</body>
+</html>

@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WebK · app</title>
+<style>
+body{font-family:sans-serif;background:#020617;color:#fff;margin:0;padding:0}
+header{display:flex;gap:8px;padding:10px 14px;background:#0B1220;border-bottom:1px solid #B57CFF33;position:sticky;top:0}
+header button{background:#0B1220;color:#fff;border:1px solid #4DD0E1;border-radius:8px;padding:8px 14px}
+header button.activo{background:#4DD0E1;color:#020617;font-weight:bold}
+#app{padding:18px;max-width:640px;margin:auto}
+.card{border:1px solid #B57CFF55;border-radius:12px;padding:20px;background:#0B1220}
+button.accion{background:#9146ff;color:#fff;border:0;border-radius:8px;padding:10px 18px;font-weight:bold;margin-top:10px}
+input{width:100%;background:#020617;border:1px solid #4DD0E155;color:#fff;border-radius:8px;padding:10px;margin-top:8px}
+ul{padding-left:20px}
+footer{color:#53535f;font-size:11px;text-align:center;padding:14px}
+footer button{padding:4px 10px;font-size:11px;background:#0B1220;color:#fff;border:1px solid #4DD0E1;border-radius:8px}
+</style>
+</head>
+<body>
+<header>
+<button id="b-inicio" onclick="mostrarPagina('inicio')">Inicio</button>
+<button id="b-muro" onclick="mostrarPagina('muro')">Muro</button>
+<button id="b-perfil" onclick="mostrarPagina('perfil')">Perfil</button>
+</header>
+<div id="app"></div>
+<footer id="pie">puente: verificando… <button onclick="puente()">Hora Dart</button></footer>
+<script>
+// El JS se encarga de las páginas y la lógica web: una sola carga,
+// el resto es render local (sin pedirle nada más al server).
+var estado = {nombre: 'visitante', posts: ['Hola WebK ♥', 'El reto+ping pasó, estoy dentro.']};
+function marcar(nombre){
+ ['inicio','muro','perfil'].forEach(function(p){
+  document.getElementById('b-'+p).className = (p === nombre) ? 'activo' : '';});
+}
+function mostrarPagina(nombre){
+ var app = document.getElementById('app');
+ marcar(nombre);
+ if(nombre === 'inicio'){
+  app.innerHTML = '<div class="card"><h1>Inicio</h1>'
+   + '<p>Hola, <b>' + estado.nombre + '</b>. Todo esto lo dibuja el JS.</p>'
+   + '<button class="accion" onclick="mostrarPagina(\'perfil\')">Ir al perfil</button> '
+   + '<button class="accion" onclick="mostrarPagina(\'muro\')">Ir al muro</button></div>';
+ }
+ if(nombre === 'muro'){
+  var items = estado.posts.map(function(p){ return '<li>' + p + '</li>'; }).join('');
+  app.innerHTML = '<div class="card"><h1>Muro</h1><ul>' + items + '</ul>'
+   + '<input id="nuevo" placeholder="Escribí algo…">'
+   + '<button class="accion" onclick="postear()">Publicar</button></div>';
+ }
+ if(nombre === 'perfil'){
+  app.innerHTML = '<div class="card"><h1>Perfil</h1>'
+   + '<p>Nombre: <b>' + estado.nombre + '</b></p>'
+   + '<input id="nom" placeholder="Tu nombre…">'
+   + '<button class="accion" onclick="guardar()">Guardar</button> '
+   + '<button class="accion" onclick="mostrarPagina(\'inicio\')">Volver</button></div>';
+ }
+}
+function postear(){
+ var v = document.getElementById('nuevo').value.trim();
+ if(v){ estado.posts.unshift(v); mostrarPagina('muro'); }
+}
+function guardar(){
+ var v = document.getElementById('nom').value.trim();
+ if(v){ estado.nombre = v; } mostrarPagina('perfil');
+}
+async function puente(){
+ var p = document.getElementById('pie');
+ if(!window.flutter_inappwebview){ return; }
+ try{
+  const r = await window.flutter_inappwebview.callHandler('webk', {cmd: 'hora'});
+  p.innerHTML = 'puente OK · Dart dice: ' + JSON.stringify(r) + ' <button onclick="puente()">Hora Dart</button>';
+ }catch(e){ /* queda el texto base */ }
+}
+mostrarPagina('inicio');
+</script>
+</body>
+</html>
