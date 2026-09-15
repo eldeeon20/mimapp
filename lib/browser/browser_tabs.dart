@@ -125,6 +125,19 @@ class BrowserTabs extends ChangeNotifier {
 
   InAppWebViewController? controllerOf(int tabId) => _controllers[tabId];
 
+  /// Pestañas cuyo renderer nativo murió (onRenderProcessGone: Android
+  /// mata el renderer en fondo y la vista queda negra para siempre).
+  /// Solo esas se recrean (con su URL); las sanas NO se tocan ni se
+  /// recargan: la web se mantiene como estaba.
+  final Set<int> _muertos = {};
+  void marcarMuerto(int tabId) {
+    _muertos.add(tabId);
+    notifyListeners();
+  }
+
+  bool estaMuerto(int tabId) => _muertos.contains(tabId);
+  bool tomarMuerto(int tabId) => _muertos.remove(tabId);
+
   /// Carga [input] en la pestaña dada; agrega https:// si falta esquema.
   Future<void> loadUrl(int tabId, String input) async {
     var u = input.trim();

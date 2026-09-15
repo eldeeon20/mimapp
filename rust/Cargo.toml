@@ -37,6 +37,8 @@ nostr-sdk = { version = "=0.43.0", features = ["nip44", "nip59"] }
 nostr = "=0.43.1"
 shamirsecretsharing = "0.1"
 rustls = { version = "0.23", features = ["ring"] }
+# TLS sobre el circuito arti para https://*.onion (misma versión que rustls)
+tokio-rustls = "0.26"
 nostringer = "0.1.8"
 libcrux-kem = "0.0.7"
 hf-hub = { version = "=1.0.0-rc.1", features = ["blocking"] }

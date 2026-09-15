@@ -43,10 +43,21 @@ class _BrowserWebViewsHostState extends State<BrowserWebViewsHost>
   /// Se deja en false siempre; antes true desmontaba a SizedBox.
   bool _enFondo = false;
 
-  /// Generación de vistas: al volver del fondo se incrementa para forzar
-  /// que Flutter recree el InAppWebView nativo con la URL de la pestaña
-  /// (el surface viejo queda muerto y sin esto vuelve negro).
-  int _genVistas = 0;
+  /// Generación POR PESTAÑA: solo se incrementa la de la pestaña cuyo
+  /// renderer murió (onRenderProcessGone) para recrear ESA vista nativa
+  /// con su URL. Las sanas no se tocan: la web se mantiene sin recargar.
+  /// OJO: recrear en fondo con la Web cerrada (offstage) crea vistas que
+  /// nunca enganchan surface y al reabrir queda negro: por eso la
+  /// recreación de una muerta cerrada espera a que se ABRA (visible).
+  final Map<int, int> _genTab = {};
+
+  // _genVistas global ya no se usa (era recarga de todo al volver);
+  // se deja comentado (regla: no borrar):
+  // int _genVistas = 0;
+
+  // _pendeRecrear global ya no se usa (era recarga de todo al abrir);
+  // se deja comentado (regla: no borrar):
+  // bool _pendeRecrear = false;
 
   @override
   void initState() {
@@ -91,10 +102,11 @@ class _BrowserWebViewsHostState extends State<BrowserWebViewsHost>
     return true;
   }
 
-  /// FIX negro al volver: NO se desmonta al ir a fondo, pero al volver
-  /// se fuerza recreación del WebView nativo (surface muerto) con la URL
-  /// de cada pestaña. Sin recrear, el surface rancio vuelve negro; sin
-  /// URL (forgetAll sin load) también negro. Esto hace ambas.
+  /// Al volver del fondo NO se toca nada: las vistas vivas (abiertas o
+  /// cerradas) se quedan como están, sin recargar. La web se mantiene.
+  /// La única muerte real es el renderer asesinado por Android en fondo
+  /// (onRenderProcessGone): esa pestaña la marca el WebView y se recrea
+  /// solo ella (al abrir si estaba cerrada, en el acto si visible).
   @override
   void didChangeAppLifecycleState(AppLifecycleState estado) {
     // Código viejo dejado comentado (regla: no borrar):
@@ -107,25 +119,52 @@ class _BrowserWebViewsHostState extends State<BrowserWebViewsHost>
     //   _enFondo = false;
     //   if (mounted) setState(() {});
     // }
-    if (estado == AppLifecycleState.resumed) {
-      _enFondo = false;
-      try {
-        final tabs = BrowserTabs.instance;
-        // Siempre: esté Web abierta o cerrada (flecha atrás). Si solo se
-        // recrea con isOpen, al volver con Web cerrada el surface queda
-        // muerto y al reabrir queda negro.
-        tabs.forgetAll();
-        _genVistas++;
-      } catch (_) {}
-      if (mounted) setState(() {});
-    } else if (estado == AppLifecycleState.paused) {
-      // No desmontar a propósito: mantener WebViews vivas.
+    // Intento anterior dejado comentado (olvidaba controladores y
+    // recreaba todo al volver/abrir = recargaba la web):
+    // if (estado == AppLifecycleState.resumed) {
+    //   _enFondo = false;
+    //   try {
+    //     final tabs = BrowserTabs.instance;
+    //     tabs.forgetAll();
+    //     _genVistas++;
+    //   } catch (_) {}
+    //   if (mounted) setState(() {});
+    // } else if (estado == AppLifecycleState.paused) {
+    //   _enFondo = false;
+    // }
+    // Intento anterior 2 dejado comentado (recreaba todo al abrir tras
+    // volver con la Web cerrada = también recargaba):
+    // if (estado == AppLifecycleState.resumed) {
+    //   _enFondo = false;
+    //   try {
+    //     final tabs = BrowserTabs.instance;
+    //     if (!tabs.isOpen) {
+    //       tabs.forgetAll();
+    //       _pendeRecrear = true;
+    //     }
+    //   } catch (_) {}
+    //   if (mounted) setState(() {});
+    // } else if (estado == AppLifecycleState.paused) {
+    //   _enFondo = false;
+    // }
+    if (estado == AppLifecycleState.paused ||
+        estado == AppLifecycleState.resumed) {
+      // A propósito no se desmonta ni se olvida nada: mantener WebViews
+      // y controladores vivos tal cual.
       _enFondo = false;
     }
   }
 
   void _syncUrl() {
     final tabs = BrowserTabs.instance;
+    // Pestaña activa con renderer muerto: se recrea SOLO ella ahora
+    // (si la Web está abierta = visible; si está cerrada se deja
+    // marcada y se recrea cuando se abra, nunca en fondo).
+    if (tabs.isOpen && tabs.estaMuerto(tabs.active.id)) {
+      tabs.tomarMuerto(tabs.active.id);
+      _genTab[tabs.active.id] = (_genTab[tabs.active.id] ?? 0) + 1;
+      if (mounted) setState(() {});
+    }
     // Si el browser se cerró desde afuera (botón atrás de app.dart),
     // los paneles locales quedaban abiertos y al reentrar no se veía
     // la web. Se resetean acá.
@@ -182,18 +221,21 @@ class _BrowserWebViewsHostState extends State<BrowserWebViewsHost>
                 Column(children: [
                   _bar(tabs, active),
                   Expanded(
-                    // FIX negro al volver: siempre montadas + recreación con
-                    // _genVistas al volver del fondo (surface nuevo con URL).
+                    // FIX negro: vistas siempre montadas; cada pestaña se
+                    // recrea SOLO si su renderer murió (gen por pestaña).
+                    // Las sanas quedan intactas, sin recargar.
                     // Viejo: _enFondo ? SizedBox.shrink() : Stack(...)
                     child: Stack(
                             children: [
                               for (final t in tabs.tabs)
                                 Visibility(
-                                  key: ValueKey('${t.id}-$_genVistas'),
+                                  key: ValueKey(
+                                      '${t.id}-v${_genTab[t.id] ?? 0}'),
                                   visible: t.id == active.id,
                                   maintainState: true,
                                   child: BrowserWebview(
-                                      key: ValueKey('${t.id}-$_genVistas'),
+                                      key: ValueKey(
+                                          '${t.id}-v${_genTab[t.id] ?? 0}'),
                                       tabs: tabs,
                                       tab: t),
                                 ),
@@ -362,7 +404,9 @@ class _BrowserWebViewsHostState extends State<BrowserWebViewsHost>
           }
         }
         final hp = await tor.startProxy();
-        final ok = await tabs.setProxy(true, hp, 'PROXY',
+        // SOCKS5 oficial de arti (un solo túnel, sin separar http):
+        // Chromium manda el hostname y Tor resuelve (incluye .onion).
+        final ok = await tabs.setProxy(true, hp, 'SOCKS',
             bypass: const ['127.0.0.1', 'localhost']);
         if (!ok) throw 'el WebView no aceptó el proxy';
         // Los WebViews ya creados no aplican el override hasta recargar.

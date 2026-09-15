@@ -207,10 +207,14 @@ pub fn tor_download(url: String, dest_path: String) -> Result<u64, String> {
     Ok(buf.len() as u64)
 }
 
-/// true si es http://<algo>.onion/... (https onion sigue por ureq).
+/// true si es http(s)://<algo>.onion/... Tor abre TODO .onion por
+/// connect() directo (ureq muere resolviendo DNS).
 fn es_onion_http(url: &str) -> bool {
     let min = url.to_lowercase();
-    let resto = match min.strip_prefix("http://") {
+    let resto = match min
+        .strip_prefix("http://")
+        .or_else(|| min.strip_prefix("https://"))
+    {
         Some(r) => r,
         None => return false,
     };
@@ -218,10 +222,83 @@ fn es_onion_http(url: &str) -> bool {
     host.ends_with(".onion")
 }
 
-/// GET http://*.onion por connect() directo de arti (sin ureq, sin TLS:
-/// el .onion ya va cifrado por el circuito). Sigue un redirect (máx 3).
-/// Devuelve (status, cuerpo).
+/// Verificador TLS que acepta cualquier cert SOLO para .onion: la
+/// identidad del servicio ya la da el circuito Tor (igual que Tor
+/// Browser). Sin esto ningún https://*.onion abriría (autofirmados).
+#[derive(Debug)]
+struct SinVerificarOnion;
+impl rustls::client::danger::ServerCertVerifier for SinVerificarOnion {
+    fn verify_server_cert(
+        &self,
+        _fin: &rustls::pki_types::CertificateDer<'_>,
+        _cadena: &[rustls::pki_types::CertificateDer<'_>],
+        _nombre: &rustls::pki_types::ServerName<'_>,
+        _ocsp: &[u8],
+        _ahora: rustls::pki_types::UnixTime,
+    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        Ok(rustls::client::danger::ServerCertVerified::assertion())
+    }
+    fn verify_tls12_signature(
+        &self,
+        _msg: &[u8],
+        _cert: &rustls::pki_types::CertificateDer<'_>,
+        _firma: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+    fn verify_tls13_signature(
+        &self,
+        _msg: &[u8],
+        _cert: &rustls::pki_types::CertificateDer<'_>,
+        _firma: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        vec![
+            rustls::SignatureScheme::ECDSA_NISTP256_SHA256,
+            rustls::SignatureScheme::ECDSA_NISTP384_SHA384,
+            rustls::SignatureScheme::ECDSA_NISTP521_SHA512,
+            rustls::SignatureScheme::ED25519,
+            rustls::SignatureScheme::RSA_PSS_SHA256,
+            rustls::SignatureScheme::RSA_PSS_SHA384,
+            rustls::SignatureScheme::RSA_PSS_SHA512,
+            rustls::SignatureScheme::RSA_PKCS1_SHA256,
+            rustls::SignatureScheme::RSA_PKCS1_SHA384,
+            rustls::SignatureScheme::RSA_PKCS1_SHA512,
+        ]
+    }
+}
+
+/// TLS-cliente para https://*.onion sobre el circuito arti.
+fn config_tls_onion() -> rustls::ClientConfig {
+    rustls::ClientConfig::builder()
+        .dangerous()
+        .with_custom_certificate_verifier(std::sync::Arc::new(SinVerificarOnion))
+        .with_no_client_auth()
+}
+
+/// GET onion con timeout legible: si el circuito se cuelga (HSDir
+/// lento, servicio caído) antes no volvía NADA nunca; ahora vuelve
+/// error a los 120s. El trabajo vive en un hilo (block_on concurrente,
+/// igual que el proxy) y acá solo se espera con tope.
 fn bajar_onion_http(url: &str) -> Result<(u16, Vec<u8>), String> {
+    let entrada = url.to_string();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::Builder::new()
+        .name("onion-get".into())
+        .spawn(move || {
+            let _ = tx.send(bajar_onion_http_inner(&entrada));
+        })
+        .map_err(|e| format!("hilo onion: {e}"))?;
+    rx.recv_timeout(std::time::Duration::from_secs(120))
+        .map_err(|_| "onion: timeout 120s (circuito lento o servicio caído)".to_string())?
+}
+
+/// GET http(s)://*.onion por connect() directo de arti (sin ureq:
+/// resuelve DNS y muere). https va con TLS sobre el circuito.
+/// Sigue un redirect (máx 3). Devuelve (status, cuerpo).
+fn bajar_onion_http_inner(url: &str) -> Result<(u16, Vec<u8>), String> {
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
     let cliente: Client = match CLIENT.lock() {
         Ok(g) => match g.as_ref() {
@@ -232,9 +309,7 @@ fn bajar_onion_http(url: &str) -> Result<(u16, Vec<u8>), String> {
     };
     let mut actual = url.to_string();
     for _ in 0..4 {
-        if actual.to_lowercase().starts_with("https://") {
-            return Err("onion https no va por GET manual (usa la web con proxy)".into());
-        }
+        let es_tls = actual.to_lowercase().starts_with("https://");
         let (host, puerto, ruta) = partir_http(&actual)?;
         let hilo = tor_rt()
             .block_on(cliente.connect((host.clone(), puerto)))
@@ -242,16 +317,52 @@ fn bajar_onion_http(url: &str) -> Result<(u16, Vec<u8>), String> {
         let pedido = format!(
             "GET {ruta} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\nUser-Agent: pr_app\r\nAccept: */*\r\n\r\n"
         );
-        let crudo: Vec<u8> = tor_rt()
-            .block_on(async {
-                let (mut r, mut w) = tokio::io::split(hilo);
-                w.write_all(pedido.as_bytes()).await?;
-                w.flush().await?;
-                let mut todo = Vec::new();
-                r.read_to_end(&mut todo).await?;
-                Ok::<_, std::io::Error>(todo)
-            })
-            .map_err(|e| format!("http onion {host}: {e}"))?;
+        let crudo: Vec<u8> = if es_tls {
+            tor_rt()
+                .block_on(async {
+                    let nombre = rustls::pki_types::ServerName::try_from(host.as_str())
+                        .map_err(|_| {
+                            std::io::Error::new(
+                                std::io::ErrorKind::InvalidInput,
+                                "SNI onion malo",
+                            )
+                        })?
+                        .to_owned();
+                    let cfg = std::sync::Arc::new(config_tls_onion());
+                    let conector = tokio_rustls::TlsConnector::from(cfg);
+                    // Box: el stream de arti no promete Unpin y el
+                    // conector TLS lo exige; la caja sí lo es siempre.
+                    let caja: Box<
+                        dyn tokio::io::AsyncRead
+                            + tokio::io::AsyncWrite
+                            + Unpin
+                            + Send,
+                    > = Box::new(hilo);
+                    let mut tls = conector.connect(nombre, caja).await.map_err(|e| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::Other,
+                            format!("tls onion {host}: {e}"),
+                        )
+                    })?;
+                    tls.write_all(pedido.as_bytes()).await?;
+                    tls.flush().await?;
+                    let mut todo = Vec::new();
+                    tls.read_to_end(&mut todo).await?;
+                    Ok::<_, std::io::Error>(todo)
+                })
+                .map_err(|e| format!("https onion {host}: {e}"))?
+        } else {
+            tor_rt()
+                .block_on(async {
+                    let (mut r, mut w) = tokio::io::split(hilo);
+                    w.write_all(pedido.as_bytes()).await?;
+                    w.flush().await?;
+                    let mut todo = Vec::new();
+                    r.read_to_end(&mut todo).await?;
+                    Ok::<_, std::io::Error>(todo)
+                })
+                .map_err(|e| format!("http onion {host}: {e}"))?
+        };
         let (estado, cuerpo, location) = partir_respuesta(&crudo)?;
         match location {
             Some(loc) if (300..400).contains(&estado) => match resolver_redirect(&actual, &loc) {
@@ -268,21 +379,26 @@ fn bajar_onion_http(url: &str) -> Result<(u16, Vec<u8>), String> {
 }
 
 /// Parte http(s)://host[:puerto][/ruta] en (host, puerto, ruta).
+/// Puerto por defecto: 443 en https, 80 en http.
 fn partir_http(url: &str) -> Result<(String, u16, String), String> {
-    let resto = url
+    let (esquema, resto) = url
         .split_once("://")
-        .map(|(_, r)| r)
         .ok_or("URL onion sin esquema")?;
     let (autoridad, ruta) = match resto.find('/') {
         Some(i) => (&resto[..i], resto[i..].to_string()),
         None => (resto, "/".to_string()),
+    };
+    let por_defecto: u16 = if esquema.eq_ignore_ascii_case("https") {
+        443
+    } else {
+        80
     };
     let (host, puerto) = match autoridad.rsplit_once(':') {
         Some((h, p)) => (
             h.to_string(),
             p.parse::<u16>().map_err(|_| format!("puerto malo: {p}"))?,
         ),
-        None => (autoridad.to_string(), 80),
+        None => (autoridad.to_string(), por_defecto),
     };
     if host.is_empty() {
         return Err("URL onion sin host".into());
@@ -387,10 +503,15 @@ pub fn tor_proxy_puerto() -> String {
     }
 }
 
-/// Levanta el proxy (requiere Tor corriendo). Idempotente: si ya está,
-/// devuelve el mismo host:puerto.
+/// Levanta el proxy OFICIAL de arti (SOCKS5) en 127.0.0.1:puerto
+/// aleatorio para el WebView. UN solo túnel: arti autodetecta el
+/// protocolo por el primer byte (SOCKS o HTTP CONNECT), sin separar
+/// http de nada. Tor SÍ era ya un proxy (`arti proxy` hace esto mismo);
+/// el casero (atender_proxy/tunel) queda abajo sin uso por regla
+/// no-borrar. Idempotente: si ya está, devuelve el mismo host:puerto.
 #[flutter_rust_bridge::frb]
 pub fn tor_proxy_start() -> Result<String, String> {
+    use tor_rtcompat::{NetStreamListener as _, NetStreamProvider as _};
     {
         let g = CLIENT.lock().map_err(|_| "mutex cliente")?;
         if g.is_none() {
@@ -400,39 +521,43 @@ pub fn tor_proxy_start() -> Result<String, String> {
     if PROXY_PUERTO.load(std::sync::atomic::Ordering::Relaxed) != 0 {
         return Ok(tor_proxy_puerto());
     }
-    let listener = std::net::TcpListener::bind("127.0.0.1:0")
-        .map_err(|e| format!("proxy bind: {e}"))?;
-    listener
-        .set_nonblocking(true)
-        .map_err(|e| format!("proxy nonblock: {e}"))?;
-    let puerto = listener
-        .local_addr()
-        .map_err(|e| format!("proxy addr: {e}"))?
-        .port();
-    PROXY_PARAR.store(false, std::sync::atomic::Ordering::Relaxed);
+    // Bindeo propio en 127.0.0.1:0 para saber el puerto (el run_proxy de
+    // arti bindea él y no lo reporta): se le pasa el listener ya atado.
+    let (puerto, cliente_proxy, listener) = tor_rt()
+        .block_on(async {
+            let cliente = {
+                let g = CLIENT.lock().map_err(|_| "mutex cliente")?;
+                (**g.as_ref().ok_or("Tor no está corriendo")?).clone()
+            };
+            let dir: std::net::SocketAddr =
+                "127.0.0.1:0".parse().map_err(|e| format!("proxy addr: {e}"))?;
+            let lis = cliente
+                .runtime()
+                .listen(&dir)
+                .await
+                .map_err(|e| format!("proxy bind: {e}"))?;
+            let puerto = lis
+                .local_addr()
+                .map_err(|e| format!("proxy puerto: {e}"))?
+                .port();
+            Ok::<_, String>((puerto, cliente, lis))
+        })?;
     PROXY_PUERTO.store(puerto, std::sync::atomic::Ordering::Relaxed);
     plog(format!(
-        "proxy esperando en 127.0.0.1:{puerto} · CONNECT acá"
+        "proxy arti SOCKS en 127.0.0.1:{puerto} · un solo túnel"
     ));
     std::thread::Builder::new()
-        .name("tor-proxy".into())
+        .name("tor-proxy-arti".into())
         .spawn(move || {
-            while !PROXY_PARAR.load(std::sync::atomic::Ordering::Relaxed) {
-                match listener.accept() {
-                    Ok((s, _)) => {
-                        std::thread::Builder::new()
-                            .name("tor-proxy-conn".into())
-                            .spawn(move || atender_proxy(s))
-                            .ok();
-                    }
-                    Err(ref e)
-                        if e.kind() == std::io::ErrorKind::WouldBlock =>
-                    {
-                        std::thread::sleep(std::time::Duration::from_millis(100))
-                    }
-                    Err(_) => break,
-                }
-            }
+            // Corre para siempre (arti no da handle de parada: al apagar
+            // desde la UI solo se quita el override del WebView y este
+            // task queda vivo hasta cerrar la app; es solo localhost).
+            let r = tor_rt().block_on(arti::proxy::run_proxy_with_listeners(
+                cliente_proxy,
+                vec![listener],
+                None,
+            ));
+            plog(format!("proxy arti terminó: {r:?}"));
             PROXY_PUERTO.store(0, std::sync::atomic::Ordering::Relaxed);
         })
         .map_err(|e| format!("hilo proxy: {e}"))?;
@@ -440,15 +565,21 @@ pub fn tor_proxy_start() -> Result<String, String> {
 }
 
 /// Baja el proxy. Idempotente (el cliente Tor sigue corriendo).
+/// Con el proxy oficial no hay parada real: se deja de usar el puerto
+/// (la UI quita el override) pero el task queda vivo; por eso el puerto
+/// NO se resetea y el próximo start lo reutiliza.
 #[flutter_rust_bridge::frb]
 pub fn tor_proxy_stop() -> Result<(), String> {
     PROXY_PARAR.store(true, std::sync::atomic::Ordering::Relaxed);
-    PROXY_PUERTO.store(0, std::sync::atomic::Ordering::Relaxed);
+    plog("proxy: override quitado (task arti sigue vivo)".into());
     Ok(())
 }
 
+/// Proxy casero: REEMPLAZADO por el oficial de arti (ver tor_proxy_start).
+/// Se deja por regla no-borrar; no se usa más.
 /// Una conexión del WebView: CONNECT host:puerto o petición absoluta
 /// (GET http://host/...). Todo lo demás → 405 y cierre.
+#[allow(dead_code)]
 fn atender_proxy(s: std::net::TcpStream) {
     use std::io::{Read, Write};
     // 30s: .onion (HSDir+introduce+rendezvous) tarda 10-30s vs 0.5s clearnet.
@@ -575,20 +706,29 @@ fn atender_proxy(s: std::net::TcpStream) {
         let _ = sock.write_all(b"HTTP/1.1 502 Proxy interno\r\nContent-Length: 0\r\n\r\n");
         return;
     }
-    let tcp = match tokio::net::TcpStream::from_std(sock) {
-        Ok(t) => t,
-        Err(e) => {
-            plog(format!("502: from_std falló ({e})"));
-            return;
-        }
-    };
-    // Túnel con flush tras cada escritura hacia Tor: DataStream
-    // bufferiza (doc arti: "Remember to call flush!") y con
-    // copy_bidirectional el ClientHello quedaba atascado en el buffer
-    // → el server nunca respondía → ERR_CONNECTION_RESET.
-    tor_rt().block_on(tunel(&host, puerto, tcp, tor_stream));
+    // from_std EXIGE contexto del runtime tokio (Handle::current):
+    // fuera del runtime hace panic ("no reactor running"), el hilo
+    // muere, el socket cae y el WebView ve ERR_CONNECTION_RESET en
+    // TODA página con proxy. Por eso la conversión va DENTRO del
+    // block_on (antes estaba fuera: ese era el reset).
+    tor_rt().block_on(async {
+        let tcp = match tokio::net::TcpStream::from_std(sock) {
+            Ok(t) => t,
+            Err(e) => {
+                plog(format!("502: from_std falló ({e})"));
+                return;
+            }
+        };
+        // Túnel con flush tras cada escritura hacia Tor: DataStream
+        // bufferiza (doc arti: "Remember to call flush!") y con
+        // copy_bidirectional el ClientHello quedaba atascado en el buffer
+        // → el server nunca respondía → ERR_CONNECTION_RESET.
+        tunel(&host, puerto, tcp, tor_stream).await
+    });
 }
 
+/// Túnel casero: REEMPLAZADO por el oficial de arti. Se deja por regla
+/// no-borrar; no se usa más.
 /// Copia bidireccional TCP<->Tor con flush en ambos sentidos.
 /// El flush hacia WebView faltaba: ServerHello quedaba bufferizado en
 /// tokio y el WebView cortaba por ERR_TIMED_OUT (directo arti-ureq OK

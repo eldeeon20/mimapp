@@ -52,6 +52,13 @@ class _BrowserWebviewState extends State<BrowserWebview> {
             },
             onTitleChanged: (_, title) =>
                 widget.tabs.rename(widget.tab.id, title ?? ''),
+            // Si Android mata el renderer (fondo con otra app pesada
+            // adelante), la vista queda negra para siempre: se marca la
+            // pestaña y el host la recrea con su URL. Solo esa pestaña.
+            onRenderProcessGone: (_, __) async {
+              widget.tabs.marcarMuerto(widget.tab.id);
+              return true;
+            },
             onDownloadStartRequest: (_, req) {
               DownloadManager.instance.start(
                 req.url.toString(),
