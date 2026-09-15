@@ -311,7 +311,7 @@ fn bajar_onion_http_inner(url: &str) -> Result<(u16, Vec<u8>), String> {
     for _ in 0..4 {
         let es_tls = actual.to_lowercase().starts_with("https://");
         let (host, puerto, ruta) = partir_http(&actual)?;
-        let hilo = tor_rt()
+        let mut hilo = tor_rt()
             .block_on(cliente.connect((host.clone(), puerto)))
             .map_err(|e| format!("connect onion {host}:{puerto}: {e}"))?;
         let pedido = format!(
@@ -330,15 +330,9 @@ fn bajar_onion_http_inner(url: &str) -> Result<(u16, Vec<u8>), String> {
                         .to_owned();
                     let cfg = std::sync::Arc::new(config_tls_onion());
                     let conector = tokio_rustls::TlsConnector::from(cfg);
-                    // Box: el stream de arti no promete Unpin y el
-                    // conector TLS lo exige; la caja sí lo es siempre.
-                    let caja: Box<
-                        dyn tokio::io::AsyncRead
-                            + tokio::io::AsyncWrite
-                            + Unpin
-                            + Send,
-                    > = Box::new(hilo);
-                    let mut tls = conector.connect(nombre, caja).await.map_err(|e| {
+                    // &mut directo: AsyncRead/AsyncWrite por blanket impls y
+                    // Unpin siempre (el Box<dyn A+B> no compila: E0225).
+                    let mut tls = conector.connect(nombre, &mut hilo).await.map_err(|e| {
                         std::io::Error::new(
                             std::io::ErrorKind::Other,
                             format!("tls onion {host}: {e}"),

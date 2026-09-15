@@ -56,7 +56,11 @@ class MainActivity : AudioServiceActivity() {
                         val fmt = SimpleDateFormat(
                             "yyyy-MM-dd'T'HH:mm:ss", Locale.US
                         ).apply { timeZone = TimeZone.getTimeZone("UTC") }
-                        val limpio = expiryIso.substringBefore("+").substringBefore("Z")
+                        // Dart manda con milisegundos (00.000) y a veces con
+                        // zona (+00:00/Z): se pelan o el parse rompe y el
+                        // vencimiento queda en 0 (token jamás se refresca).
+                        val limpio = expiryIso.substringBefore("+")
+                            .substringBefore("Z").substringBefore(".")
                         fmt.parse(limpio)?.let { expiryMs = it.time }
                     } catch (_: Exception) {}
                     val i = Intent(this, ServicioMimapp::class.java)

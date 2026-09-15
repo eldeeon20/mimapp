@@ -68,14 +68,18 @@ class StatusNotifier {
   /// fondo. La app NO pinea: solo muestra el espejo.
   void refresh() {
     final cs = ColabService();
+    // Espejo vivo del nativo (pings + error), sin esperar: pinta con lo
+    // último y al próximo tick (3s) ya viene fresco.
+    unawaited(cs.refrescarEspejo());
     // Laurelia: tokens generados (contador estático).
     final tokens = LaureliaChat.generatedTokens;
 
     final active = cs.pingActivo;
     final count = cs.activeSessionCount;
+    final err = cs.espejoError.isNotEmpty ? ' · error: ${cs.espejoError}' : '';
     final colabLine = active
         ? 'Colab: ACTIVO (${cs.activeEndpoint ?? ''} · '
-            '${ColabKeepAlive.fmtDur(cs.espejoElapsed)} · ping servicio)'
+            '${ColabKeepAlive.fmtDur(cs.espejoElapsed)} · ${cs.espejoPings} pings$err)'
         : (count > 0 ? 'Colab: $count sesión(es)' : 'Colab: inactivo');
 
     extra = '$colabLine · Laurelia: $tokens tokens';

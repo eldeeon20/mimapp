@@ -44,6 +44,9 @@ class ColabService {
   /// Pings OK contados por el servicio (lo escribe en el estado).
   int espejoPings = 0;
 
+  /// Último error corto del ping nativo ("" = bien). Se muestra en 777.
+  String espejoError = '';
+
   /// true si el servicio mantiene algo en ping (espejo local).
   bool get pingActivo => activeEndpoint != null && activeEndpoint!.isNotEmpty;
 
@@ -65,6 +68,7 @@ class ColabService {
     activeEndpoint = endpoint;
     espejoInicio = DateTime.now();
     espejoPings = 0;
+    espejoError = '';
     // Sin servicio no hay ping: prender el NATIVO primero, esperar que
     // arranque y recién ordenarle el ping.
     await Nativo.prender();
@@ -92,6 +96,7 @@ class ColabService {
     activeEndpoint = null;
     espejoInicio = null;
     espejoPings = 0;
+    espejoError = '';
     StatusNotifier.instance.refresh();
     // Sin celda el servicio no tiene por qué quedar: pararlo también.
     try {
@@ -101,6 +106,7 @@ class ColabService {
 
   /// Inicializar: carga tokens y recupera el espejo de lo que el
   /// servicio ya pineaba (si la app se cerró y el servicio siguió).
+  /// Nada más: el servicio se crea al crear celda, punto.
   Future<void> init() async {
     if (_initialized) return;
     _initialized = true;
@@ -111,16 +117,26 @@ class ColabService {
   /// Lee el estado que escribe el servicio NATIVO: si sigue vivo, la
   /// 777 lo muestra sin arrancar ningún ping en la app. Primero el
   /// canal nativo (siempre fresco), después el archivo legacy.
+  /// Si el canal responde (mapa no vacío) se le cree: vivo → espejo,
+  /// muerto → espejo en limpio (no mostrar fantasma).
   Future<void> _recuperarEspejo() async {
     try {
       final e = await Nativo.estado();
-      if (e['vivo'] == true && '${e['endpoint'] ?? ''}'.isNotEmpty) {
-        activeEndpoint = '${e['endpoint']}';
-        final ms = (e['inicioMs'] as int?) ?? 0;
-        espejoInicio = ms > 0
-            ? DateTime.fromMillisecondsSinceEpoch(ms)
-            : DateTime.now();
-        espejoPings = (e['pingsOk'] as int?) ?? 0;
+      if (e.isNotEmpty) {
+        if (e['vivo'] == true && '${e['endpoint'] ?? ''}'.isNotEmpty) {
+          activeEndpoint = '${e['endpoint']}';
+          final ms = (e['inicioMs'] as int?) ?? 0;
+          espejoInicio = ms > 0
+              ? DateTime.fromMillisecondsSinceEpoch(ms)
+              : DateTime.now();
+          espejoPings = (e['pingsOk'] as int?) ?? 0;
+          espejoError = '${e['ultimoError'] ?? ''}';
+        } else {
+          activeEndpoint = null;
+          espejoInicio = null;
+          espejoPings = 0;
+          espejoError = '';
+        }
         return;
       }
     } catch (_) {}
@@ -141,8 +157,13 @@ class ColabService {
       activeEndpoint = ep;
       espejoInicio = DateTime.tryParse('${d['inicio'] ?? ''}');
       espejoPings = (d['pingsOk'] as int?) ?? 0;
+      espejoError = '';
     } catch (_) {}
   }
+
+  /// Relee el espejo nativo (para la 777 cada 3s): pings y error vivos,
+  /// sin arrancar nada en la app.
+  Future<void> refrescarEspejo() => _recuperarEspejo();
 
   // COMENTADO: autodetect desactivado, el ping es solo manual.
   // Se deja sin borrar.

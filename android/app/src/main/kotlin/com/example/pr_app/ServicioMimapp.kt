@@ -12,15 +12,10 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import androidx.core.app.NotificationCompat
-import java.io.File
 import java.net.HttpURLConnection
 import java.net.SocketTimeoutException
 import java.net.URL
 import java.net.URLEncoder
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-import java.util.TimeZone
 import org.json.JSONObject
 
 /// Servicio en primer plano 100% nativo de mimapp (sin
@@ -57,12 +52,16 @@ class ServicioMimapp : Service() {
         @Volatile var pingsOk: Int = 0
         @Volatile var consec4xx: Int = 0
         @Volatile var vivo: Boolean = false
+        /// Último error corto del ping (se muestra en la 888/777).
+        /// Vacío = todo bien. Sin esto el "ping 0" era un misterio.
+        @Volatile var ultimoError: String = ""
 
         fun estado(): Map<String, Any> = mapOf(
             "vivo" to vivo,
             "endpoint" to endpoint,
             "inicioMs" to inicioMs,
             "pingsOk" to pingsOk,
+            "ultimoError" to ultimoError,
         )
     }
 
@@ -121,6 +120,9 @@ class ServicioMimapp : Service() {
                 return START_NOT_STICKY
             }
         }
+        // Sin acción (prender manual o revive STICKY): solo frente.
+        // El servicio NO retoma nada solo ni guarda órdenes: eso lo
+        // ordena la app (Dart) al abrir.
         arrancarFrente()
         mano.removeCallbacks(pulso)
         mano.post(pulso)
@@ -186,7 +188,10 @@ class ServicioMimapp : Service() {
         val (t, c) = texto888()
         try {
             val nm = getSystemService(NotificationManager::class.java) ?: return
-            nm.notify(ID_SERVICIO, notiServicio("$t · c$contador", c))
+            // "latido N": prueba de vida del servicio (cada 5s +1).
+            // "N pings": pings OK a Colab. Si latido sube y pings no,
+            // el ping falla: el motivo va en el cuerpo (ultimoError).
+            nm.notify(ID_SERVICIO, notiServicio("$t · latido $contador", c))
         } catch (_: Exception) {}
     }
 
@@ -194,7 +199,11 @@ class ServicioMimapp : Service() {
         if (!vivo || endpoint.isEmpty()) {
             return "Secure App" to "Servicio activo · sin ping"
         }
-        return "Secure App · Colab vivo" to "$endpoint · ${formatoDur(System.currentTimeMillis() - inicioMs)} · $pingsOk pings"
+        var cuerpo = "$endpoint · ${formatoDur(System.currentTimeMillis() - inicioMs)} · $pingsOk pings"
+        if (ultimoError.isNotEmpty()) {
+            cuerpo += " · error: $ultimoError"
+        }
+        return "Secure App · Colab vivo" to cuerpo
     }
 
     // ---------------- ping Colab (HTTP, como el CLI) ----------------
@@ -205,9 +214,9 @@ class ServicioMimapp : Service() {
         inicioMs = System.currentTimeMillis()
         pingsOk = 0
         consec4xx = 0
+        ultimoError = ""
         vivo = true
         arrancarFrente()
-        guardarEstado()
         Thread { hacerPing() }.start()
         mano.postDelayed(pingTick, 60_000)
     }
@@ -215,7 +224,6 @@ class ServicioMimapp : Service() {
     private fun pararPing(origen: String) {
         mano.removeCallbacks(pingTick)
         vivo = false
-        guardarEstado()
         if (origen.isNotEmpty()) actualizar888()
         endpoint = ""
         inicioMs = 0L
@@ -234,7 +242,8 @@ class ServicioMimapp : Service() {
             if (expiryMs > 0 && System.currentTimeMillis() > expiryMs - 60_000) {
                 token = refrescar()
             }
-            val url = URL("https://colab.research.google.com/tun/m/$ep/keep-alive/?authuser=0")
+            // URL EXACTA del CLI (sin ?authuser: el CLI no lo manda).
+            val url = URL("https://colab.research.google.com/tun/m/$ep/keep-alive/")
             val c = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
                 connectTimeout = 10_000
@@ -244,12 +253,27 @@ class ServicioMimapp : Service() {
                 setRequestProperty("X-Colab-Client-Agent", "pr_app")
                 setRequestProperty("X-Colab-Tunnel", "Google")
             }
+            // Fase: el CLI distingue timeout de CONEXIÓN (no llegó: fallo)
+            // de timeout de LECTURA (llegó al TFE, la VM no contesta:
+            // ÉXITO, cuenta ping). Java tira SocketTimeout en ambos:
+            // se marca fase con bandera, igual semántica que el CLI.
+            var conectado = false
             val code = try {
                 c.connect()
+                conectado = true
                 c.responseCode
             } catch (e: SocketTimeoutException) {
-                // Como el CLI (ReadTimeout = éxito anotado por TFE): neutro.
+                if (conectado) {
+                    // ReadTimeout = éxito CLI: actividad anotada por el TFE.
+                    consec4xx = 0
+                    pingsOk++
+                    ultimoError = ""
+                    mano.post { actualizar888() }
+                    return
+                }
+                // ConnectTimeout = no llegó al TFE: neutro con aviso.
                 consec4xx = 0
+                ultimoError = "timeout red"
                 mano.post { actualizar888() }
                 return
             }
@@ -257,6 +281,7 @@ class ServicioMimapp : Service() {
             try { c.errorStream?.close() } catch (_: Exception) {}
             if (code in 400..499) {
                 consec4xx++
+                ultimoError = "http $code"
                 if (consec4xx >= 2) {
                     mano.post { pararPing("celda muerta ($code)") }
                     return
@@ -264,12 +289,17 @@ class ServicioMimapp : Service() {
             } else {
                 consec4xx = 0
                 pingsOk++
+                ultimoError = ""
             }
             mano.post { actualizar888() }
-            guardarEstado()
-        } catch (_: Exception) {
+        } catch (e: Exception) {
             // red/timeout: reintenta en el próximo ciclo, no cuenta error.
+            // Pero SE MUESTRA (antes era mudo y el "ping 0" no se entendía).
             consec4xx = 0
+            ultimoError = (e.message ?: "red").take(40)
+            try {
+                mano.post { actualizar888() }
+            } catch (_: Exception) {}
         }
     }
 
@@ -289,34 +319,17 @@ class ServicioMimapp : Service() {
             "&grant_type=refresh_token"
         c.outputStream.use { it.write(cuerpo.toByteArray()) }
         val code = c.responseCode
-        if (code != 200) throw Exception("refresh $code")
+        if (code != 200) {
+            ultimoError = "refresh http $code"
+            throw Exception("refresh $code")
+        }
         val texto = c.inputStream.bufferedReader().use { it.readText() }
         val d = JSONObject(texto)
         accessToken = d.getString("access_token")
         val expiraEn = d.optLong("expires_in", 3600L)
         expiryMs = System.currentTimeMillis() + expiraEn * 1000L
+        ultimoError = ""
         return accessToken
-    }
-
-    /// Espejo en disco con el mismo formato que espera Dart
-    /// (colab/colab_ping_estado.json). Best-effort.
-    private fun guardarEstado() {
-        try {
-            val dir = File(filesDir, "colab")
-            dir.mkdirs()
-            val fmt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
-                timeZone = TimeZone.getTimeZone("UTC")
-            }
-            val ahora = fmt.format(Date())
-            val inicio = if (inicioMs > 0) fmt.format(Date(inicioMs)) else ""
-            val j = JSONObject()
-                .put("vivo", vivo)
-                .put("endpoint", endpoint)
-                .put("inicio", inicio)
-                .put("pingsOk", pingsOk)
-                .put("cuando", ahora)
-            File(dir, "colab_ping_estado.json").writeText(j.toString())
-        } catch (_: Exception) {}
     }
 
     private fun formatoDur(ms: Long): String {
@@ -346,7 +359,6 @@ class ServicioMimapp : Service() {
         mano.removeCallbacks(pulso)
         mano.removeCallbacks(pingTick)
         vivo = false
-        guardarEstado()
         try {
             stopForeground(STOP_FOREGROUND_REMOVE)
         } catch (_: Exception) {

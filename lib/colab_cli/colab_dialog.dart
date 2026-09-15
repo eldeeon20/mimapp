@@ -79,6 +79,8 @@ class _ColabDialogBodyState extends State<_ColabDialogBody> {
       _sessions = await widget.sessions.list();
       ColabService().activeSessionCount = _sessions.length;
       StatusNotifier.instance.refresh();
+      // Listar no arranca nada (así está bien): el auto-inicio es solo
+      // al CREAR la celda (ver _createSession).
     } catch (e) {
       setState(() => _error = 'Error cargando sesiones: $e');
     }
@@ -131,8 +133,24 @@ class _ColabDialogBodyState extends State<_ColabDialogBody> {
       _error = null;
     });
     try {
+      final antes = _sessions.map((s) => s.endpoint).toSet();
       await widget.sessions.assign(accel: choice);
       await _loadSessions();
+      // AUTO-INICIO: la celda nueva entra en ping sola (servicio nativo).
+      // Si ya había algo pineando no se roba: solo si no hay ping activo.
+      if (!ColabService().pingActivo) {
+        final nuevas = _sessions.where((s) => !antes.contains(s.endpoint));
+        final primera = nuevas.isNotEmpty ? nuevas.first : null;
+        final destino = primera ??
+            (_sessions.isNotEmpty ? _sessions.first : null);
+        if (destino != null) {
+          try {
+            await ColabService().startKeepAlive(destino.endpoint);
+          } catch (e) {
+            _error = 'Celda creada pero el ping no arrancó: $e';
+          }
+        }
+      }
     } catch (e) {
       if (mounted) {
         setState(() {
