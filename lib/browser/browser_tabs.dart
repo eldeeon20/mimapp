@@ -159,11 +159,17 @@ class BrowserTabs extends ChangeNotifier {
   bool tomarMuerto(int tabId) => _muertos.remove(tabId);
 
   /// Carga [input] en la pestaña dada; agrega https:// si falta esquema.
+  /// Garantía onion: un .onion SOLO sale con el proxy Tor prendido (el
+  /// http:// va cifrado dentro del circuito); si no, se rehúsa en claro.
   Future<void> loadUrl(int tabId, String input) async {
     var u = input.trim();
     if (u.isEmpty) return;
     if (!u.startsWith('http://') && !u.startsWith('https://')) {
       u = 'https://$u';
+    }
+    final host = Uri.tryParse(u)?.host.toLowerCase() ?? '';
+    if ((host == 'onion' || host.endsWith('.onion')) && !proxyEnabled) {
+      throw '.onion bloqueado: prendé Tor (⋮ → Tor) para salir cifrado';
     }
     updateUrl(tabId, u);
     await controllerOf(tabId)?.loadUrl(urlRequest: URLRequest(url: WebUri(u)));
@@ -200,6 +206,15 @@ class BrowserTabs extends ChangeNotifier {
         // de otra app (el surface de Android no se restaura).
         transparentBackground: false,
         supportZoom: true,
+        // FIX negro TODA la app al volver del fondo con web cerrada: con
+        // composición híbrida cada WebView oculto es un SurfaceView nativo
+        // aparte; al reenganchar queda huérfano tapando todo en negro y el
+        // pause/resume no lo mata. Sin ella el WebView dibuja dentro de la
+        // superficie de Flutter (virtual display): no hay capa que tape y
+        // las vistas siguen montadas sin recargar. Aplica a vistas NUEVAS
+        // (restart, pestaña nueva, renderer muerto); las vivas la toman al
+        // recrearse. Rige desde APK nuevo (proceso fresco).
+        useHybridComposition: false,
       );
 
   /// Aplica todos los ajustes actuales a un controlador concreto.

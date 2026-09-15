@@ -104,11 +104,12 @@ class _BrowserWebViewsHostState extends State<BrowserWebViewsHost>
     return true;
   }
 
-  /// FIX negro toda la app al volver del fondo con web cerrada: las
-  /// vistas ocultas rompen la superficie al reenganchar. Sin desmontar
-  /// ni recrear ni recargar: se APARCAN (pause: paran GPU/timers y
-  /// guardan todo) y se REANUDAN (resume) al volver/abrir. Páginas
-  /// intactas siempre. Con web abierta no se toca (ya vuelve bien).
+  /// Fondo con web cerrada: se APARCA (pause: paran timers/GPU) y se
+  /// REANUDA al volver/abrir, sin desmontar ni recargar. OJO: esto SOLO
+  /// frena trabajo; el negro de TODA la app lo causaba la composición
+  /// híbrida (SurfaceView huérfano tapando todo) y se arregla con
+  /// useHybridComposition:false en currentWebViewSettings (las vistas
+  /// siguen montadas, sin recargas). Con web abierta no se toca.
   @override
   void didChangeAppLifecycleState(AppLifecycleState estado) {
     // Código viejo dejado comentado (regla: no borrar):
@@ -226,7 +227,13 @@ class _BrowserWebViewsHostState extends State<BrowserWebViewsHost>
           maintainSize: false,
           maintainAnimation: true,
           child: Scaffold(
+            // Mismo negro de la barra por si algo deja hueco.
+            backgroundColor: Colors.black87,
+            // top:false: la barra arranca en el borde físico (y=0) y usa
+            // TODA la pantalla incluida la zona de la cámara; nada queda
+            // por debajo de ella. Abajo/izq/der se siguen respetando.
             body: SafeArea(
+              top: false,
               child: Stack(children: [
                 Column(children: [
                   _bar(tabs, active),
@@ -290,7 +297,16 @@ class _BrowserWebViewsHostState extends State<BrowserWebViewsHost>
               isCollapsed: true,
               contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
             ),
-            onSubmitted: (v) => tabs.loadUrl(active.id, v),
+            onSubmitted: (v) async {
+              try {
+                await tabs.loadUrl(active.id, v);
+              } catch (e) {
+                if (!context.mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('$e')),
+                );
+              }
+            },
           ),
         ),
         IconButton(

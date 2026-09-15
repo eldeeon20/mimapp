@@ -329,6 +329,8 @@ class _WebkTestScreenState extends State<WebkTestScreen> {
                 bloqCookies3ros: _bloqCookies3ros,
                 onIniciar: _iniciar,
                 onPaginas: () => setState(() => _menuAbierto = true),
+                onBuilder: () =>
+                    _abrirPagina('webapp/builder/builder.html'),
                 onAutorizarOtra: _autorizarOtra,
                 onDetener: _detener,
                 onCambiarImg: () => _cambiarImg(!_bloqImg),

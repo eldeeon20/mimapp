@@ -10,7 +10,11 @@ class HomeHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // top:false: las tarjetas arrancan arriba del todo y la app usa
+    // TODA la pantalla incluida la zona de la cámara (el fondo gradiente
+    // ya pinta completo detrás).
     return SafeArea(
+      top: false,
       bottom: false,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 18, 16, 0),

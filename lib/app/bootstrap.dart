@@ -54,12 +54,14 @@ Future<void> initApp() async {
   await StatusNotifier.instance.init();
 }
 
-/// Pantalla completa inmersiva: sin barra de estado (sin hora/batería)
-/// y el contenido cubre también la zona del notch/punch-hole
-/// (el modo cutout SHORT_EDGES se configura en MainActivity.kt).
+/// Pantalla completa edge-to-edge: la app dibuja DETRÁS de la barra de
+/// estado y la de navegación (transparentes) y cubre también la zona del
+/// notch/punch-hole (el modo cutout SHORT_EDGES se configura en
+/// MainActivity.kt). El inmersivo anterior ocultaba las barras pero los
+/// SafeArea seguían reservando su altura y quedaba franja sin cubrir.
 Future<void> _initSystemUi() async {
   try {
-    await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
       statusBarIconBrightness: Brightness.light,

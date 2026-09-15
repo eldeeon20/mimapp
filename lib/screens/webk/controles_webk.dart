@@ -12,6 +12,7 @@ class ControlesWebk extends StatelessWidget {
   final bool bloqCookies3ros;
   final VoidCallback onIniciar;
   final VoidCallback onPaginas;
+  final VoidCallback onBuilder;
   final VoidCallback onAutorizarOtra;
   final VoidCallback onDetener;
   final VoidCallback onCambiarImg;
@@ -29,6 +30,7 @@ class ControlesWebk extends StatelessWidget {
     required this.bloqCookies3ros,
     required this.onIniciar,
     required this.onPaginas,
+    required this.onBuilder,
     required this.onAutorizarOtra,
     required this.onDetener,
     required this.onCambiarImg,
@@ -83,6 +85,12 @@ class ControlesWebk extends StatelessWidget {
                     (!corriendo || !indiceListo) ? null : onPaginas,
                 icon: const Icon(Icons.menu_rounded, size: 16),
                 label: const Text('Páginas', style: _chico),
+              ),
+              FilledButton.tonalIcon(
+                onPressed:
+                    (!corriendo || !indiceListo) ? null : onBuilder,
+                icon: const Icon(Icons.build_rounded, size: 16),
+                label: const Text('Builder', style: _chico),
               ),
               OutlinedButton.icon(
                 onPressed: corriendo ? onAutorizarOtra : null,
