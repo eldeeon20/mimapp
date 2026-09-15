@@ -30,11 +30,10 @@ class RegistroPuentes {
   /// Cierra los conectores que guardan algo (al detener/salir).
   void cerrarTodos() {
     for (final c in _todos) {
-      if (c is WebkCerrable) {
-        try {
-          c.cerrar();
-        } catch (_) {}
-      }
+      if (c is! WebkCerrable) continue;
+      try {
+        (c as WebkCerrable).cerrar();
+      } catch (_) {}
     }
   }
 }

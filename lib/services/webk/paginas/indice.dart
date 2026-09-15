@@ -31,6 +31,12 @@ typedef WebkResolvedor = Future<WebkPagina?> Function(String ruta);
 class WebkIndex {
   final _paginas = <String, WebkPagina>{};
 
+  /// Fallback a demanda: si la ruta no está registrada, se pide acá
+  /// (la pantalla lo conecta al asset `lib/services/webk/<ruta>`).
+  /// Así las webapps parten su código en N archivos sin listarlos en Dart:
+  /// solo los puntos de entrada se registran, el resto llega solo.
+  Future<String?> Function(String ruta)? cargaAsset;
+
   void registrar(String nombre, Uint8List bytes) {
     final n = _normalizar(nombre);
     _paginas[n] = WebkPagina(
@@ -46,11 +52,21 @@ class WebkIndex {
   List<String> get paginas => _paginas.keys.toList()..sort();
 
   /// Resuelve una ruta ('/hola.html' o 'hola.html'; '' → hola.html).
+  /// Si no está registrada, prueba [cargaAsset] una vez y la cachea.
   /// null = no existe o no pasó verificación.
   Future<WebkPagina?> resolver(String ruta) async {
     var nombre = _normalizar(ruta);
     if (nombre.isEmpty) nombre = 'hola.html';
-    final p = _paginas[nombre];
+    var p = _paginas[nombre];
+    if (p == null && cargaAsset != null && !nombre.contains('..')) {
+      try {
+        final texto = await cargaAsset!(nombre);
+        if (texto != null) {
+          registrarTexto(nombre, texto);
+          p = _paginas[nombre];
+        }
+      } catch (_) {}
+    }
     if (p == null) return null;
     if (!bienFormada(p)) return null;
     if (!await verificarContenido(p)) return null;

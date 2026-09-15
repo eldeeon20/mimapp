@@ -239,6 +239,22 @@ class CajaSql {
     }
   }
 
+  /// Primera fila que cumple [donde] (donde='nombre = ?', args=[...]).
+  /// null si no hay. Para traer UN dato grande sin listar toda la tabla.
+  Map<String, Object?>? uno(
+      String tabla, String donde, [List<Object?> args = const []]) {
+    _exigirId('tabla', tabla);
+    try {
+      final rs =
+          _base.select('SELECT * FROM "$tabla" WHERE $donde LIMIT 1;', args);
+      if (rs.isEmpty) return null;
+      final f = rs.first;
+      return {for (final c in rs.columnNames) c: f[c]};
+    } catch (e) {
+      throw StateError('CajaSql: no lee en "$tabla": $e');
+    }
+  }
+
   /// Cuenta filas (con filtro opcional: donde='nombre = ?', args=[...]).
   int contar(String tabla, {String? donde, List<Object?> args = const []}) {
     _exigirId('tabla', tabla);

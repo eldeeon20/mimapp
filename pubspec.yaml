@@ -94,8 +94,9 @@ flutter:
   uses-material-design: true
 
   assets:
-    # Toda la carpeta: las páginas nuevas entran solas, sin tocar acá.
+    # Carpetas enteras: páginas y apps nuevas entran solas, sin tocar acá.
     - lib/services/webk/paginas/
+    - lib/services/webk/webapp/
 
   # To add assets to your application, add an assets section, like this:
   # assets:

@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Web Builder</title>
+</head>
+<body>
+
+<div id="app">
+
+  <!-- COMPONENTES -->
+
+  <aside id="tools">
+
+    <h3>Componentes</h3>
+
+    <div class="tool" draggable="true" data-type="text">
+      📝 Texto
+    </div>
+
+    <div class="tool" draggable="true" data-type="button">
+      🔘 Botón
+    </div>
+
+    <div class="tool" draggable="true" data-type="image">
+      🖼 Imagen
+    </div>
+
+    <div class="tool" draggable="true" data-type="box">
+      📦 Contenedor
+    </div>
+
+    <div class="tool" draggable="true" data-type="title">
+      🔤 Título
+    </div>
+
+    <h3>Mis webs</h3>
+
+    <div id="listaSitios">tocá «Sitios»…</div>
+
+    <h3>ZIP en SQL</h3>
+
+    <div id="listaZips">tocá «SQL 📂»…</div>
+
+    <h3>Páginas en DB</h3>
+
+    <div id="listaPags">tocá «BD 📂»…</div>
+
+  </aside>
+
+
+  <!-- EDITOR -->
+
+  <section id="center">
+
+    <div id="bar">
+
+      <button onclick="descargarTriple()">
+        ⬇ Archivos
+      </button>
+
+      <button onclick="bajarZip()">
+        ⬇ ZIP
+      </button>
+
+      <button onclick="guardarEnWebk()">
+        💾 WebK
+      </button>
+
+      <button onclick="verCodigo()">
+        👁 Código
+      </button>
+
+      <button onclick="zipGuardarSQL()">
+        SQL 💾
+      </button>
+
+      <button onclick="zipListarSQL()">
+        SQL 📂
+      </button>
+
+      <button onclick="bdGuardar()">
+        BD 💾
+      </button>
+
+      <button onclick="bdListar()">
+        BD 📂
+      </button>
+
+      <button onclick="misWebs()">
+        📂 Sitios
+      </button>
+
+      <button onclick="clearPage()">
+        🗑 Limpiar
+      </button>
+
+      <button onclick="previewWeb()">
+        ▶ Preview
+      </button>
+
+      <span id="status">
+        cargando…
+      </span>
+
+    </div>
+
+
+    <div id="canvas">
+
+      <div id="page">
+
+        <div class="element" data-type="title">
+          <h1>Mi página</h1>
+        </div>
+
+        <div class="element" data-type="text">
+          <p>Arrastrá componentes desde la izquierda.</p>
+        </div>
+
+      </div>
+
+    </div>
+
+  </section>
+
+
+  <!-- PROPIEDADES -->
+
+  <aside id="properties">
+
+    <h3>Propiedades</h3>
+
+    <div id="propertyContent">
+      Seleccioná un elemento.
+    </div>
+
+  </aside>
+
+</div>
+
+
+<!-- CÓDIGO SEPARADO -->
+
+<div id="panelCodigo">
+  <div id="marcoCodigo">
+    <div><button onclick="cerrarCodigo()">✕ Cerrar código</button></div>
+    <label>index.html</label>
+    <textarea id="campoHtml" readonly></textarea>
+    <label>style.css</label>
+    <textarea id="campoCss" readonly></textarea>
+    <label>script.js</label>
+    <textarea id="campoJs" readonly></textarea>
+  </div>
+</div>
+
+
+<!-- PREVIEW LOCAL -->
+
+<div id="vistaPrevia">
+  <div id="marcoPrevia">
+    <div><button onclick="cerrarPrevia()">✕ Cerrar preview</button></div>
+    <iframe id="marcoWeb" title="preview" sandbox="allow-scripts"></iframe>
+  </div>
+</div>
+
+
+<script>
+// Cargador WebK: el css/js de la app se piden con pase (puente),
+// igual que las páginas incrustadas. Sin llave no sale nada.
+(function(){
+  var BASE = 'webapp/builder';
+  var estado = document.getElementById('status');
+  function listo(t){ if(estado) estado.textContent = t; }
+  async function pasePara(pagina){
+    const r = await window.flutter_inappwebview.callHandler(
+      'webk', {cmd: 'pase', pagina: pagina, llave: window.WEBK_LLAVE || ''});
+    return (typeof r === 'string') ? r : '';
+  }
+  async function textoDe(pagina){
+    const p = await pasePara(pagina);
+    if(!p || p === 'DENEGADO') throw new Error('DENEGADO ' + pagina);
+    return fetch('/' + pagina + '?pase=' + encodeURIComponent(p))
+      .then(function(r){ if(!r.ok) throw new Error('HTTP ' + r.status); return r.text(); });
+  }
+  async function cargar(pagina, tipo){
+    const t = await textoDe(pagina);
+    var el = document.createElement(tipo === 'css' ? 'style' : 'script');
+    el.textContent = t;
+    (tipo === 'css' ? document.head : document.body).appendChild(el);
+  }
+  async function arrancar(){
+    if(!window.flutter_inappwebview){ listo('sin puente (página fuera de WebK)'); return; }
+    for(var i = 0; i < 40 && !window.WEBK_LLAVE; i++){
+      await new Promise(function(r){ setTimeout(r, 200); });
+    }
+    // js partido en archivos chicos: la lista vive en UN solo lugar
+    // (js/partes.json); el server los trae a demanda sin listarlos en Dart.
+    try{
+      await cargar(BASE + '/builder.css', 'css');
+      const PARTES = JSON.parse(await textoDe(BASE + '/js/partes.json'));
+      for(var j = 0; j < PARTES.length; j++){
+        await cargar(BASE + '/js/' + PARTES[j], 'js');
+      }
+      listo('Arrastrá un componente');
+      misWebs();
+    }catch(e){ listo('error: ' + e); }
+  }
+  arrancar();
+})();
+</script>
+
+</body>
+</html>

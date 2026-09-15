@@ -5,6 +5,7 @@
 // - paginas/  → el índice + las páginas como archivos (*.html).
 export 'paginas/indice.dart';
 export 'puentes/agenda.dart';
+export 'puentes/builder.dart';
 export 'puentes/nucleo.dart';
 export 'puentes/puente.dart';
 export 'puentes/registro.dart';

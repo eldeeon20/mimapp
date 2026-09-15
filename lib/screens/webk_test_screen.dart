@@ -71,6 +71,11 @@ class _WebkTestScreenState extends State<WebkTestScreen> {
     ..registrar(PuenteAgenda(
       leerLlave: () => _llaveSesion,
       log: _logPuente,
+    ))
+    ..registrar(PuenteBuilder(
+      indice: _indice,
+      leerLlave: () => _llaveSesion,
+      log: _logPuente,
     ));
 
   void _logPuente(String s) {
@@ -139,19 +144,39 @@ class _WebkTestScreenState extends State<WebkTestScreen> {
     'agenda-sql.html',
   ];
 
+  /// Entradas de webapps: cada app su carpeta en webapp/.
+  /// SOLO los puntos de entrada (para el menú); el resto de archivos
+  /// (css/js/json) el servidor los trae a demanda vía [cargaAsset].
+  static const _entradasWebapp = [
+    'webapp/builder/builder.html',
+  ];
+
   Future<void> _cargarIndice() async {
+    // Fallback a demanda: cualquier ruta bajo webk/ se sirve del asset
+    // sin listarla acá (con reto+ping+pase igual que las registradas).
+    _indice.cargaAsset =
+        (ruta) => rootBundle.loadString('lib/services/webk/$ruta');
     var ok = 0;
-    for (final n in _archivos) {
+    var total = 0;
+    Future<void> cargarUno(String asset, String nombre) async {
+      total++;
       try {
-        final texto = await rootBundle
-            .loadString('lib/services/webk/paginas/$n');
-        _indice.registrarTexto(n, texto);
+        final texto =
+            await rootBundle.loadString('lib/services/webk/$asset');
+        _indice.registrarTexto(nombre, texto);
         ok++;
       } catch (e) {
-        _add('✗ asset $n no cargó ($e)');
+        _add('✗ asset $asset no cargó ($e)');
       }
     }
-    _add('✓ índice: $ok/${_archivos.length} páginas (reto+ping antes de servir)');
+
+    for (final n in _archivos) {
+      await cargarUno('paginas/$n', n);
+    }
+    for (final n in _entradasWebapp) {
+      await cargarUno(n, n);
+    }
+    _add('✓ índice: $ok/$total páginas (reto+ping antes de servir)');
     if (mounted) setState(() => _indiceListo = ok > 0);
   }
 
@@ -329,7 +354,9 @@ class _WebkTestScreenState extends State<WebkTestScreen> {
               onSalir: () => setState(() => _pantallaCompleta = false)),
         if (_menuAbierto)
           MenuPaginas(
-            paginas: _indice.paginas,
+            paginas: _indice.paginas
+                .where((p) => p.endsWith('.html'))
+                .toList(),
             historial: _historial,
             onElegir: _abrirPagina,
             onCerrar: () => setState(() => _menuAbierto = false),
