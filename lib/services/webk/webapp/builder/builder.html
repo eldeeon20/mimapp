@@ -151,13 +151,14 @@
 
 <div id="panelCodigo">
   <div id="marcoCodigo">
-    <div><button onclick="cerrarCodigo()">✕ Cerrar código</button></div>
-    <label>index.html</label>
+    <div><button onclick="cerrarCodigo()">✕ Cerrar código</button>
+    <button onclick="aplicarCodigo()">✓ Aplicar JS/CSS</button></div>
+    <label>index.html (lectura: lo dibuja el lienzo)</label>
     <textarea id="campoHtml" readonly></textarea>
-    <label>style.css</label>
-    <textarea id="campoCss" readonly></textarea>
-    <label>script.js</label>
-    <textarea id="campoJs" readonly></textarea>
+    <label>style.css (editable: script/style van acá, no al lienzo)</label>
+    <textarea id="campoCss"></textarea>
+    <label>script.js (editable)</label>
+    <textarea id="campoJs"></textarea>
   </div>
 </div>
 

@@ -17,9 +17,10 @@ previsualizás y guardás la web como **3 archivos separados**
 - **⬇ ZIP**: empaqueta los 3 en `mi-web.zip` (writer propio, sin
   librerías ni internet: método store + CRC32 a mano).
 - **📂 Cargar**: mete un ZIP de vuelta al lienzo para seguir editando
-  (lector propio en `js/cargar.js`, solo store). El css/js del zip pasan
-  a ser los del sitio (próximo guardado los usa); 🗑 vuelve al base.
-  Lo no editable se filtra con `analizarElemento()` (ver abajo).
+  (lector propio en `js/cargar.js`, solo store). Cada nodo cargado se
+  envuelve y queda seleccionable/borrable como uno creado acá; el css/js
+  del zip pasan a ser los del sitio (próximo guardado los usa); 🗑 vuelve
+  al base. Las partes se rutean por categoría (ver abajo).
 - **💾 WebK**: guarda el sitio triple en `webapp/sitio/<nombre>/`
   (index con cargador + css + js) y lo abre ahí mismo.
 - **📂 Sitios**: lista lo guardado en el índice y lo abre.
@@ -115,11 +116,21 @@ y atender `mi_cmd` en un conector (`puentes/`, ver `webk.md`).
   escribir LZ77+Huffman a mano (~300 líneas) o vendorizar librería.
   El lector tampoco infla: un ZIP deflateado avisa y no entra
   (los que salen de SQL 💾 salen en store y entran).
-- **Cargar filtra lo no editable**: `analizarElemento()` saltea
-  `SCRIPT/STYLE/LINK/META/HEAD/TITLE/NOSCRIPT/TEMPLATE` y lo que esté
-  dentro de ellos; además se les arrancan los descendientes de ese tipo.
-  Una web externa entra como contenido visible editable; su lógica
-  original no (a propósito: el js del sitio lo pone el editor).
+- **Cargar rutea por categoría** (`categoriaDe()` en `js/cargar.js`,
+  no hay un simple editable/no-editable):
+  - `noVisual = [SCRIPT, STYLE, HEAD]` → fuera del lienzo. El SCRIPT
+    **sí se edita**: el inline cae en el editor de código JS
+    (`inyectarCodigo()` → `SITIO_JS`); el STYLE en el de CSS.
+  - `editableAttributes = [LINK, META, TITLE]` → distintivo en el lienzo
+    (el nodo real oculto + etiqueta `data-editor`): LINK edita `href`,
+    META edita atributos, TITLE edita texto. Al guardar sale el
+    distintivo y queda solo el nodo limpio.
+  - `special = [NOSCRIPT, TEMPLATE]` → entra su contenido extraído,
+    editable como caja.
+  - Resto → tal cual. Lo anidado no-visual se arranca.
+- **Editores de código**: el panel 👁 Código trae los 3 campos; el JS y
+  el CSS son editables + botón ✓ Aplicar (quedan en `SITIO_JS`/`SITIO_CSS`
+  y los usa el próximo triple/ZIP/SQL/BD/preview). El html es lectura.
 - **ZIP sin cifrado**: el `.zip` descargado lo abre cualquiera. Lo
   cifrado son las db (`sitios`, `paginas`); el transporte WebK
   (reto+ping+pase+llave).
