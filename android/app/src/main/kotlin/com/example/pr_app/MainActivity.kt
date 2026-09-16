@@ -11,12 +11,47 @@ import android.view.WindowManager
 import com.ryanheise.audioservice.AudioServiceActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
-import java.text.SimpleDateFormat
-import java.util.Locale
-import java.util.TimeZone
 
 class MainActivity : AudioServiceActivity() {
     private val CANAL = "pr_app/nativo"
+
+    /// Último estado empujado por `:ping` (ver ACCION_ESTADO).
+    private val estadoCache = mutableMapOf<String, Any>()
+    private var estadoReceiverOn = false
+
+    private fun escucharEstado() {
+        if (estadoReceiverOn) return
+        estadoReceiverOn = true
+        try {
+            val r = object : android.content.BroadcastReceiver() {
+                override fun onReceive(
+                    c: android.content.Context?,
+                    i: Intent?,
+                ) {
+                    try {
+                        if (i == null) return
+                        estadoCache["vivo"] = i.getBooleanExtra("vivo", false)
+                        estadoCache["endpoint"] = i.getStringExtra("endpoint") ?: ""
+                        estadoCache["ultimoEndpoint"] =
+                            i.getStringExtra("ultimoEndpoint") ?: ""
+                        estadoCache["inicioMs"] = i.getLongExtra("inicioMs", 0L)
+                        estadoCache["pingsOk"] = i.getIntExtra("pingsOk", 0)
+                        estadoCache["ultimoError"] =
+                            i.getStringExtra("ultimoError") ?: ""
+                        estadoCache["ultimaParada"] =
+                            i.getStringExtra("ultimaParada") ?: ""
+                    } catch (_: Throwable) {}
+                }
+            }
+            val f = android.content.IntentFilter(ServicioMimapp.ACCION_ESTADO)
+            if (Build.VERSION.SDK_INT >= 33) {
+                registerReceiver(r, f, android.content.Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                @Suppress("DEPRECATION")
+                registerReceiver(r, f)
+            }
+        } catch (_: Throwable) {}
+    }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // Dibujar también en la zona del notch/punch-hole (evita franja negra)
@@ -31,6 +66,7 @@ class MainActivity : AudioServiceActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        escucharEstado()
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger, CANAL
         ).setMethodCallHandler { llamada, res ->
@@ -53,38 +89,42 @@ class MainActivity : AudioServiceActivity() {
                     res.success(true)
                 }
                 "startPing" -> {
+                    // expiryMs = epoch (Dart manda UTC: sin parseo ni zonas).
                     val m = (llamada.arguments as? Map<*, *>) ?: emptyMap<Any, Any>()
-                    val expiryIso = m["expiryIso"] as? String ?: ""
-                    var expiryMs = 0L
-                    try {
-                        val fmt = SimpleDateFormat(
-                            "yyyy-MM-dd'T'HH:mm:ss", Locale.US
-                        ).apply { timeZone = TimeZone.getTimeZone("UTC") }
-                        // Dart manda con milisegundos (00.000) y a veces con
-                        // zona (+00:00/Z): se pelan o el parse rompe y el
-                        // vencimiento queda en 0 (token jamás se refresca).
-                        val limpio = expiryIso.substringBefore("+")
-                            .substringBefore("Z").substringBefore(".")
-                        fmt.parse(limpio)?.let { expiryMs = it.time }
-                    } catch (_: Exception) {}
                     val i = Intent(this, ServicioMimapp::class.java)
                         .setAction(ServicioMimapp.ACCION_START_PING)
                         .putExtra("endpoint", m["endpoint"] as? String ?: "")
                         .putExtra("accessToken", m["accessToken"] as? String ?: "")
                         .putExtra("refreshToken", m["refreshToken"] as? String ?: "")
-                        .putExtra("expiryMs", expiryMs)
+                        .putExtra("expiryMs", (m["expiryMs"] as? Number)?.toLong() ?: 0L)
                         .putExtra("clientId", m["clientId"] as? String ?: "")
                         .putExtra("clientSecret", m["clientSecret"] as? String ?: "")
                     arrancar(null, i)
                     res.success(true)
                 }
-                "stopPing" -> {
-                    arrancar(ServicioMimapp.ACCION_STOP_PING, null)
+                "updateToken" -> {
+                    // Token fresco de la app: pisa sin resetear el loop.
+                    val m = (llamada.arguments as? Map<*, *>) ?: emptyMap<Any, Any>()
+                    val i = Intent(this, ServicioMimapp::class.java)
+                        .setAction(ServicioMimapp.ACCION_UPDATE_TOKEN)
+                        .putExtra("accessToken", m["accessToken"] as? String ?: "")
+                        .putExtra("refreshToken", m["refreshToken"] as? String ?: "")
+                        .putExtra("expiryMs", (m["expiryMs"] as? Number)?.toLong() ?: 0L)
+                    arrancar(null, i)
                     res.success(true)
                 }
                 "estado" -> {
-                    val e = ServicioMimapp.estado()
-                    res.success(e)
+                    // El servicio vive en `:ping` (otro proceso): los
+                    // statics locales están muertos. Se devuelve el
+                    // último broadcast recibido y se pide uno fresco
+                    // (llega solo; el próximo tick lo trae).
+                    try {
+                        sendBroadcast(
+                            Intent(ServicioMimapp.ACCION_PEDIR_ESTADO)
+                                .setPackage(packageName)
+                        )
+                    } catch (_: Throwable) {}
+                    res.success(HashMap(estadoCache))
                 }
                 // Check de memoria/almacenamiento (Configuración →
                 // Almacén): StatFs del almacenamiento interno + RAM del

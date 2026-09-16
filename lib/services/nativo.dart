@@ -36,11 +36,13 @@ class Nativo {
     } catch (_) {}
   }
 
+  /// Crea el servicio `:ping` (proceso independiente) con el bundle.
+  /// [expiryMs] = epoch en UTC (sin strings ni zonas).
   static Future<void> startPing({
     required String endpoint,
     required String accessToken,
     required String refreshToken,
-    required String expiryIso,
+    required int expiryMs,
     required String clientId,
     required String clientSecret,
   }) async {
@@ -49,16 +51,26 @@ class Nativo {
         'endpoint': endpoint,
         'accessToken': accessToken,
         'refreshToken': refreshToken,
-        'expiryIso': expiryIso,
+        'expiryMs': expiryMs,
         'clientId': clientId,
         'clientSecret': clientSecret,
       });
     } catch (_) {}
   }
 
-  static Future<void> stopPing() async {
+  /// Token fresco empujado al servicio (pisa sin resetear el loop).
+  /// El servicio lo ignora si no está pineando.
+  static Future<void> updateToken({
+    required String accessToken,
+    required String refreshToken,
+    required int expiryMs,
+  }) async {
     try {
-      await _canal.invokeMethod('stopPing');
+      await _canal.invokeMethod('updateToken', {
+        'accessToken': accessToken,
+        'refreshToken': refreshToken,
+        'expiryMs': expiryMs,
+      });
     } catch (_) {}
   }
 
@@ -82,7 +94,9 @@ class Nativo {
   }
 
   /// Espejo de lo que pinea el nativo (para la 777 de Dart).
-  /// Mismo proceso: el canal lee el companion en vivo.
+  /// El servicio vive en `:ping` (otro proceso): llega por broadcast
+  /// (último push + pedido fresco). Incluye `ultimoEndpoint` para
+  /// desasignar la celda muerta.
   static Future<Map<String, dynamic>> estado() async {
     try {
       final r = await _canal.invokeMethod('estado');

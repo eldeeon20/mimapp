@@ -143,12 +143,29 @@ class ColabAuth {
     _tokens = ColabTokens(
       accessToken: data['access_token'],
       refreshToken: data['refresh_token'],
+      // UTC: el servicio nativo recibe epoch, sin zonas que malinterpretar.
       expiry: DateTime.now()
+          .toUtc()
           .add(Duration(seconds: data['expires_in'] ?? 3600)),
       scopes: (data['scope'] as String?)?.split(' ') ?? [],
     );
     await _saveTokens();
+    _avisarCambio();
     return _tokens!;
+  }
+
+  /// Gancho: tras cada refresh exitoso se avisa para empujar el token
+  /// fresco al servicio nativo (lo pone ColabService; acá no se importa
+  /// nada de services para no invertir capas).
+  static Future<void> Function(ColabTokens t)? onTokensChanged;
+
+  void _avisarCambio() {
+    final t = _tokens;
+    final cb = onTokensChanged;
+    if (t == null || cb == null) return;
+    try {
+      cb(t);
+    } catch (_) {}
   }
 
   /// Refresca el access_token usando el refresh_token.
@@ -174,10 +191,12 @@ class ColabAuth {
       accessToken: data['access_token'],
       refreshToken: _tokens!.refreshToken,
       expiry: DateTime.now()
+          .toUtc()
           .add(Duration(seconds: data['expires_in'] ?? 3600)),
       scopes: _tokens!.scopes,
     );
     await _saveTokens();
+    _avisarCambio();
     return _tokens!;
   }
 

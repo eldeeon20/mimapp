@@ -64,25 +64,45 @@ class _ColabDialogBodyState extends State<_ColabDialogBody> {
     });
     try {
       await widget.auth.signInInteractive();
+      if (!mounted) return;
       setState(() {});
       await _loadSessions();
     } catch (e) {
-      setState(() => _error = 'Error: $e');
+      if (mounted) setState(() => _error = 'Error: $e');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
 
   Future<void> _loadSessions() async {
-    setState(() => _loading = true);
+    if (mounted) setState(() => _loading = true);
     try {
       _sessions = await widget.sessions.list();
       ColabService().activeSessionCount = _sessions.length;
       StatusNotifier.instance.refresh();
       // Listar no arranca nada (así está bien): el auto-inicio es solo
       // al CREAR la celda (ver _createSession).
+      // Servicio muerto = celda que se quita sola: si el nativo murió
+      // pineando un endpoint que sigue listado, se desasigna solo.
+      try {
+        await ColabService().refrescarEspejo();
+        final muerto = ColabService().espejoUltimoEndpoint;
+        if (!ColabService().pingActivo &&
+            muerto.isNotEmpty &&
+            _sessions.any((s) => s.endpoint == muerto)) {
+          await widget.sessions.unassign(muerto);
+          _sessions = await widget.sessions.list();
+          ColabService().activeSessionCount = _sessions.length;
+          if (mounted) {
+            setState(() {
+              _error = 'Celda muerta (${ColabService().espejoError}): '
+                  'se quitó sola. Solo queda la X del servicio.';
+            });
+          }
+        }
+      } catch (_) {}
     } catch (e) {
-      setState(() => _error = 'Error cargando sesiones: $e');
+      if (mounted) setState(() => _error = 'Error cargando sesiones: $e');
     }
     if (mounted) setState(() => _loading = false);
   }
@@ -305,7 +325,7 @@ class _ColabDialogBodyState extends State<_ColabDialogBody> {
                   TextButton(
                     onPressed: () async {
                       await widget.auth.logout();
-                      setState(() {});
+                      if (mounted) setState(() {});
                     },
                     child: const Text('Salir'),
                   ),
@@ -374,21 +394,20 @@ class _ColabDialogBodyState extends State<_ColabDialogBody> {
                                 case 'tareas':
                                   _openTasks(s);
                                   break;
-                                case 'keepalive':
-                                  await ColabService().startKeepAlive(s.endpoint);
-                                  StatusNotifier.instance.refresh();
-                                  setState(() {});
-                                  break;
                                 case 'unassign':
-                                  setState(() => _loading = true);
+                                  if (mounted) {
+                                    setState(() => _loading = true);
+                                  }
                                   try {
                                     await widget.sessions.unassign(s.endpoint);
                                     await _loadSessions();
                                   } catch (e) {
-                                    setState(() {
-                                      _error = 'Error soltando: $e';
-                                      _loading = false;
-                                    });
+                                    if (mounted) {
+                                      setState(() {
+                                        _error = 'Error soltando: $e';
+                                        _loading = false;
+                                      });
+                                    }
                                   }
                                   break;
                               }
@@ -407,13 +426,6 @@ class _ColabDialogBodyState extends State<_ColabDialogBody> {
                                     Icon(Icons.playlist_add, size: 18),
                                     SizedBox(width: 8),
                                     Text('Tareas'),
-                                  ])),
-                              PopupMenuItem(
-                                  value: 'keepalive',
-                                  child: Row(children: [
-                                    Icon(Icons.timer, size: 18),
-                                    SizedBox(width: 8),
-                                    Text('Keep-alive'),
                                   ])),
                               PopupMenuItem(
                                   value: 'unassign',
@@ -454,16 +466,9 @@ class _ColabDialogBodyState extends State<_ColabDialogBody> {
                       const SizedBox(width: 6),
                       Expanded(
                           child: Text(
-                              'Keep-alive (servicio): ${ColabService().activeEndpoint} '
-                              '(${ColabKeepAlive.fmtDur(ColabService().espejoElapsed)})')),
-                      TextButton(
-                        onPressed: () async {
-                          await ColabService().stopKeepAlive();
-                          StatusNotifier.instance.refresh();
-                          setState(() {});
-                        },
-                        child: const Text('Detener'),
-                      ),
+                              'Servicio `:ping` independiente: ${ColabService().activeEndpoint} '
+                              '(${ColabKeepAlive.fmtDur(ColabService().espejoElapsed)}). '
+                              'Única salida: la X de la notificación.')),
                     ],
                   ),
                 ),

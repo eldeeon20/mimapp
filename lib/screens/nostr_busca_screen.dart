@@ -45,7 +45,9 @@ class _NostrBuscaScreenState extends State<NostrBuscaScreen> {
   Future<void> _run() async {
     if (_corriendo) return;
     final q = _qCtrl.text.trim();
-    if (q.isEmpty) {
+    // Modo Relés: vacío trae TODOS los nuevos (solo lista relés).
+    // Modos 0/1 sí exigen texto.
+    if (q.isEmpty && _modo != 2) {
       setState(() => _estado = 'escribí un nombre o pegá un npub');
       return;
     }
@@ -65,9 +67,12 @@ class _NostrBuscaScreenState extends State<NostrBuscaScreen> {
     });
     try {
       if (_modo == 2) {
-        // URL directa → se revisa ese. Texto → directorio filtrado,
-        // EXCLUYENDO los que ya tengo en el editor.
-        final esUrl = q.contains('://') || q.contains('.');
+        // URL directa (con esquema) → se revisa ese. Texto (aunque
+        // tenga punto) → directorio filtrado, EXCLUYENDO los del editor.
+        final ql = q.toLowerCase();
+        final esUrl = ql.startsWith('wss://') ||
+            ql.startsWith('ws://') ||
+            q.contains('://');
         if (esUrl) {
           final r = await RelayInfo.revisar(q);
           setState(() {
@@ -403,7 +408,7 @@ class _NostrBuscaScreenState extends State<NostrBuscaScreen> {
                 controller: _qCtrl,
                 decoration: InputDecoration(
                   hintText: _modo == 2
-                      ? 'pegá un relay (wss://…) o tocá uno abajo'
+                      ? 'vacío = trae nuevos · texto filtra · o pegá wss://…'
                       : _modo == 1
                           ? 'buscar posts en toda la red…'
                           : 'nombre… o pegá un npub / nprofile / hex64',

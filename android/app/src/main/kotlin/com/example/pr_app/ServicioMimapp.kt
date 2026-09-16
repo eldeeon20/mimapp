@@ -1,6 +1,5 @@
 package com.example.pr_app
 
-import android.app.AlarmManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -9,27 +8,37 @@ import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
-import android.os.Handler
 import android.os.IBinder
-import android.os.Looper
-import android.os.SystemClock
-import androidx.core.app.NotificationCompat
+import java.net.ConnectException
 import java.net.HttpURLConnection
 import java.net.SocketTimeoutException
 import java.net.URL
 import java.net.URLEncoder
+import java.net.UnknownHostException
+import javax.net.ssl.SSLException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelChildren
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 
-/// Servicio en primer plano 100% nativo de mimapp (sin
-/// flutter_background_service para 888/777):
-/// - 888 "Secure App" foreground con X = DETIENE EL SERVICIO (corta el
-///   ping, baja la 888 y hace stopSelf). La app SIGUE viva.
-/// - El ping a Colab vive acá (HTTP GET /tun/m/<ep>/keep-alive/ cada 60s,
-///   igual que ColabPingMotor/ColabKeepAlive en Dart y que keep_alive del
-///   google-colab-cli). Si la UI se cierra, el ping continúa.
-/// - La 777 (panel Estado) la postea Dart (StatusNotifier): acá NO se
-///   postea 777. "Salir" de la 777 cierra la app + baja la 777 (lo hace
-///   Dart); el servicio sigue.
+/// Servicio de ping a Colab 100% nativo e independiente (estilo
+/// PingService): vive en proceso `:ping`, NO depende de Flutter ni de
+/// la Activity una vez iniciado. Barrer la app no lo toca.
+///
+/// - Crear celda → `START_PING` con el bundle (endpoint+tokens): guarda
+///   en prefs plano, prende frente 888 y pineea cada 60s en coroutine IO.
+/// - Bundle en prefs plano `colab_ping`: el restart STICKY lo lee y
+///   retoma solo. Sin bundle no hay nada que hacer → se detiene.
+/// - `UPDATE_TOKEN`: la app empuja token fresco (pisa sin resetear).
+/// - Única salida: la X de la 888 (`SALIR_TOTAL`/`STOP`): borra bundle,
+///   cancela loop y `stopSelf`. No hay botón detener en la app.
+/// - Servicio muerto = celda que se quita sola: al parar por
+///   reauth/404/24h se borra el bundle y se detiene; `ultimoEndpoint`
+///   queda para que la UI desasigne la celda.
 class ServicioMimapp : Service() {
 
     companion object {
@@ -41,8 +50,17 @@ class ServicioMimapp : Service() {
         const val ACCION_SALIR_TOTAL = "pr_app.SALIR_TOTAL"
         const val ACCION_CERRAR_STATUS = "pr_app.CERRAR_STATUS"
         const val ACCION_START_PING = "pr_app.START_PING"
-        const val ACCION_STOP_PING = "pr_app.STOP_PING"
+        const val ACCION_UPDATE_TOKEN = "pr_app.UPDATE_TOKEN"
         const val ACCION_STOP = "pr_app.STOP"
+        /// La UI vive en otro proceso (`:ping`): el estado viaja por
+        /// broadcast. La UI pide con PEDIR_ESTADO; el servicio responde
+        /// y además empuja solo en cada tick/cambio con ESTADO.
+        const val ACCION_PEDIR_ESTADO = "pr_app.PEDIR_ESTADO"
+        const val ACCION_ESTADO = "pr_app.ESTADO"
+
+        const val PREFS = "colab_ping"
+        const val INTERVALO_MS = 60_000L
+        const val LIMITE_24H_MS = 24L * 3600L * 1000L
 
         @Volatile var endpoint: String = ""
         @Volatile var accessToken: String = ""
@@ -54,20 +72,16 @@ class ServicioMimapp : Service() {
         @Volatile var pingsOk: Int = 0
         @Volatile var consec4xx: Int = 0
         @Volatile var vivo: Boolean = false
-        /// Último error corto del ping (se muestra en la 888/777).
-        /// Vacío = todo bien. Sin esto el "ping 0" era un misterio.
         @Volatile var ultimoError: String = ""
-
-        /// Por qué paró la última vez (persiste en prefs: sobrevive a la
-        /// muerte del proceso para diagnosticar quién lo mató).
         @Volatile var ultimaParada: String = ""
-
-        /// Viene de la alarma post-barrido (se muestra una vez en la 888).
-        @Volatile var revivido: Boolean = false
+        /// Endpoint que pineaba al parar (no se borra en pararPing para
+        /// que la UI desasigne la celda muerta; se limpia en X/arranque).
+        @Volatile var ultimoEndpoint: String = ""
 
         fun estado(): Map<String, Any> = mapOf(
             "vivo" to vivo,
             "endpoint" to endpoint,
+            "ultimoEndpoint" to ultimoEndpoint,
             "inicioMs" to inicioMs,
             "pingsOk" to pingsOk,
             "ultimoError" to ultimoError,
@@ -75,35 +89,57 @@ class ServicioMimapp : Service() {
         )
     }
 
-    private val mano = Handler(Looper.getMainLooper())
-    private var contador = 0
+    private val scope =
+        CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    private val pulso = object : Runnable {
-        override fun run() {
-            contador++
-            actualizar888()
-            mano.postDelayed(this, 5000)
-        }
-    }
-
-    private val pingTick = object : Runnable {
-        override fun run() {
-            hacerPing()
-            mano.postDelayed(this, 60_000)
-        }
-    }
+    private var receptorPedido: android.content.BroadcastReceiver? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
         crearCanal()
+        // Responde pedidos de estado de la UI (otro proceso).
+        try {
+            val r = object : android.content.BroadcastReceiver() {
+                override fun onReceive(
+                    c: android.content.Context?,
+                    i: Intent?,
+                ) {
+                    try { difundirEstado() } catch (_: Throwable) {}
+                }
+            }
+            receptorPedido = r
+            val f = android.content.IntentFilter(ACCION_PEDIR_ESTADO)
+            if (Build.VERSION.SDK_INT >= 33) {
+                registerReceiver(r, f, android.content.Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                @Suppress("DEPRECATION")
+                registerReceiver(r, f)
+            }
+        } catch (_: Throwable) {}
+    }
+
+    /// Empuja el estado a la UI (proceso principal) por broadcast.
+    private fun difundirEstado() {
+        try {
+            val i = Intent(ACCION_ESTADO)
+                .setPackage(packageName)
+                .putExtra("vivo", vivo)
+                .putExtra("endpoint", endpoint)
+                .putExtra("ultimoEndpoint", ultimoEndpoint)
+                .putExtra("inicioMs", inicioMs)
+                .putExtra("pingsOk", pingsOk)
+                .putExtra("ultimoError", ultimoError)
+                .putExtra("ultimaParada", ultimaParada)
+            sendBroadcast(i)
+        } catch (_: Throwable) {}
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACCION_SALIR_TOTAL -> {
-                // X de la 888: detiene el servicio, la app sigue.
+            ACCION_SALIR_TOTAL, ACCION_STOP -> {
+                // X de la 888: única salida. Borra bundle, baja todo.
                 pararServicio()
                 return START_NOT_STICKY
             }
@@ -112,82 +148,107 @@ class ServicioMimapp : Service() {
                 return START_STICKY
             }
             ACCION_START_PING -> {
-                val epExtra = intent.getStringExtra("endpoint") ?: ""
-                if (intent.getBooleanExtra("revivido", false)) {
-                    revivido = true
+                // Bundle nuevo de la app (crear celda): guarda y arranca.
+                if (intent.hasExtra("endpoint")) guardarBundle(intent)
+                if (endpoint.isNotEmpty()) {
+                    empezarPing()
+                } else {
+                    // Sin datos: nada que pinear.
+                    updFrenteSinPing("sin datos de celda")
                 }
-                // Duplicado (alarma de respaldo con el ping ya vivo):
-                // ignorar para no resetear contadores/inicio.
-                if (vivo && epExtra.isNotEmpty() && epExtra == endpoint) {
-                    return START_STICKY
-                }
-                if (epExtra.isNotEmpty()) {
-                    endpoint = epExtra
-                    accessToken = intent.getStringExtra("accessToken") ?: ""
-                    refreshToken = intent.getStringExtra("refreshToken") ?: ""
-                    expiryMs = intent.getLongExtra("expiryMs", 0L)
-                    clientId = intent.getStringExtra("clientId") ?: ""
-                    clientSecret = intent.getStringExtra("clientSecret") ?: ""
-                }
-                // Sin extras (revive STICKY pelado): sin datos no hay ping,
-                // solo frente. La alarma de onTaskRemoved SÍ trae extras.
-                if (endpoint.isNotEmpty()) empezarPing()
                 return START_STICKY
             }
-            ACCION_STOP_PING -> {
-                pararPing("manual")
+            ACCION_UPDATE_TOKEN -> {
+                // Token fresco empujado por la app: pisa sin resetear
+                // contadores, inicio ni loop.
+                if (intent.hasExtra("accessToken")) guardarBundle(intent)
                 return START_STICKY
-            }
-            ACCION_STOP -> {
-                pararServicio()
-                return START_NOT_STICKY
             }
         }
-        // Sin acción (prender manual o revive STICKY sin extras): solo
-        // frente. El servicio NO crea archivos ni guarda nada.
-        arrancarFrente()
-        mano.removeCallbacks(pulso)
-        mano.post(pulso)
-        return START_STICKY
+        // Restart STICKY pelado (el sistema mató `:ping`): retomar del
+        // bundle guardado. Sin bundle no queda servicio.
+        val b = cargarBundle()
+        if (b != null) {
+            endpoint = b.endpoint
+            accessToken = b.accessToken
+            refreshToken = b.refreshToken
+            expiryMs = b.expiryMs
+            clientId = b.clientId
+            clientSecret = b.clientSecret
+            empezarPing()
+            return START_STICKY
+        }
+        try { stopSelf() } catch (_: Throwable) {}
+        return START_NOT_STICKY
     }
 
-    /// Barrer la app mata el proceso (y con él al servicio: mismo
-    /// proceso). Relanzar en 2s por alarma LLEVANDO LOS DATOS en extras
-    /// (el servicio no guarda nada en disco: ni prefs ni archivos).
+    /// Proceso separado + stopWithTask=false: barrer la UI no mata el
+    /// servicio. Sin alarma ni relanzamiento (era parche del proceso
+    /// compartido): el restart STICKY + bundle alcanza.
     override fun onTaskRemoved(rootIntent: Intent?) {
-        // Diagnóstico en la propia 888: si al barrer aparece esto y
-        // después nada = el sistema mató y la alarma no volvió.
-        // Si aparece "revivido" = la alarma funcionó.
-        if (vivo && endpoint.isNotEmpty()) {
-            try {
-                val nm = getSystemService(NotificationManager::class.java)
-                nm?.notify(
-                    ID_SERVICIO,
-                    notiServicio("Secure App", "barrido: relanzando ping…"),
-                )
-            } catch (_: Throwable) {}
-            try {
-                val i = Intent(this, ServicioMimapp::class.java)
-                    .setAction(ACCION_START_PING)
-                    .putExtra("revivido", true)
-                    .putExtra("endpoint", endpoint)
-                    .putExtra("accessToken", accessToken)
-                    .putExtra("refreshToken", refreshToken)
-                    .putExtra("expiryMs", expiryMs)
-                    .putExtra("clientId", clientId)
-                    .putExtra("clientSecret", clientSecret)
-                val f = PendingIntent.FLAG_UPDATE_CURRENT or
-                    (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_IMMUTABLE else 0)
-                val pi = PendingIntent.getService(this, 7, i, f)
-                val am = getSystemService(AlarmManager::class.java)
-                am?.setExactAndAllowWhileIdle(
-                    AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                    SystemClock.elapsedRealtime() + 2000,
-                    pi,
-                )
-            } catch (_: Throwable) {}
-        }
         super.onTaskRemoved(rootIntent)
+    }
+
+    // ---------------- bundle plano ----------------
+
+    private data class Bundle(
+        val endpoint: String,
+        val accessToken: String,
+        val refreshToken: String,
+        val expiryMs: Long,
+        val clientId: String,
+        val clientSecret: String,
+    )
+
+    private fun prefs() =
+        getSharedPreferences(PREFS, MODE_PRIVATE)
+
+    private fun guardarBundle(i: Intent) {
+        endpoint = i.getStringExtra("endpoint") ?: endpoint
+        accessToken = i.getStringExtra("accessToken") ?: accessToken
+        refreshToken = i.getStringExtra("refreshToken") ?: refreshToken
+        if (i.hasExtra("expiryMs")) expiryMs = i.getLongExtra("expiryMs", expiryMs)
+        clientId = i.getStringExtra("clientId") ?: clientId
+        clientSecret = i.getStringExtra("clientSecret") ?: clientSecret
+        try {
+            prefs().edit()
+                .putString("endpoint", endpoint)
+                .putString("accessToken", accessToken)
+                .putString("refreshToken", refreshToken)
+                .putLong("expiryMs", expiryMs)
+                .putString("clientId", clientId)
+                .putString("clientSecret", clientSecret)
+                .apply()
+        } catch (_: Throwable) {}
+    }
+
+    private fun cargarBundle(): Bundle? {
+        return try {
+            val p = prefs()
+            val ep = p.getString("endpoint", "") ?: ""
+            if (ep.isEmpty()) return null
+            Bundle(
+                ep,
+                p.getString("accessToken", "") ?: "",
+                p.getString("refreshToken", "") ?: "",
+                p.getLong("expiryMs", 0L),
+                p.getString("clientId", "") ?: "",
+                p.getString("clientSecret", "") ?: "",
+            )
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    private fun borrarBundle() {
+        endpoint = ""
+        accessToken = ""
+        refreshToken = ""
+        expiryMs = 0L
+        clientId = ""
+        clientSecret = ""
+        ultimoEndpoint = ""
+        try { prefs().edit().clear().apply() } catch (_: Throwable) {}
     }
 
     // ---------------- frente y notificaciones ----------------
@@ -221,7 +282,7 @@ class ServicioMimapp : Service() {
     }
 
     private fun notiServicio(titulo: String, cuerpo: String): Notification {
-        return NotificationCompat.Builder(this, CANAL_ID)
+        return androidx.core.app.NotificationCompat.Builder(this, CANAL_ID)
             .setContentTitle(titulo)
             .setContentText(cuerpo)
             .setSmallIcon(R.mipmap.ic_launcher)
@@ -249,79 +310,96 @@ class ServicioMimapp : Service() {
         val (t, c) = texto888()
         try {
             val nm = getSystemService(NotificationManager::class.java) ?: return
-            // "latido N": prueba de vida del servicio (cada 5s +1).
-            // "N pings": pings OK a Colab. Si latido sube y pings no,
-            // el ping falla: el motivo va en el cuerpo (ultimoError).
-            nm.notify(ID_SERVICIO, notiServicio("$t · latido $contador", c))
+            nm.notify(ID_SERVICIO, notiServicio(t, c))
         } catch (_: Throwable) {}
+        // Espejo para la UI (otro proceso): cada tick/cambio.
+        difundirEstado()
     }
 
     private fun texto888(): Pair<String, String> {
         if (!vivo || endpoint.isEmpty()) {
-            return "Secure App" to "Servicio activo · sin ping"
+            val why = ultimaParada.ifEmpty { "sin ping" }
+            return "Secure App" to "Servicio activo · $why"
         }
         var cuerpo = "$endpoint · ${formatoDur(System.currentTimeMillis() - inicioMs)} · $pingsOk pings"
         if (ultimoError.isNotEmpty()) {
             cuerpo += " · error: $ultimoError"
         }
-        if (revivido) {
-            cuerpo += " · revivido ✓"
-            revivido = false
-        }
         return "Secure App · Colab vivo" to cuerpo
+    }
+
+    private fun updFrenteSinPing(motivo: String) {
+        vivo = false
+        ultimaParada = motivo
+        arrancarFrente()
     }
 
     // ---------------- ping Colab (HTTP, como el CLI) ----------------
 
-    /// Arranca el ping. false = faltan datos (NO queda mudo: lo muestra
-    /// en la 888 y el espejo para no quedarse en "se activa y ya").
-    private fun empezarPing(): Boolean {
+    private fun empezarPing() {
         if (endpoint.isEmpty() || accessToken.isEmpty()) {
-            ultimoError = if (endpoint.isEmpty()) {
-                "sin endpoint"
-            } else {
-                "sin token: reautenticar en Colab"
-            }
-            ultimaParada = ""
-            vivo = false
-            arrancarFrente()
-            mano.removeCallbacks(pulso)
-            mano.post(pulso)
-            return false
+            updFrenteSinPing(
+                if (endpoint.isEmpty()) "sin endpoint"
+                else "sin token: reautenticar en Colab"
+            )
+            return
         }
-        // Latido también con ping (si no, la 888 queda congelada).
-        mano.removeCallbacks(pulso)
-        mano.post(pulso)
-        mano.removeCallbacks(pingTick)
+        scope.coroutineContext.cancelChildren()
         inicioMs = System.currentTimeMillis()
         pingsOk = 0
         consec4xx = 0
         ultimoError = ""
         ultimaParada = ""
+        ultimoEndpoint = endpoint
         vivo = true
         arrancarFrente()
-        Thread { hacerPing() }.start()
-        mano.postDelayed(pingTick, 60_000)
-        return true
+        scope.launch {
+            hacerPing()
+            while (isActive && vivo) {
+                delay(INTERVALO_MS)
+                if (!vivo) break
+                hacerPing()
+            }
+        }
     }
 
+    /// Celda muerta (reauth/404/24h): servicio muerto = celda que se
+    /// quita sola. Borra bundle, detiene loop y se detiene (sin bundle
+    /// no queda servicio). `ultimoEndpoint` queda para la UI.
     private fun pararPing(origen: String) {
-        mano.removeCallbacks(pingTick)
         vivo = false
-        // REGLA: nada para nada salvo Detener-ping: solo se registra el
-        // motivo en memoria (visible en la 888/777). Sin disco.
+        val ep = endpoint.ifEmpty { ultimoEndpoint }
         ultimaParada = if (origen.isNotEmpty()) origen else "ping detenido"
-        if (origen.isNotEmpty()) actualizar888()
+        ultimoEndpoint = ep
         endpoint = ""
         inicioMs = 0L
         consec4xx = 0
+        try { prefs().edit().clear().apply() } catch (_: Throwable) {}
+        accessToken = ""
+        refreshToken = ""
+        expiryMs = 0L
+        // Último parte a la UI antes de detenerse (celda muerta).
+        difundirEstado()
+        try {
+            if (Build.VERSION.SDK_INT >= 26) {
+                stopForeground(Service.STOP_FOREGROUND_REMOVE)
+            } else {
+                @Suppress("DEPRECATION")
+                stopForeground(true)
+            }
+        } catch (_: Throwable) {}
+        try {
+            val nm = getSystemService(NotificationManager::class.java)
+            nm?.cancel(ID_SERVICIO)
+        } catch (_: Throwable) {}
+        try { stopSelf() } catch (_: Throwable) {}
     }
 
-    // GET EXACTO del CLI/vscode: Bearer del usuario + X-Colab-Tunnel,
-    // NADA más. Headers de más (Accept, agent, cookies, XSRF) → 400;
-    // sin Bearer válido → 401. Devuelve el código, o -1 si el TFE
-    // anotó actividad pero la VM no contestó (ReadTimeout = éxito CLI).
-    private fun pingCodigo(ep: String, token: String): Int {
+    // GET EXACTO del CLI/vscode: Bearer + X-Colab-Tunnel, NADA más.
+    // Devuelve (código, body recortado en 4xx). -1 = ReadTimeout tras
+    // conectar = éxito CLI (el TFE anotó actividad y la VM no contesta).
+    // SocketTimeout SIN conectar = se lanza (neutro, reintenta).
+    private fun pingCodigo(ep: String, token: String): Pair<Int, String> {
         val url = URL("https://colab.research.google.com/tun/m/$ep/keep-alive/")
         val c = (url.openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
@@ -335,20 +413,41 @@ class ServicioMimapp : Service() {
             c.connect()
             conectado = true
             val code = c.responseCode
+            var body = ""
+            if (code in 400..599) {
+                try {
+                    body = c.errorStream?.bufferedReader()?.use {
+                        it.readText()
+                    }?.replace(Regex("\\s+"), " ")?.trim()?.take(200) ?: ""
+                } catch (_: Throwable) {}
+            }
             try { c.inputStream?.close() } catch (_: Throwable) {}
             try { c.errorStream?.close() } catch (_: Throwable) {}
-            return code
+            return code to body
         } catch (e: SocketTimeoutException) {
-            if (conectado) return -1
+            if (conectado) return -1 to ""
             throw e
+        }
+    }
+
+    /// Causa legible por TIPO (nunca texto crudo que puede venir null
+    /// y mostrar solo "red").
+    private fun diagnostico(e: Throwable): String {
+        return when (e) {
+            is UnknownHostException -> "sin DNS/red"
+            is ConnectException -> "sin conexión"
+            is SocketTimeoutException -> "timeout red"
+            is SSLException -> "TLS"
+            else -> e.message?.take(40)?.ifEmpty { null }
+                ?: e.javaClass.simpleName.ifEmpty { "red" }
         }
     }
 
     private fun hacerPing() {
         val ep = endpoint
         if (ep.isEmpty()) return
-        if (System.currentTimeMillis() - inicioMs >= 24L * 3600L * 1000L) {
-            mano.post { pararPing("límite 24h") }
+        if (System.currentTimeMillis() - inicioMs >= LIMITE_24H_MS) {
+            pararPing("límite 24h")
             return
         }
         try {
@@ -356,78 +455,81 @@ class ServicioMimapp : Service() {
             if (expiryMs > 0 && System.currentTimeMillis() > expiryMs - 60_000) {
                 token = refrescar()
             }
-            var code = try {
+            val (code, body) = try {
                 pingCodigo(ep, token)
             } catch (e: SocketTimeoutException) {
-                // ConnectTimeout = no llegó al TFE: neutro con aviso.
+                // ConnectTimeout = no llegó al TFE: neutro, no detiene.
                 consec4xx = 0
-                ultimoError = "timeout red"
-                mano.post { actualizar888() }
+                ultimoError = diagnostico(e)
+                actualizar888()
                 return
             }
             if (code == -1) {
-                // ReadTimeout = éxito CLI: actividad anotada por el TFE.
                 consec4xx = 0
                 pingsOk++
                 ultimoError = ""
-                mano.post { actualizar888() }
+                actualizar888()
                 return
             }
             if (code == 401) {
                 // Token sin permiso: refrescar UNA vez y reintentar.
-                // Si sigue 401 es reauth (cuenta/alcance), NO celda muerta.
-                var reintentado = -2
-                try {
+                // Falla de RED en el reintento ≠ reauth: no detiene.
+                val (reintento, rebody) = try {
                     token = refrescar()
-                    reintentado = pingCodigo(ep, token)
-                } catch (_: Throwable) {}
-                if (reintentado == -1) {
+                    pingCodigo(ep, token)
+                } catch (e: Throwable) {
+                    consec4xx = 0
+                    ultimoError = diagnostico(e)
+                    actualizar888()
+                    return
+                }
+                if (reintento == -1) {
                     consec4xx = 0
                     pingsOk++
                     ultimoError = ""
-                    mano.post { actualizar888() }
+                    actualizar888()
                     return
                 }
-                if (reintentado == -2 || reintentado == 401) {
-                    ultimoError = "reauth 401"
-                    mano.post {
-                        pararPing("reauth 401: reautenticar en Colab")
-                        actualizar888()
-                    }
+                if (reintento == 401) {
+                    val detalle =
+                        if (rebody.isNotEmpty()) " · $rebody" else ""
+                    ultimoError = "reauth 401$detalle"
+                    pararPing("reauth 401: reautenticar en Colab")
                     return
                 }
-                code = reintentado
+                return procesarCodigo(reintento, rebody)
             }
-            if (code == 404) {
-                consec4xx++
-                ultimoError = "http 404"
-                if (consec4xx >= 2) {
-                    mano.post { pararPing("celda muerta (404)") }
-                    return
-                }
-            } else if (code in 400..499) {
-                consec4xx++
-                ultimoError = "http $code"
-                if (consec4xx >= 2) {
-                    mano.post { pararPing("celda muerta ($code)") }
-                    return
-                }
-            } else {
-                consec4xx = 0
-                pingsOk++
-                ultimoError = ""
-            }
-            mano.post { actualizar888() }
+            return procesarCodigo(code, body)
         } catch (e: Throwable) {
-            // red/timeout: reintenta en el próximo ciclo, no cuenta error.
-            // Pero SE MUESTRA (antes era mudo y el "ping 0" no se entendía).
-            // Throwable (no solo Exception): un Error acá mataba app+servicio.
+            // red/refresh: reintenta en el próximo ciclo, NO detiene.
             consec4xx = 0
-            ultimoError = (e.message ?: "red").take(40)
-            try {
-                mano.post { actualizar888() }
-            } catch (_: Throwable) {}
+            ultimoError = diagnostico(e)
+            try { actualizar888() } catch (_: Throwable) {}
         }
+    }
+
+    private fun procesarCodigo(code: Int, body: String) {
+        val detalle = if (body.isNotEmpty()) " · $body" else ""
+        if (code == 404) {
+            consec4xx++
+            ultimoError = "http 404$detalle"
+            if (consec4xx >= 2) {
+                pararPing("celda muerta (404)")
+                return
+            }
+        } else if (code in 400..499) {
+            consec4xx++
+            ultimoError = "http $code$detalle"
+            if (consec4xx >= 2) {
+                pararPing("celda muerta ($code)")
+                return
+            }
+        } else {
+            consec4xx = 0
+            pingsOk++
+            ultimoError = ""
+        }
+        actualizar888()
     }
 
     /// Refresca el access_token por HTTP puro (igual que ColabPingMotor).
@@ -447,7 +549,14 @@ class ServicioMimapp : Service() {
         c.outputStream.use { it.write(cuerpo.toByteArray()) }
         val code = c.responseCode
         if (code != 200) {
-            ultimoError = "refresh http $code"
+            var body = ""
+            try {
+                body = c.errorStream?.bufferedReader()?.use { it.readText() }
+                    ?.replace(Regex("\\s+"), " ")?.trim()?.take(120) ?: ""
+            } catch (_: Throwable) {}
+            ultimoError =
+                if (body.isNotEmpty()) "refresh http $code · $body"
+                else "refresh http $code"
             throw Exception("refresh $code")
         }
         val texto = c.inputStream.bufferedReader().use { it.readText() }
@@ -456,6 +565,13 @@ class ServicioMimapp : Service() {
         val expiraEn = d.optLong("expires_in", 3600L)
         expiryMs = System.currentTimeMillis() + expiraEn * 1000L
         ultimoError = ""
+        // Persiste el bundle renovado (restart retoma con token vigente).
+        try {
+            prefs().edit()
+                .putString("accessToken", accessToken)
+                .putLong("expiryMs", expiryMs)
+                .apply()
+        } catch (_: Throwable) {}
         return accessToken
     }
 
@@ -479,18 +595,13 @@ class ServicioMimapp : Service() {
         } catch (_: Exception) {}
     }
 
-    /// Sin celda el servicio no queda: corta ping, baja 888 y se detiene.
-    /// NO mata el proceso ni toca la 777 (panel de Dart). La app sigue.
-    /// (También es lo que hace la X de la 888.)
-    /// Los catch son Throwable a propósito: un Error (ej. NoSuchMethod)
-    /// acá mataba app+servicio juntos al detener.
+    /// X de la 888 (única salida): borra bundle, cancela loop, baja la
+    /// 888 y se detiene. La app (otro proceso) ni se entera.
     private fun pararServicio() {
-        mano.removeCallbacks(pulso)
-        mano.removeCallbacks(pingTick)
         vivo = false
-        // X / stop explícito: se registra en memoria (no fue el sistema).
-        // Sin disco: el servicio no crea archivos.
         ultimaParada = "servicio detenido"
+        try { scope.coroutineContext.cancelChildren() } catch (_: Throwable) {}
+        borrarBundle()
         try {
             if (Build.VERSION.SDK_INT >= 26) {
                 stopForeground(Service.STOP_FOREGROUND_REMOVE)
@@ -507,8 +618,11 @@ class ServicioMimapp : Service() {
     }
 
     override fun onDestroy() {
-        mano.removeCallbacks(pulso)
-        mano.removeCallbacks(pingTick)
+        try { scope.coroutineContext.cancelChildren() } catch (_: Throwable) {}
+        try {
+            receptorPedido?.let { unregisterReceiver(it) }
+        } catch (_: Throwable) {}
+        receptorPedido = null
         super.onDestroy()
     }
 }

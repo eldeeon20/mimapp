@@ -14,10 +14,10 @@ import 'status_notifier.dart';
 /// Servicio Colab: singleton que vive toda la vida de la app.
 /// Auth + sesiones. La UI solo lee de acá.
 ///
-/// - SIN autodetect y SIN ping en la app: el ÚNICO ping vive en el isolate
-///   del servicio (ColabPingMotor en bootstrap). La app solo le ordena
-///   "mantené esto en ping" vía [startKeepAlive] y "cortá" vía
-///   [stopKeepAlive]. Si la app se cierra, el servicio sigue pineando.
+/// - SIN autodetect y SIN ping en la app: el ÚNICO ping vive en el
+///   servicio nativo `:ping` (proceso independiente). Crear celda =
+///   único disparo ([startKeepAlive]); no hay detener, solo la X.
+///   Servicio muerto = celda que se quita sola.
 /// - Todo aviso va por la notificación que YA existe (Estado 777).
 class ColabService {
   static final ColabService _instance = ColabService._();
@@ -46,6 +46,9 @@ class ColabService {
 
   /// Último error corto del ping nativo ("" = bien). Se muestra en 777.
   String espejoError = '';
+
+  /// Endpoint que pineaba al morir (para desasignar la celda muerta).
+  String espejoUltimoEndpoint = '';
 
   /// true si el servicio mantiene algo en ping (espejo local).
   bool get pingActivo => activeEndpoint != null && activeEndpoint!.isNotEmpty;
@@ -90,7 +93,7 @@ class ColabService {
         endpoint: endpoint,
         accessToken: t.accessToken,
         refreshToken: t.refreshToken,
-        expiryIso: t.expiry.toIso8601String(),
+        expiryMs: t.expiry.millisecondsSinceEpoch,
         clientId: ColabConfig.clientId,
         clientSecret: ColabConfig.clientSecret,
       );
@@ -99,29 +102,27 @@ class ColabService {
     StatusNotifier.instance.refresh();
   }
 
-  /// Corta el ping y APAGA el servicio nativo (sin celda no queda nada).
-  /// Solo acción explícita del usuario. No mata la app.
-  Future<void> stopKeepAlive() async {
-    try {
-      await Nativo.stopPing();
-    } catch (_) {}
-    activeEndpoint = null;
-    espejoInicio = null;
-    espejoPings = 0;
-    espejoError = '';
-    StatusNotifier.instance.refresh();
-    // Sin celda el servicio no tiene por qué quedar: pararlo también.
-    try {
-      await Nativo.stop();
-    } catch (_) {}
-  }
+  // ELIMINADO stopKeepAlive: no hay botón detener. Única salida = X de
+  // la 888. Servicio muerto = celda que se quita sola (ver diálogo).
+  // Se deja el hueco sin borrar.
 
-  /// Inicializar: carga tokens y recupera el espejo de lo que el
-  /// servicio ya pineaba (si la app se cerró y el servicio siguió).
+  /// Inicializar: carga tokens, engancha el empuje de token fresco al
+  /// servicio y recupera el espejo de lo que ya pineaba.
   /// Nada más: el servicio se crea al crear celda, punto.
   Future<void> init() async {
     if (_initialized) return;
     _initialized = true;
+    // App viva → cada refresh Dart empuja el token al servicio `:ping`
+    // (pisa sin resetear). App muerta → el servicio se autoabastece.
+    ColabAuth.onTokensChanged = (t) async {
+      try {
+        await Nativo.updateToken(
+          accessToken: t.accessToken,
+          refreshToken: t.refreshToken,
+          expiryMs: t.expiry.millisecondsSinceEpoch,
+        );
+      } catch (_) {}
+    };
     await auth.loadTokens();
     await _recuperarEspejo();
   }
@@ -135,6 +136,7 @@ class ColabService {
     try {
       final e = await Nativo.estado();
       if (e.isNotEmpty) {
+        espejoUltimoEndpoint = '${e['ultimoEndpoint'] ?? ''}';
         if (e['vivo'] == true && '${e['endpoint'] ?? ''}'.isNotEmpty) {
           activeEndpoint = '${e['endpoint']}';
           final ms = (e['inicioMs'] as int?) ?? 0;
@@ -147,7 +149,7 @@ class ColabService {
           activeEndpoint = null;
           espejoInicio = null;
           espejoPings = 0;
-          // Muerto: mostrar POR QUÉ paró (lo registra el nativo en prefs).
+          // Muerto: mostrar POR QUÉ paró (lo informa el nativo).
           final up = '${e['ultimaParada'] ?? ''}';
           espejoError = up.isNotEmpty ? 'paró: $up' : '';
         }
