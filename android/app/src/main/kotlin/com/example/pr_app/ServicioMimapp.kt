@@ -175,8 +175,23 @@ class ServicioMimapp : Service() {
             }
             ACCION_UPDATE_TOKEN -> {
                 // Token fresco empujado por la app: pisa sin resetear
-                // contadores, inicio ni loop. Si estaba muerto con bundle
-                // completo, retoma (tablas: no es reset, es resume).
+                // contadores, inicio ni loop. En proceso frío primero se
+                // recupera la memoria del bundle (si no, el update
+                // parcial no sabe la celda y no puede retomar).
+                if (endpoint.isEmpty()) {
+                    cargarBundle()?.let {
+                        endpoint = it.endpoint
+                        if (accessToken.isEmpty()) accessToken = it.accessToken
+                        if (refreshToken.isEmpty()) {
+                            refreshToken = it.refreshToken
+                        }
+                        if (expiryMs == 0L) expiryMs = it.expiryMs
+                        if (clientId.isEmpty()) clientId = it.clientId
+                        if (clientSecret.isEmpty()) {
+                            clientSecret = it.clientSecret
+                        }
+                    }
+                }
                 if (intent.hasExtra("accessToken")) guardarBundle(intent)
                 if (!vivo && endpoint.isNotEmpty() && accessToken.isNotEmpty()) {
                     empezarPing()
@@ -226,24 +241,43 @@ class ServicioMimapp : Service() {
         getSharedPreferences(PREFS, MODE_PRIVATE)
 
     private fun guardarBundle(i: Intent) {
+        // Solo se pisa lo que el intent TRAE: en proceso frío las
+        // variables están vacías y un update parcial (UPDATE_TOKEN sin
+        // endpoint) jamás debe borrar lo guardado (eso mataba la celda
+        // al cambiar el token con `:ping` caído).
         // Endpoint saneado: espacios/saltos en la URL → 400 del TFE.
         val epLimpio = i.getStringExtra("endpoint")
             ?.replace(Regex("\\s+"), "") ?: ""
-        if (epLimpio.isNotEmpty()) endpoint = epLimpio
-        accessToken = i.getStringExtra("accessToken") ?: accessToken
-        refreshToken = i.getStringExtra("refreshToken") ?: refreshToken
-        if (i.hasExtra("expiryMs")) expiryMs = i.getLongExtra("expiryMs", expiryMs)
-        clientId = i.getStringExtra("clientId") ?: clientId
-        clientSecret = i.getStringExtra("clientSecret") ?: clientSecret
+        val traeEndpoint = i.hasExtra("endpoint") && epLimpio.isNotEmpty()
+        if (traeEndpoint) endpoint = epLimpio
+        if (i.hasExtra("accessToken")) {
+            accessToken = i.getStringExtra("accessToken") ?: accessToken
+        }
+        if (i.hasExtra("refreshToken")) {
+            refreshToken = i.getStringExtra("refreshToken") ?: refreshToken
+        }
+        if (i.hasExtra("expiryMs")) {
+            expiryMs = i.getLongExtra("expiryMs", expiryMs)
+        }
+        if (i.hasExtra("clientId")) {
+            clientId = i.getStringExtra("clientId") ?: clientId
+        }
+        if (i.hasExtra("clientSecret")) {
+            clientSecret = i.getStringExtra("clientSecret") ?: clientSecret
+        }
         try {
-            prefs().edit()
-                .putString("endpoint", endpoint)
-                .putString("accessToken", accessToken)
-                .putString("refreshToken", refreshToken)
-                .putLong("expiryMs", expiryMs)
-                .putString("clientId", clientId)
-                .putString("clientSecret", clientSecret)
-                .apply()
+            val e = prefs().edit()
+            if (traeEndpoint) e.putString("endpoint", endpoint)
+            if (i.hasExtra("accessToken")) e.putString("accessToken", accessToken)
+            if (i.hasExtra("refreshToken")) {
+                e.putString("refreshToken", refreshToken)
+            }
+            if (i.hasExtra("expiryMs")) e.putLong("expiryMs", expiryMs)
+            if (i.hasExtra("clientId")) e.putString("clientId", clientId)
+            if (i.hasExtra("clientSecret")) {
+                e.putString("clientSecret", clientSecret)
+            }
+            e.apply()
         } catch (_: Throwable) {}
     }
 
