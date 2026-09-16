@@ -79,8 +79,10 @@ lib/services/webk/
     sitio/         ← (se llena solo) sitios guardados desde el builder
 ```
 
-`pubspec.yaml` declara `paginas/` y `webapp/` ENTERAS: archivo nuevo
-entra solo al APK, sin tocar el pubspec.
+`pubspec.yaml` declara `paginas/` entera (es plana: archivo nuevo entra
+solo al APK). En `webapp/` cada subcarpeta (`builder/`, `builder/js/`,
+toda app nueva) necesita su propia entrada: el empaquetador no recorre
+subcarpetas. `sitio/` no se declara (se llena en disco en runtime).
 
 ## El puente de ida y vuelta
 

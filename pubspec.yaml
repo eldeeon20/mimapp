@@ -95,8 +95,12 @@ flutter:
 
   assets:
     # Carpetas enteras: páginas y apps nuevas entran solas, sin tocar acá.
+    # OJO: el empaquetador NO es recursivo (solo archivos DIRECTOS de cada
+    # carpeta). `paginas/` anda porque es plana; cada subcarpeta de
+    # `webapp/` necesita su propia entrada.
     - lib/services/webk/paginas/
-    - lib/services/webk/webapp/
+    - lib/services/webk/webapp/builder/
+    - lib/services/webk/webapp/builder/js/
 
   # To add assets to your application, add an assets section, like this:
   # assets:
