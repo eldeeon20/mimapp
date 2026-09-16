@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -49,12 +51,30 @@ class _ColabDialogBodyState extends State<_ColabDialogBody> {
   String? _error;
   List<ColabSession> _sessions = [];
 
+  /// Repinta el log del ping cada 5s mientras el diálogo siga abierto.
+  Timer? _relojLog;
+
   @override
   void initState() {
     super.initState();
     if (widget.auth.isAuthenticated) {
       _loadSessions();
     }
+    _relojLog = Timer.periodic(const Duration(seconds: 5), (_) async {
+      if (!mounted) return;
+      try {
+        await ColabService().refrescarEspejo();
+      } catch (_) {}
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    try {
+      _relojLog?.cancel();
+    } catch (_) {}
+    super.dispose();
   }
 
   Future<void> _startLogin() async {
@@ -461,14 +481,17 @@ class _ColabDialogBodyState extends State<_ColabDialogBody> {
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
                   child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Icon(Icons.timer, size: 16, color: Colors.blue),
                       const SizedBox(width: 6),
                       Expanded(
                           child: Text(
-                              'Servicio `:ping` independiente: ${ColabService().activeEndpoint} '
-                              '(${ColabKeepAlive.fmtDur(ColabService().espejoElapsed)}). '
-                              'Única salida: la X de la notificación.')),
+                              'Ping cada 60s: ${ColabService().activeEndpoint} '
+                              '(${ColabKeepAlive.fmtDur(ColabService().espejoElapsed)} · '
+                              '${ColabService().espejoPings} pings)'
+                              '${ColabService().espejoUltimoPing.isNotEmpty ? '\nlog: ${ColabService().espejoUltimoPing}' : ''}',
+                              style: const TextStyle(fontSize: 12))),
                     ],
                   ),
                 ),

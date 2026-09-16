@@ -77,9 +77,12 @@ class StatusNotifier {
     final active = cs.pingActivo;
     final count = cs.activeSessionCount;
     final err = cs.espejoError.isNotEmpty ? ' · error: ${cs.espejoError}' : '';
+    final log = cs.espejoUltimoPing.isNotEmpty
+        ? ' · log: ${cs.espejoUltimoPing}'
+        : '';
     final colabLine = active
         ? 'Colab: ACTIVO (${cs.activeEndpoint ?? ''} · '
-            '${ColabKeepAlive.fmtDur(cs.espejoElapsed)} · ${cs.espejoPings} pings$err)'
+            '${ColabKeepAlive.fmtDur(cs.espejoElapsed)} · ${cs.espejoPings} pings$err$log)'
         : (count > 0 ? 'Colab: $count sesión(es)' : 'Colab: inactivo');
 
     extra = '$colabLine · Laurelia: $tokens tokens';

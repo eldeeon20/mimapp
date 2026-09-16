@@ -25,6 +25,37 @@ object Notis {
         )
     }
 
+    /// Aviso con ABRIR (tocar trae la app al frente). Para el
+    /// interruptor de hombre muerto: autoCancel al tocar.
+    fun avisarAbrir(ctx: Context, titulo: String, cuerpo: String): Int {
+        canal(ctx)
+        val id = siguienteId()
+        val abrir = android.app.PendingIntent.getActivity(
+            ctx, 31,
+            android.content.Intent(ctx, MainActivity::class.java).apply {
+                action = android.content.Intent.ACTION_MAIN
+                addCategory(android.content.Intent.CATEGORY_LAUNCHER)
+                flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK or
+                    android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP
+            },
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or
+                (if (android.os.Build.VERSION.SDK_INT >= 31)
+                    android.app.PendingIntent.FLAG_IMMUTABLE else 0),
+        )
+        val n = NotificationCompat.Builder(ctx, CANAL_ID)
+            .setContentTitle(titulo)
+            .setContentText(cuerpo)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(cuerpo))
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentIntent(abrir)
+            .setAutoCancel(true)
+            .setShowWhen(true)
+            .setGroup(GRUPO)
+            .build()
+        ctx.getSystemService(NotificationManager::class.java)?.notify(id, n)
+        return id
+    }
+
     /// Muestra un aviso simple y devuelve su id.
     fun avisar(ctx: Context, titulo: String, cuerpo: String): Int {
         canal(ctx)

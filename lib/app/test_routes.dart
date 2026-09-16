@@ -13,6 +13,7 @@ import '../screens/iroh_chat_screen.dart';
 import '../screens/iroh_test_screen.dart';
 import '../screens/kem_test_screen.dart';
 import '../screens/koni_test_screen.dart';
+import '../screens/media_server_test_screen.dart';
 import '../screens/nostr_busca_screen.dart';
 import '../screens/nostr_dm_test_screen.dart';
 import '../screens/nostr_peer_test_screen.dart';
@@ -127,6 +128,10 @@ const Map<String, TestRoute> kTestRoutes = {
     titulo: 'Base SQL · SQLite ChaCha20',
     pagina: _db,
   ),
+  'ml': (
+    titulo: 'MediaServer · moldes .mld + rangos',
+    pagina: _ml,
+  ),
 };
 
 Widget _dm(BuildContext _) => const NostrDmTestScreen();
@@ -153,3 +158,4 @@ Widget _ic(BuildContext _) => const IrohChatScreen();
 Widget _ir(BuildContext _) => const IrohTestScreen();
 Widget _age(BuildContext _) => const AgendaTestScreen();
 Widget _db(BuildContext _) => const DbTestScreen();
+Widget _ml(BuildContext _) => const MediaServerTestScreen();

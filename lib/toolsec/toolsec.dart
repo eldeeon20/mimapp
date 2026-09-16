@@ -45,6 +45,14 @@ class ToolSec {
     return hash;
   }
 
+  /// Estado inicial del keystream para esta semilla (paso 0).
+  /// Lo usa el media_server para cifrar por streaming sin cargar todo.
+  int get semillaEstado => _seed.toUnsigned(64);
+
+  /// Un paso público del PRNG (igual que el privado): retorna
+  /// (randByte, newState). Misma secuencia que [processBytes].
+  static (int, int) siguiente(int estado) => _nextRand(estado);
+
   /// Siguiente estado del PRNG xorshift64* + byte aleatorio (0-255).
   /// Retorna (randByte, newState) para encadenar sin mutable.
   static (int, int) _nextRand(int state) {
@@ -59,8 +67,23 @@ class ToolSec {
 
   /// Procesa bytes en memoria (XOR byte a byte). Archivos chicos.
   Uint8List processBytes(Uint8List data) {
+    return processBytesDesde(data, 0);
+  }
+
+  /// Procesa bytes como si empezaran en la [posicion] del keystream
+  /// (saltea `posicion` pasos sin generar salida). Para descifrar
+  /// RANGOS de un archivo cifrado de a una vez: el keystream del byte
+  /// N depende de N, así que un rango [a, b) se descifra salteando `a`
+  /// y procesando `b - a`. Simétrico como [processBytes].
+  Uint8List processBytesDesde(Uint8List data, int posicion) {
+    if (posicion < 0) {
+      throw ArgumentError('ToolSec: posicion negativa $posicion');
+    }
     final result = Uint8List(data.length);
     int state = _seed.toUnsigned(64);
+    for (var i = 0; i < posicion; i++) {
+      state = _nextRand(state).$2;
+    }
     for (var i = 0; i < data.length; i++) {
       final (rand, next) = _nextRand(state);
       result[i] = data[i] ^ rand;

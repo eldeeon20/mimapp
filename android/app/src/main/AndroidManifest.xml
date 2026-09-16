@@ -51,15 +51,20 @@
             android:name="id.flutter.flutter_background_service.BackgroundService"
             android:foregroundServiceType="dataSync" />
 
-        <!-- Mismo proceso que la UI: los comandos llegan por intents,
-             el estado sale por el canal y la alarma de respaldo lleva
-             los datos en extras (el servicio NO crea archivos). -->
+        <!-- Proceso `:ping` independiente: barrer la UI no lo toca.
+              Notificación en canal silencioso. El interruptor de hombre
+              muerto (AlarmaColab, NO es servicio) avisa si la app muere:
+              baja la 777 congelada y postea "abrí la app o cae la celda". -->
         <service
             android:name=".ServicioMimapp"
             android:exported="false"
             android:process=":ping"
             android:stopWithTask="false"
             android:foregroundServiceType="dataSync" />
+
+        <receiver
+            android:name=".AlarmaColab"
+            android:exported="false" />
 
         <service
             android:name="com.ryanheise.audioservice.AudioService"

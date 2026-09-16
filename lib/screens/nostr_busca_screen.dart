@@ -18,15 +18,21 @@ class NostrBuscaScreen extends StatefulWidget {
   State<NostrBuscaScreen> createState() => _NostrBuscaScreenState();
 }
 
-/// Editor arranca vacío: sin nada hardcodeado a la vista.
-/// (Si está vacío, el lado Rust usa sus propios relays para que la
-/// consulta igual funcione; eso no se muestra en ningún lado.)
-
+/// Editor con defaults con NIP-50 (búsqueda): sin relés la consulta
+/// vuelve vacía (Rust no inventa relays; cliente efímero con lo dado).
+/// El usuario puede quitar/sumar; el modo Relés descubre más.
 class _NostrBuscaScreenState extends State<NostrBuscaScreen> {
   final _busca = NostrBusca();
   final _qCtrl = TextEditingController();
 
-  List<String> _relays = [];
+  static const _defaults = [
+    'wss://nos.lol',
+    'wss://relay.primal.net',
+    'wss://relay.nostr.band',
+    'wss://search.nos.today',
+  ];
+
+  List<String> _relays = [..._defaults];
   List<rust.PerfilItem> _resultados = [];
   List<rust.PostItem> _postsRed = [];
   int _modo = 0; // 0 usuarios · 1 posts · 2 relés (solo, sin user)
@@ -49,6 +55,13 @@ class _NostrBuscaScreenState extends State<NostrBuscaScreen> {
     // Modos 0/1 sí exigen texto.
     if (q.isEmpty && _modo != 2) {
       setState(() => _estado = 'escribí un nombre o pegá un npub');
+      return;
+    }
+    // Modos 0/1 consultan LOS relays del editor: vacío = 0 matches
+    // seguro (Rust no suple relays). Se avisa en vez de consultar.
+    if (_modo != 2 && _relays.isEmpty) {
+      setState(() => _estado =
+          'sin relés en el editor: agregá abajo o traé de Relés');
       return;
     }
     setState(() {

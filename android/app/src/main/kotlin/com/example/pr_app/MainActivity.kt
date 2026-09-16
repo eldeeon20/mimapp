@@ -40,6 +40,8 @@ class MainActivity : AudioServiceActivity() {
                             i.getStringExtra("ultimoError") ?: ""
                         estadoCache["ultimaParada"] =
                             i.getStringExtra("ultimaParada") ?: ""
+                        estadoCache["ultimoPing"] =
+                            i.getStringExtra("ultimoPing") ?: ""
                     } catch (_: Throwable) {}
                 }
             }

@@ -125,6 +125,21 @@ class CajaSql {
     }
   }
 
+  /// Crea un índice si no existe (búsquedas por ese campo).
+  /// Ej: `crearIndice('archivos', 'molde')` para que cada molde abra
+  /// solo lo suyo sin escanear la tabla entera.
+  void crearIndice(String tabla, String campo) {
+    _exigirId('tabla', tabla);
+    _exigirId('campo', campo);
+    try {
+      _base.execute(
+          'CREATE INDEX IF NOT EXISTS "idx_${tabla}_${campo}" '
+          'ON "$tabla" ("$campo");');
+    } catch (e) {
+      throw StateError('CajaSql: no crea índice en "$tabla"("$campo"): $e');
+    }
+  }
+
   /// Borra la tabla entera (con sus filas).
   void borrarTabla(String tabla) {
     _exigirId('tabla', tabla);
@@ -236,6 +251,30 @@ class CajaSql {
       ];
     } catch (e) {
       throw StateError('CajaSql: no lista "$tabla": $e');
+    }
+  }
+
+  /// Filas que cumplen [donde] (donde='molde = ?', args=[...]),
+  /// ordenadas. Para traer SOLO lo de un molde sin listar la tabla.
+  List<Map<String, Object?>> listarDonde(
+    String tabla,
+    String donde,
+    List<Object?> args, {
+    String por = 'id',
+    bool asc = true,
+  }) {
+    _exigirId('tabla', tabla);
+    _exigirId('orden', por);
+    final sql =
+        'SELECT * FROM "$tabla" WHERE $donde ORDER BY "$por" ${asc ? 'ASC' : 'DESC'};';
+    try {
+      final rs = _base.select(sql, args);
+      return [
+        for (final f in rs)
+          {for (final c in rs.columnNames) c: f[c]}
+      ];
+    } catch (e) {
+      throw StateError('CajaSql: no lista "$tabla" con filtro: $e');
     }
   }
 

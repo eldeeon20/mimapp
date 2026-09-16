@@ -50,6 +50,10 @@ class ColabService {
   /// Endpoint que pineaba al morir (para desasignar la celda muerta).
   String espejoUltimoEndpoint = '';
 
+  /// Log del último ping (código · latencia · hora). Se ve en el
+  /// diálogo de Colab y en la 777.
+  String espejoUltimoPing = '';
+
   /// true si el servicio mantiene algo en ping (espejo local).
   bool get pingActivo => activeEndpoint != null && activeEndpoint!.isNotEmpty;
 
@@ -79,6 +83,7 @@ class ColabService {
     espejoInicio = DateTime.now();
     espejoPings = 0;
     espejoError = '';
+    espejoUltimoPing = '';
     // Sin exención la ROM mata el servicio al barrer y no revive
     // (service_flu sobrevive por esto, no por código). Se pide una vez.
     try {
@@ -145,6 +150,7 @@ class ColabService {
               : DateTime.now();
           espejoPings = (e['pingsOk'] as int?) ?? 0;
           espejoError = '${e['ultimoError'] ?? ''}';
+          espejoUltimoPing = '${e['ultimoPing'] ?? ''}';
         } else {
           activeEndpoint = null;
           espejoInicio = null;
@@ -152,6 +158,7 @@ class ColabService {
           // Muerto: mostrar POR QUÉ paró (lo informa el nativo).
           final up = '${e['ultimaParada'] ?? ''}';
           espejoError = up.isNotEmpty ? 'paró: $up' : '';
+          espejoUltimoPing = '${e['ultimoPing'] ?? ''}';
         }
         return;
       }

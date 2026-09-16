@@ -125,6 +125,11 @@ abstract final class RadialCatalog {
         icon: Icons.storage_rounded,
         color: Colors.brown),
     RadialMenuItem(
+        key: 'ml',
+        label: 'MediaServer',
+        icon: Icons.archive_rounded,
+        color: Colors.tealAccent),
+    RadialMenuItem(
         key: 'ring',
         label: 'Nostringer',
         icon: Icons.fingerprint_rounded,

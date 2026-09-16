@@ -1,5 +1,6 @@
 package com.example.pr_app
 
+import android.app.AlarmManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -9,6 +10,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.SystemClock
 import java.net.ConnectException
 import java.net.HttpURLConnection
 import java.net.SocketTimeoutException
@@ -42,7 +44,11 @@ import org.json.JSONObject
 class ServicioMimapp : Service() {
 
     companion object {
-        const val CANAL_ID = "pr_app_channel"
+        /// Canal SILENCIOSO (IMPORTANCE_MIN): la 888 existe por ley
+        /// (foreground) pero no suena, no vibra y queda minimizada.
+        /// ID nuevo a propósito: el canal viejo queda huérfano en
+        /// dispositivos ya instalados (inofensivo).
+        const val CANAL_ID = "pr_app_servicio"
         const val CANAL_NOMBRE = "pr_app"
         const val ID_SERVICIO = 888
         const val ID_ESTADO = 777
@@ -61,6 +67,9 @@ class ServicioMimapp : Service() {
         const val PREFS = "colab_ping"
         const val INTERVALO_MS = 60_000L
         const val LIMITE_24H_MS = 24L * 3600L * 1000L
+        /// Interruptor de hombre muerto: se rearma en cada ping OK. Si
+        /// la app muere, AlarmaColab avisa para abrirla o cae la celda.
+        const val ALARMA_MS = 90_000L
 
         @Volatile var endpoint: String = ""
         @Volatile var accessToken: String = ""
@@ -74,6 +83,10 @@ class ServicioMimapp : Service() {
         @Volatile var vivo: Boolean = false
         @Volatile var ultimoError: String = ""
         @Volatile var ultimaParada: String = ""
+        /// Log del último ping (visible en la 888 + logcat): código,
+        /// latencia y hora. Ej: "200 · 1234ms · 14:22:31".
+        @Volatile var ultimoPing: String = ""
+        const val TAG_LOG = "ColabPing"
         /// Endpoint que pineaba al parar (no se borra en pararPing para
         /// que la UI desasigne la celda muerta; se limpia en X/arranque).
         @Volatile var ultimoEndpoint: String = ""
@@ -86,6 +99,7 @@ class ServicioMimapp : Service() {
             "pingsOk" to pingsOk,
             "ultimoError" to ultimoError,
             "ultimaParada" to ultimaParada,
+            "ultimoPing" to ultimoPing,
         )
     }
 
@@ -138,6 +152,7 @@ class ServicioMimapp : Service() {
                 .putExtra("pingsOk", pingsOk)
                 .putExtra("ultimoError", ultimoError)
                 .putExtra("ultimaParada", ultimaParada)
+                .putExtra("ultimoPing", ultimoPing)
             sendBroadcast(i)
         } catch (_: Throwable) {}
     }
@@ -315,10 +330,13 @@ class ServicioMimapp : Service() {
 
     private fun crearCanal() {
         val nm = getSystemService(NotificationManager::class.java) ?: return
+        try {
+            nm.deleteNotificationChannel("pr_app_channel")
+        } catch (_: Throwable) {}
         nm.createNotificationChannel(
             NotificationChannel(
                 CANAL_ID, CANAL_NOMBRE,
-                NotificationManager.IMPORTANCE_LOW
+                NotificationManager.IMPORTANCE_MIN
             )
         )
     }
@@ -345,12 +363,34 @@ class ServicioMimapp : Service() {
         return androidx.core.app.NotificationCompat.Builder(this, CANAL_ID)
             .setContentTitle(titulo)
             .setContentText(cuerpo)
+            .setStyle(
+                androidx.core.app.NotificationCompat.BigTextStyle()
+                    .bigText(cuerpo)
+            )
             .setSmallIcon(R.mipmap.ic_launcher)
             .setOngoing(true)
             .setShowWhen(false)
             .setContentIntent(pendienteAbrir())
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "X", pendienteX())
             .build()
+    }
+
+    /// Log de cada ping: queda en la 888 (expandible) y en logcat
+    /// (`adb logcat -s ColabPing`) para ver si está bien.
+    private fun bitacora(info: String) {
+        ultimoPing = info
+        try {
+            android.util.Log.d(TAG_LOG, info)
+        } catch (_: Throwable) {}
+    }
+
+    private fun horaCorta(): String {
+        return try {
+            java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
+                .format(java.util.Date())
+        } catch (_: Throwable) {
+            ""
+        }
     }
 
     private fun arrancarFrente() {
@@ -384,6 +424,9 @@ class ServicioMimapp : Service() {
         var cuerpo = "$endpoint · ${formatoDur(System.currentTimeMillis() - inicioMs)} · $pingsOk pings"
         if (ultimoError.isNotEmpty()) {
             cuerpo += " · error: $ultimoError"
+        }
+        if (ultimoPing.isNotEmpty()) {
+            cuerpo += "\núltimo: $ultimoPing"
         }
         return "Secure App · Colab vivo" to cuerpo
     }
@@ -441,6 +484,9 @@ class ServicioMimapp : Service() {
         // Último parte a la UI antes de detenerse (celda muerta).
         difundirEstado()
         frente = false
+        // Sin ping no hay alarma que rearmar: se desarma (si no,
+        // avisaría "abrí la app" por una celda ya muerta a propósito).
+        cancelarAlarma()
         try {
             if (Build.VERSION.SDK_INT >= 26) {
                 stopForeground(Service.STOP_FOREGROUND_REMOVE)
@@ -516,19 +562,24 @@ class ServicioMimapp : Service() {
             if (expiryMs > 0 && System.currentTimeMillis() > expiryMs - 60_000) {
                 token = refrescar()
             }
+            val t0 = SystemClock.elapsedRealtime()
             val (code, body) = try {
                 pingCodigo(ep, token)
             } catch (e: SocketTimeoutException) {
                 // ConnectTimeout = no llegó al TFE: neutro, no detiene.
                 consec4xx = 0
                 ultimoError = diagnostico(e)
+                bitacora("timeout-conexión · ${horaCorta()}")
                 actualizar888()
                 return
             }
+            val ms = SystemClock.elapsedRealtime() - t0
             if (code == -1) {
                 consec4xx = 0
                 pingsOk++
                 ultimoError = ""
+                bitacora("timeout-lectura=éxito · ${ms}ms · ${horaCorta()}")
+                marcarPing()
                 actualizar888()
                 return
             }
@@ -541,6 +592,7 @@ class ServicioMimapp : Service() {
                 } catch (e: Throwable) {
                     consec4xx = 0
                     ultimoError = diagnostico(e)
+                    bitacora("401→red (${diagnostico(e)}) · ${horaCorta()}")
                     actualizar888()
                     return
                 }
@@ -548,6 +600,8 @@ class ServicioMimapp : Service() {
                     consec4xx = 0
                     pingsOk++
                     ultimoError = ""
+                    bitacora("401→refresh→éxito · ${horaCorta()}")
+                    marcarPing()
                     actualizar888()
                     return
                 }
@@ -555,16 +609,24 @@ class ServicioMimapp : Service() {
                     val detalle =
                         if (rebody.isNotEmpty()) " · $rebody" else ""
                     ultimoError = "reauth 401$detalle"
+                    bitacora("401→401 reauth · ${horaCorta()}")
                     pararPing("reauth 401: reautenticar en Colab")
                     return
                 }
+                bitacora("401→refresh→$reintento · ${horaCorta()}")
                 return procesarCodigo(reintento, rebody)
+            }
+            if (code in 200..299) {
+                bitacora("$code · ${ms}ms · ${horaCorta()}")
+            } else if (code >= 400) {
+                bitacora("$code ($consec4xx+1) · ${horaCorta()}")
             }
             return procesarCodigo(code, body)
         } catch (e: Throwable) {
             // red/refresh: reintenta en el próximo ciclo, NO detiene.
             consec4xx = 0
             ultimoError = diagnostico(e)
+            bitacora("excepción (${diagnostico(e)}) · ${horaCorta()}")
             try { actualizar888() } catch (_: Throwable) {}
         }
     }
@@ -589,6 +651,7 @@ class ServicioMimapp : Service() {
             consec4xx = 0
             pingsOk++
             ultimoError = ""
+            marcarPing()
         }
         actualizar888()
     }
@@ -636,6 +699,51 @@ class ServicioMimapp : Service() {
         return accessToken
     }
 
+    // ---------------- interruptor de hombre muerto ----------------
+
+    private fun piAlarma(): PendingIntent {
+        val i = Intent(this, AlarmaColab::class.java)
+            .setAction(AlarmaColab.ACCION)
+        val f = PendingIntent.FLAG_UPDATE_CURRENT or
+            (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_IMMUTABLE else 0)
+        return PendingIntent.getBroadcast(this, AlarmaColab.CODIGO, i, f)
+    }
+
+    /// Marca ping OK y rearma la alarma (+90s). Sin esto la alarma
+    /// dispara el aviso "abrí la app o cae la celda".
+    private fun marcarPing() {
+        try {
+            prefs().edit().putLong("lastPingMs", System.currentTimeMillis())
+                .apply()
+        } catch (_: Throwable) {}
+        programarAlarma()
+    }
+
+    private fun programarAlarma() {
+        try {
+            val am = getSystemService(AlarmManager::class.java) ?: return
+            val cuando =
+                SystemClock.elapsedRealtime() + ALARMA_MS
+            try {
+                am.setExactAndAllowWhileIdle(
+                    AlarmManager.ELAPSED_REALTIME_WAKEUP, cuando, piAlarma()
+                )
+            } catch (_: SecurityException) {
+                // Sin permiso de exactas: respaldo inexacto (puede tardar).
+                am.setAndAllowWhileIdle(
+                    AlarmManager.ELAPSED_REALTIME_WAKEUP, cuando, piAlarma()
+                )
+            }
+        } catch (_: Throwable) {}
+    }
+
+    private fun cancelarAlarma() {
+        try {
+            val am = getSystemService(AlarmManager::class.java) ?: return
+            am.cancel(piAlarma())
+        } catch (_: Throwable) {}
+    }
+
     private fun formatoDur(ms: Long): String {
         val s = (ms / 1000).toInt()
         val h = s / 3600
@@ -661,6 +769,7 @@ class ServicioMimapp : Service() {
     private fun pararServicio() {
         vivo = false
         frente = false
+        cancelarAlarma()
         ultimaParada = "servicio detenido"
         try { scope.coroutineContext.cancelChildren() } catch (_: Throwable) {}
         borrarBundle()
