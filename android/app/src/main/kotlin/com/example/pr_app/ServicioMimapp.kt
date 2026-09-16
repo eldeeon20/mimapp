@@ -94,6 +94,12 @@ class ServicioMimapp : Service() {
 
     private var receptorPedido: android.content.BroadcastReceiver? = null
 
+    /// true si ya se llamó startForeground en este proceso. Tras un
+    /// startForegroundService() Android EXIGE startForeground en tiempo:
+    /// toda entrada en frío debe prender frente primero (incluso las de
+    /// parada: se prende y se detiene, nunca se entra sin frente).
+    private var frente = false
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -137,6 +143,15 @@ class ServicioMimapp : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Frente asegurado: en proceso frío (o restart) hay que llamar
+        // startForeground sí o sí o Android tira
+        // ForegroundServiceDidNotStartInTimeException.
+        if (!frente) {
+            try {
+                arrancarFrente()
+            } catch (_: Throwable) {}
+            frente = true
+        }
         when (intent?.action) {
             ACCION_SALIR_TOTAL, ACCION_STOP -> {
                 // X de la 888: única salida. Borra bundle, baja todo.
@@ -160,13 +175,19 @@ class ServicioMimapp : Service() {
             }
             ACCION_UPDATE_TOKEN -> {
                 // Token fresco empujado por la app: pisa sin resetear
-                // contadores, inicio ni loop.
+                // contadores, inicio ni loop. Si estaba muerto con bundle
+                // completo, retoma (tablas: no es reset, es resume).
                 if (intent.hasExtra("accessToken")) guardarBundle(intent)
+                if (!vivo && endpoint.isNotEmpty() && accessToken.isNotEmpty()) {
+                    empezarPing()
+                }
                 return START_STICKY
             }
         }
         // Restart STICKY pelado (el sistema mató `:ping`): retomar del
-        // bundle guardado. Sin bundle no queda servicio.
+        // bundle guardado. Sin bundle no queda servicio (el frente ya se
+        // aseguró arriba: se detiene legal, sin
+        // ForegroundServiceDidNotStartInTimeException).
         val b = cargarBundle()
         if (b != null) {
             endpoint = b.endpoint
@@ -178,6 +199,7 @@ class ServicioMimapp : Service() {
             empezarPing()
             return START_STICKY
         }
+        frente = false
         try { stopSelf() } catch (_: Throwable) {}
         return START_NOT_STICKY
     }
@@ -204,7 +226,10 @@ class ServicioMimapp : Service() {
         getSharedPreferences(PREFS, MODE_PRIVATE)
 
     private fun guardarBundle(i: Intent) {
-        endpoint = i.getStringExtra("endpoint") ?: endpoint
+        // Endpoint saneado: espacios/saltos en la URL → 400 del TFE.
+        val epLimpio = i.getStringExtra("endpoint")
+            ?.replace(Regex("\\s+"), "") ?: ""
+        if (epLimpio.isNotEmpty()) endpoint = epLimpio
         accessToken = i.getStringExtra("accessToken") ?: accessToken
         refreshToken = i.getStringExtra("refreshToken") ?: refreshToken
         if (i.hasExtra("expiryMs")) expiryMs = i.getLongExtra("expiryMs", expiryMs)
@@ -225,7 +250,8 @@ class ServicioMimapp : Service() {
     private fun cargarBundle(): Bundle? {
         return try {
             val p = prefs()
-            val ep = p.getString("endpoint", "") ?: ""
+            val ep = (p.getString("endpoint", "") ?: "")
+                .replace(Regex("\\s+"), "")
             if (ep.isEmpty()) return null
             Bundle(
                 ep,
@@ -380,6 +406,7 @@ class ServicioMimapp : Service() {
         expiryMs = 0L
         // Último parte a la UI antes de detenerse (celda muerta).
         difundirEstado()
+        frente = false
         try {
             if (Build.VERSION.SDK_INT >= 26) {
                 stopForeground(Service.STOP_FOREGROUND_REMOVE)
@@ -599,6 +626,7 @@ class ServicioMimapp : Service() {
     /// 888 y se detiene. La app (otro proceso) ni se entera.
     private fun pararServicio() {
         vivo = false
+        frente = false
         ultimaParada = "servicio detenido"
         try { scope.coroutineContext.cancelChildren() } catch (_: Throwable) {}
         borrarBundle()
