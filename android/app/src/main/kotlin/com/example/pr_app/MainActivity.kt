@@ -206,11 +206,15 @@ class MainActivity : AudioServiceActivity() {
     }
 
     private fun arrancar(accion: String?, yaArmado: Intent?) {
-        val i = yaArmado ?: Intent(this, ServicioMimapp::class.java).setAction(accion)
-        if (Build.VERSION.SDK_INT >= 26) {
-            startForegroundService(i)
-        } else {
-            startService(i)
-        }
+        // Blindado: si la app está en fondo y el sistema rechaza el
+        // arranque (background start), que falle mudo y NO crashee la UI.
+        try {
+            val i = yaArmado ?: Intent(this, ServicioMimapp::class.java).setAction(accion)
+            if (Build.VERSION.SDK_INT >= 26) {
+                startForegroundService(i)
+            } else {
+                startService(i)
+            }
+        } catch (_: Throwable) {}
     }
 }

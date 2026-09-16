@@ -687,4 +687,16 @@ class ServicioMimapp : Service() {
         receptorPedido = null
         super.onDestroy()
     }
+
+    /// Guillotina Android 15+ para `dataSync` (6h/24h en segundo plano):
+    /// si no se detiene en segundos tras este callback, el sistema
+    /// crashea el servicio. Parada limpia = celda que se quita sola.
+    /// En Android viejo nunca se llama (existe desde API 35).
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        try {
+            pararPing("límite sistema 6h (dataSync)")
+        } catch (_: Throwable) {
+            try { stopSelf() } catch (_: Throwable) {}
+        }
+    }
 }
