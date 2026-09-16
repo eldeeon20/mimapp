@@ -429,6 +429,22 @@ class _ColabDialogBodyState extends State<_ColabDialogBody> {
                       ),
                     ),
                   )),
+              if (!ColabService().pingActivo &&
+                  ColabService().espejoError.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.info_outline,
+                          size: 16, color: Colors.grey),
+                      const SizedBox(width: 6),
+                      Expanded(
+                          child: Text(ColabService().espejoError,
+                              style: const TextStyle(
+                                  fontSize: 11, color: Colors.grey))),
+                    ],
+                  ),
+                ),
               if (ColabService().pingActivo)
                 Padding(
                   padding: const EdgeInsets.only(top: 8),

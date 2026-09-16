@@ -6,7 +6,6 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
-import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
@@ -59,12 +58,20 @@ class ServicioMimapp : Service() {
         /// Vacío = todo bien. Sin esto el "ping 0" era un misterio.
         @Volatile var ultimoError: String = ""
 
+        /// Por qué paró la última vez (persiste en prefs: sobrevive a la
+        /// muerte del proceso para diagnosticar quién lo mató).
+        @Volatile var ultimaParada: String = ""
+
+        /// Viene de la alarma post-barrido (se muestra una vez en la 888).
+        @Volatile var revivido: Boolean = false
+
         fun estado(): Map<String, Any> = mapOf(
             "vivo" to vivo,
             "endpoint" to endpoint,
             "inicioMs" to inicioMs,
             "pingsOk" to pingsOk,
             "ultimoError" to ultimoError,
+            "ultimaParada" to ultimaParada,
         )
     }
 
@@ -106,6 +113,14 @@ class ServicioMimapp : Service() {
             }
             ACCION_START_PING -> {
                 val epExtra = intent.getStringExtra("endpoint") ?: ""
+                if (intent.getBooleanExtra("revivido", false)) {
+                    revivido = true
+                }
+                // Duplicado (alarma de respaldo con el ping ya vivo):
+                // ignorar para no resetear contadores/inicio.
+                if (vivo && epExtra.isNotEmpty() && epExtra == endpoint) {
+                    return START_STICKY
+                }
                 if (epExtra.isNotEmpty()) {
                     endpoint = epExtra
                     accessToken = intent.getStringExtra("accessToken") ?: ""
@@ -113,12 +128,9 @@ class ServicioMimapp : Service() {
                     expiryMs = intent.getLongExtra("expiryMs", 0L)
                     clientId = intent.getStringExtra("clientId") ?: ""
                     clientSecret = intent.getStringExtra("clientSecret") ?: ""
-                    guardarPrefs()
-                } else {
-                    // Relanzado (tarea barrida / revive STICKY): los
-                    // companion murieron con el proceso, retomar de prefs.
-                    cargarPrefs()
                 }
+                // Sin extras (revive STICKY pelado): sin datos no hay ping,
+                // solo frente. La alarma de onTaskRemoved SÍ trae extras.
                 if (endpoint.isNotEmpty()) empezarPing()
                 return START_STICKY
             }
@@ -131,26 +143,39 @@ class ServicioMimapp : Service() {
                 return START_NOT_STICKY
             }
         }
-        // Sin acción (prender manual o revive STICKY sin extras): si hay
-        // ping guardado se retoma, si no solo frente (como antes).
-        if (cargarPrefs() && endpoint.isNotEmpty()) {
-            empezarPing()
-        } else {
-            arrancarFrente()
-            mano.removeCallbacks(pulso)
-            mano.post(pulso)
-        }
+        // Sin acción (prender manual o revive STICKY sin extras): solo
+        // frente. El servicio NO crea archivos ni guarda nada.
+        arrancarFrente()
+        mano.removeCallbacks(pulso)
+        mano.post(pulso)
         return START_STICKY
     }
 
     /// Barrer la app mata el proceso (y con él al servicio: mismo
-    /// proceso). Relanzar en 2s por alarma; los datos se retoman de
-    /// prefs en onStartCommand (la memoria ya se perdió).
+    /// proceso). Relanzar en 2s por alarma LLEVANDO LOS DATOS en extras
+    /// (el servicio no guarda nada en disco: ni prefs ni archivos).
     override fun onTaskRemoved(rootIntent: Intent?) {
+        // Diagnóstico en la propia 888: si al barrer aparece esto y
+        // después nada = el sistema mató y la alarma no volvió.
+        // Si aparece "revivido" = la alarma funcionó.
         if (vivo && endpoint.isNotEmpty()) {
+            try {
+                val nm = getSystemService(NotificationManager::class.java)
+                nm?.notify(
+                    ID_SERVICIO,
+                    notiServicio("Secure App", "barrido: relanzando ping…"),
+                )
+            } catch (_: Throwable) {}
             try {
                 val i = Intent(this, ServicioMimapp::class.java)
                     .setAction(ACCION_START_PING)
+                    .putExtra("revivido", true)
+                    .putExtra("endpoint", endpoint)
+                    .putExtra("accessToken", accessToken)
+                    .putExtra("refreshToken", refreshToken)
+                    .putExtra("expiryMs", expiryMs)
+                    .putExtra("clientId", clientId)
+                    .putExtra("clientSecret", clientSecret)
                 val f = PendingIntent.FLAG_UPDATE_CURRENT or
                     (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_IMMUTABLE else 0)
                 val pi = PendingIntent.getService(this, 7, i, f)
@@ -163,49 +188,6 @@ class ServicioMimapp : Service() {
             } catch (_: Throwable) {}
         }
         super.onTaskRemoved(rootIntent)
-    }
-
-    // ---------------- persistencia del ping (sobrevive al proceso) ----
-
-    private fun prefs() =
-        getSharedPreferences("mimapp_ping", Context.MODE_PRIVATE)
-
-    /// Guarda lo necesario para retomar el ping si matan el proceso.
-    private fun guardarPrefs() {
-        try {
-            prefs().edit()
-                .putString("endpoint", endpoint)
-                .putString("accessToken", accessToken)
-                .putString("refreshToken", refreshToken)
-                .putLong("expiryMs", expiryMs)
-                .putString("clientId", clientId)
-                .putString("clientSecret", clientSecret)
-                .apply()
-        } catch (_: Throwable) {}
-    }
-
-    /// Retoma de prefs. false = no había nada guardado.
-    private fun cargarPrefs(): Boolean {
-        return try {
-            val p = prefs()
-            val ep = p.getString("endpoint", "") ?: ""
-            if (ep.isEmpty()) return false
-            endpoint = ep
-            accessToken = p.getString("accessToken", "") ?: ""
-            refreshToken = p.getString("refreshToken", "") ?: ""
-            expiryMs = p.getLong("expiryMs", 0L)
-            clientId = p.getString("clientId", "") ?: ""
-            clientSecret = p.getString("clientSecret", "") ?: ""
-            true
-        } catch (_: Throwable) {
-            false
-        }
-    }
-
-    private fun borrarPrefs() {
-        try {
-            prefs().edit().clear().apply()
-        } catch (_: Throwable) {}
     }
 
     // ---------------- frente y notificaciones ----------------
@@ -271,7 +253,7 @@ class ServicioMimapp : Service() {
             // "N pings": pings OK a Colab. Si latido sube y pings no,
             // el ping falla: el motivo va en el cuerpo (ultimoError).
             nm.notify(ID_SERVICIO, notiServicio("$t · latido $contador", c))
-        } catch (_: Exception) {}
+        } catch (_: Throwable) {}
     }
 
     private fun texto888(): Pair<String, String> {
@@ -282,31 +264,53 @@ class ServicioMimapp : Service() {
         if (ultimoError.isNotEmpty()) {
             cuerpo += " · error: $ultimoError"
         }
+        if (revivido) {
+            cuerpo += " · revivido ✓"
+            revivido = false
+        }
         return "Secure App · Colab vivo" to cuerpo
     }
 
     // ---------------- ping Colab (HTTP, como el CLI) ----------------
 
-    private fun empezarPing() {
-        if (endpoint.isEmpty() || accessToken.isEmpty()) return
-        guardarPrefs()
+    /// Arranca el ping. false = faltan datos (NO queda mudo: lo muestra
+    /// en la 888 y el espejo para no quedarse en "se activa y ya").
+    private fun empezarPing(): Boolean {
+        if (endpoint.isEmpty() || accessToken.isEmpty()) {
+            ultimoError = if (endpoint.isEmpty()) {
+                "sin endpoint"
+            } else {
+                "sin token: reautenticar en Colab"
+            }
+            ultimaParada = ""
+            vivo = false
+            arrancarFrente()
+            mano.removeCallbacks(pulso)
+            mano.post(pulso)
+            return false
+        }
+        // Latido también con ping (si no, la 888 queda congelada).
+        mano.removeCallbacks(pulso)
+        mano.post(pulso)
         mano.removeCallbacks(pingTick)
         inicioMs = System.currentTimeMillis()
         pingsOk = 0
         consec4xx = 0
         ultimoError = ""
+        ultimaParada = ""
         vivo = true
         arrancarFrente()
         Thread { hacerPing() }.start()
         mano.postDelayed(pingTick, 60_000)
+        return true
     }
 
     private fun pararPing(origen: String) {
         mano.removeCallbacks(pingTick)
         vivo = false
-        // Parada definitiva (manual, 24h, celda muerta, reauth): que el
-        // relanzado no resucite un ping que el usuario mató.
-        borrarPrefs()
+        // REGLA: nada para nada salvo Detener-ping: solo se registra el
+        // motivo en memoria (visible en la 888/777). Sin disco.
+        ultimaParada = if (origen.isNotEmpty()) origen else "ping detenido"
         if (origen.isNotEmpty()) actualizar888()
         endpoint = ""
         inicioMs = 0L
@@ -351,7 +355,6 @@ class ServicioMimapp : Service() {
             var token = accessToken
             if (expiryMs > 0 && System.currentTimeMillis() > expiryMs - 60_000) {
                 token = refrescar()
-                guardarPrefs()
             }
             var code = try {
                 pingCodigo(ep, token)
@@ -376,7 +379,6 @@ class ServicioMimapp : Service() {
                 var reintentado = -2
                 try {
                     token = refrescar()
-                    guardarPrefs()
                     reintentado = pingCodigo(ep, token)
                 } catch (_: Throwable) {}
                 if (reintentado == -1) {
@@ -486,7 +488,9 @@ class ServicioMimapp : Service() {
         mano.removeCallbacks(pulso)
         mano.removeCallbacks(pingTick)
         vivo = false
-        borrarPrefs()
+        // X / stop explícito: se registra en memoria (no fue el sistema).
+        // Sin disco: el servicio no crea archivos.
+        ultimaParada = "servicio detenido"
         try {
             if (Build.VERSION.SDK_INT >= 26) {
                 stopForeground(Service.STOP_FOREGROUND_REMOVE)

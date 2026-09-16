@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../services/settings.dart';
+import 'almacen_screen.dart';
 import 'tor_test_screen.dart';
 
 /// Menú de Configuración.
@@ -22,7 +23,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _Placeholder(Icons.autorenew, 'Opciones automáticas'),
     _Placeholder(Icons.data_usage, 'Uso de datos'),
     _Placeholder(Icons.download_done, 'Modelo descargado'),
-    _Placeholder(Icons.memory, 'Uso de memoria'),
   ];
 
   @override
@@ -34,6 +34,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
         padding: const EdgeInsets.all(12),
         children: [
           for (final p in _placeholders) _placeholderTile(p),
+          ListTile(
+            leading: const Icon(Icons.memory),
+            title: const Text('Almacén y caché'),
+            subtitle: const Text(
+                'Memoria libre/ocupada, caché por grupos y limpieza'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const AlmacenScreen())),
+          ),
           const Divider(),
           SwitchListTile(
             secondary: const Icon(Icons.link),

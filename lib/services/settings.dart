@@ -45,6 +45,10 @@ class Settings {
   String colabClientId = '';
   String colabClientSecret = '';
 
+  /// Carpeta RAÍZ de torrents (rqbit): la elige el usuario una vez y
+  /// cada torrent crea SU subcarpeta adentro. Vacío = preguntar.
+  String torrentRoot = '';
+
   bool _loaded = false;
 
   Future<void> load() async {
@@ -101,6 +105,7 @@ class Settings {
         }
         colabClientId = map['colabClientId'] as String? ?? '';
         colabClientSecret = map['colabClientSecret'] as String? ?? '';
+        torrentRoot = map['torrentRoot'] as String? ?? '';
         if (needsMigration) {
           // Legado XOR -> re-guardar ya como envelope V2 (AES-GCM).
           await save();
@@ -127,6 +132,7 @@ class Settings {
         'nostrKeys': nostrKeys,
         'colabClientId': colabClientId,
         'colabClientSecret': colabClientSecret,
+        'torrentRoot': torrentRoot,
       };
       final plain = utf8.encode(jsonEncode(map));
       final enc =

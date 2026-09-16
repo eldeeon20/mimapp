@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../services/rqbit.dart';
+import '../services/settings.dart';
 
 /// Configuración de sesión en memoria (se aplica al primer arranque).
 class _SessionCfg {
@@ -46,17 +47,27 @@ class _TorrentScreenState extends State<TorrentScreen> {
     super.dispose();
   }
 
+  /// Carpeta RAÍZ elegida (cada torrent crea SU subcarpeta adentro).
+  String _raiz = '';
+
   Future<void> _boot() async {
     try {
       if (!RqbitBridge.running) {
-        final docs = await getApplicationDocumentsDirectory();
+        final raiz = await _resolverRaiz();
+        if (raiz.isEmpty) {
+          setState(() => _error = 'sin carpeta raíz: cancelado');
+          if (mounted) setState(() => _booting = false);
+          return;
+        }
+        _raiz = raiz;
         _bootInfo = await RqbitBridge.startSession(
-          '${docs.path}/torrent',
+          raiz,
           dht: _cfg.dht,
           upnp: _cfg.upnp,
           downBps: _cfg.downBps,
           upBps: _cfg.upBps,
         );
+        _bootInfo = '$_bootInfo\ncarpeta raíz: $raiz';
       }
       setState(() => _error = null);
       await _refresh();
@@ -65,6 +76,55 @@ class _TorrentScreenState extends State<TorrentScreen> {
       setState(() => _error = '$e');
     }
     if (mounted) setState(() => _booting = false);
+  }
+
+  /// Raíz guardada o preguntada una vez (default + Elegir carpeta).
+  /// Vacío = el usuario canceló.
+  Future<String> _resolverRaiz() async {
+    await Settings.instance.load();
+    final guardada = Settings.instance.torrentRoot.trim();
+    if (guardada.isNotEmpty) return guardada;
+    final docs = await getApplicationDocumentsDirectory();
+    final ctrl = TextEditingController(text: '${docs.path}/torrent');
+    final ok = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Carpeta raíz de torrents'),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Text(
+              'Cada torrent crea SU subcarpeta adentro. Se pregunta una '
+              'sola vez (después se cambia en ⚙).',
+              style: TextStyle(fontSize: 12)),
+          const SizedBox(height: 8),
+          TextField(controller: ctrl, maxLines: 2,
+              style: const TextStyle(fontSize: 12)),
+        ]),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar')),
+          TextButton(
+              onPressed: () async {
+                try {
+                  final p =
+                      await FilePicker.platform.getDirectoryPath();
+                  if (p != null && p.isNotEmpty) ctrl.text = p;
+                } catch (_) {}
+              },
+              child: const Text('Elegir…')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Usar')),
+        ],
+      ),
+    );
+    if (ok != true) return '';
+    final raiz = ctrl.text.trim();
+    if (raiz.isEmpty) return '';
+    Settings.instance.torrentRoot = raiz;
+    await Settings.instance.save();
+    return raiz;
   }
 
   Future<void> _refresh() async {
@@ -224,6 +284,60 @@ class _TorrentScreenState extends State<TorrentScreen> {
               decoration: const InputDecoration(
                   labelText: 'Límite global ↑ KB/s (vacío = ∞)'),
             ),
+            const Divider(),
+            Row(children: [
+              Expanded(
+                  child: Text(
+                      'Raíz: ${_raiz.isEmpty ? Settings.instance.torrentRoot : _raiz}',
+                      style: const TextStyle(fontSize: 11))),
+              TextButton(
+                  onPressed: () async {
+                    final ctrl = TextEditingController(
+                        text: _raiz.isEmpty
+                            ? Settings.instance.torrentRoot
+                            : _raiz);
+                    if (!context.mounted) return;
+                    final p = await showDialog<String>(
+                      context: context,
+                      builder: (c2) => AlertDialog(
+                        title: const Text('Carpeta raíz'),
+                        content: TextField(
+                            controller: ctrl,
+                            maxLines: 2,
+                            style:
+                                const TextStyle(fontSize: 12)),
+                        actions: [
+                          TextButton(
+                              onPressed: () =>
+                                  Navigator.pop(c2),
+                              child: const Text('Cancelar')),
+                          TextButton(
+                              onPressed: () async {
+                                try {
+                                  final d = await FilePicker
+                                      .platform
+                                      .getDirectoryPath();
+                                  if (d != null && d.isNotEmpty) {
+                                    ctrl.text = d;
+                                  }
+                                } catch (_) {}
+                              },
+                              child: const Text('Elegir…')),
+                          FilledButton(
+                              onPressed: () =>
+                                  Navigator.pop(c2, ctrl.text.trim()),
+                              child: const Text('Guardar')),
+                        ],
+                      ),
+                    );
+                    if (p != null && p.isNotEmpty) {
+                      Settings.instance.torrentRoot = p;
+                      await Settings.instance.save();
+                      setD(() {});
+                    }
+                  },
+                  child: const Text('Cambiar')),
+            ]),
             if (RqbitBridge.running)
               const Padding(
                 padding: EdgeInsets.only(top: 8),

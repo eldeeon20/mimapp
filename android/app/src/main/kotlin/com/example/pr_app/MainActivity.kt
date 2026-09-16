@@ -1,8 +1,12 @@
 package com.example.pr_app
 
+import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings
 import android.view.WindowManager
 import com.ryanheise.audioservice.AudioServiceActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -81,6 +85,53 @@ class MainActivity : AudioServiceActivity() {
                 "estado" -> {
                     val e = ServicioMimapp.estado()
                     res.success(e)
+                }
+                // Check de memoria/almacenamiento (Configuración →
+                // Almacén): StatFs del almacenamiento interno + RAM del
+                // ActivityManager. Todo en bytes (Dart formatea).
+                "memoria" -> {
+                    try {
+                        val stat = android.os.StatFs(
+                            android.os.Environment.getDataDirectory().path)
+                        val bloque = stat.blockSizeLong
+                        val total = stat.blockCountLong * bloque
+                        val libre = stat.availableBlocksLong * bloque
+                        val am = getSystemService(
+                            android.content.Context.ACTIVITY_SERVICE)
+                            as android.app.ActivityManager
+                        val mi =
+                            android.app.ActivityManager.MemoryInfo()
+                        am.getMemoryInfo(mi)
+                        res.success(mapOf(
+                            "internaTotal" to total,
+                            "internaLibre" to libre,
+                            "ramTotal" to mi.totalMem,
+                            "ramLibre" to mi.availMem,
+                        ))
+                    } catch (e: Throwable) {
+                        res.error("MEMORIA", "${e.message}", null)
+                    }
+                }
+                // Sin esto Android 12+ y las ROMs matan el servicio al
+                // barrer y NO lo dejan revivir (ni alarma ni sticky).
+                // Abre el ajuste para eximir a la app (una sola vez).
+                "sinLimites" -> {
+                    try {
+                        val pm =
+                            getSystemService(Context.POWER_SERVICE) as PowerManager
+                        if (pm.isIgnoringBatteryOptimizations(packageName)) {
+                            res.success(true)
+                        } else {
+                            val i = Intent(
+                                Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                                Uri.parse("package:$packageName"),
+                            )
+                            startActivity(i)
+                            res.success(false)
+                        }
+                    } catch (_: Throwable) {
+                        res.success(false)
+                    }
                 }
                 "avisar" -> {
                     val m = (llamada.arguments as? Map<*, *>) ?: emptyMap<Any, Any>()

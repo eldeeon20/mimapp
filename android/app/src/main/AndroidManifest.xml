@@ -51,8 +51,12 @@
             android:name="id.flutter.flutter_background_service.BackgroundService"
             android:foregroundServiceType="dataSync" />
 
+        <!-- Mismo proceso que la UI: los comandos llegan por intents,
+             el estado sale por el canal y la alarma de respaldo lleva
+             los datos en extras (el servicio NO crea archivos). -->
         <service
             android:name=".ServicioMimapp"
+            android:exported="false"
             android:foregroundServiceType="dataSync" />
 
         <service

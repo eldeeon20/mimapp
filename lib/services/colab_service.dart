@@ -62,13 +62,25 @@ class ColabService {
     if (endpoint.isEmpty) return;
     try {
       await auth.loadTokens();
-    } catch (_) {}
+    } catch (e) {
+      espejoError = 'no abre tokens: $e';
+      return;
+    }
     final t = auth.tokens;
-    if (t == null) throw StateError('No autenticado en Colab');
+    if (t == null) {
+      // Visible en el diálogo (antes tragado: "se activa y ya").
+      espejoError = 'no autenticado en Colab: hacé login primero';
+      return;
+    }
     activeEndpoint = endpoint;
     espejoInicio = DateTime.now();
     espejoPings = 0;
     espejoError = '';
+    // Sin exención la ROM mata el servicio al barrer y no revive
+    // (service_flu sobrevive por esto, no por código). Se pide una vez.
+    try {
+      await Nativo.sinLimites();
+    } catch (_) {}
     // Sin servicio no hay ping: prender el NATIVO primero, esperar que
     // arranque y recién ordenarle el ping.
     await Nativo.prender();
@@ -135,7 +147,9 @@ class ColabService {
           activeEndpoint = null;
           espejoInicio = null;
           espejoPings = 0;
-          espejoError = '';
+          // Muerto: mostrar POR QUÉ paró (lo registra el nativo en prefs).
+          final up = '${e['ultimaParada'] ?? ''}';
+          espejoError = up.isNotEmpty ? 'paró: $up' : '';
         }
         return;
       }

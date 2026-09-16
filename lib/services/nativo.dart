@@ -62,6 +62,18 @@ class Nativo {
     } catch (_) {}
   }
 
+  /// Pide eximir a la app de la optimización de batería (una vez).
+  /// Sin esto Android 12+ y las ROMs matan el servicio al barrer y no
+  /// lo dejan revivir. true = ya exenta (no abre nada).
+  static Future<bool> sinLimites() async {
+    try {
+      final r = await _canal.invokeMethod('sinLimites');
+      return r == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Para el servicio nativo (sin celda no queda nada). No mata la app.
   static Future<void> stop() async {
     try {
@@ -70,6 +82,7 @@ class Nativo {
   }
 
   /// Espejo de lo que pinea el nativo (para la 777 de Dart).
+  /// Mismo proceso: el canal lee el companion en vivo.
   static Future<Map<String, dynamic>> estado() async {
     try {
       final r = await _canal.invokeMethod('estado');
