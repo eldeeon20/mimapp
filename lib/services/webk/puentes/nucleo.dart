@@ -63,9 +63,12 @@ class PuenteNucleo extends WebkConector {
       case 'pase':
         // Composición interna (iframe/fetch): la página ya cargada pide
         // un pase de una sola vez para incrustar otra. Solo con llave.
+        // Vale para registradas Y para assets a demanda (css/js de
+        // webapps: no están en el índice, los trae cargaAsset; el
+        // server 404ea lo inexistente igual). Sin llave → DENEGADO.
         final okPase = llaveOk(leerLlave(), cmd);
         final destino = cmd['pagina']?.toString() ?? '';
-        if (!okPase || !indice.paginas.contains(destino)) {
+        if (!okPase || !_rutaServible(destino)) {
           log('✗ pase "$destino": DENEGADO');
           return 'DENEGADO';
         }
@@ -74,5 +77,18 @@ class PuenteNucleo extends WebkConector {
       default:
         return 'CMD?';
     }
+  }
+
+  /// ¿La ruta puede servirse con pase? Registradas siempre; a demanda
+  /// solo bajo `webapp/` o `paginas/`, nunca con `..`.
+  /// (La existencia la decide el resolvedor/cargaAsset con 404.)
+  bool _rutaServible(String destino) {
+    if (destino.isEmpty || destino.contains('..')) return false;
+    if (indice.paginas.contains(destino)) return true;
+    var n = destino.trim();
+    while (n.startsWith('/')) {
+      n = n.substring(1);
+    }
+    return n.startsWith('webapp/') || n.startsWith('paginas/');
   }
 }
