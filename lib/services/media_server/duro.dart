@@ -61,7 +61,7 @@ class Duro {
       throw ArgumentError('media_server: clave vacía');
     }
     final pbkdf2 = Pbkdf2(
-      mac: Hmac.sha256(),
+      macAlgorithm: Hmac.sha256(),
       iterations: _pbkdf2Vueltas,
       bits: 256,
     );
