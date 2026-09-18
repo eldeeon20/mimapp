@@ -13,7 +13,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 /// formato `prev`, misma clave del archivo) y el grid/list las
 /// muestran sin abrir jamás el original.
 ///
-/// Imágenes: 1 jpeg de 320px. Videos: frames con el media de
+/// Imágenes: 1 PNG de 320px. Videos: frames con el media de
 /// mimapp (seek + screenshot sobre surface oculta). Vacío = sin
 /// previa (el grid muestra icono+formato).
 /// Moldes viejos (sin previas guardadas): previa al vuelo como antes.
@@ -63,7 +63,8 @@ class PreviewMolde {
   static String patronDe(String nombreRel) => '$prefijo$nombreRel#%';
 }
 
-/// Una previa de imagen: jpeg de 320px (corre en hilo aparte).
+/// Una previa de imagen: PNG de 320px (corre en hilo aparte).
+/// (Sin encoder jpeg a mano: `ImageByteFormat` no tiene jpeg.)
 Future<List<Uint8List>> _previaImagen(String ruta) async {
   try {
     final bytes = await File(ruta).readAsBytes();
@@ -75,7 +76,7 @@ Future<List<Uint8List>> _previaImagen(String ruta) async {
     final frame = await codec.getNextFrame();
     try {
       final data = await frame.image
-          .toByteData(format: ui.ImageByteFormat.jpeg);
+          .toByteData(format: ui.ImageByteFormat.png);
       final b = data?.buffer.asUint8List();
       if (b == null || b.isEmpty) return [];
       return [Uint8List.fromList(b)];
