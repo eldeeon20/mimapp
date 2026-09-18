@@ -130,6 +130,11 @@ abstract final class RadialCatalog {
         icon: Icons.archive_rounded,
         color: Colors.tealAccent),
     RadialMenuItem(
+        key: 'ts',
+        label: 'Test SQL',
+        icon: Icons.table_chart_rounded,
+        color: Colors.limeAccent),
+    RadialMenuItem(
         key: 'ring',
         label: 'Nostringer',
         icon: Icons.fingerprint_rounded,

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../modo_sql/test_screen.dart';
 import '../screens/agenda_test_screen.dart';
 import '../screens/ai_screen.dart';
 import '../screens/db_test_screen.dart';
@@ -132,6 +133,10 @@ const Map<String, TestRoute> kTestRoutes = {
     titulo: 'MediaServer · moldes .mld + rangos',
     pagina: _ml,
   ),
+  'ts': (
+    titulo: 'Test SQL · moldes + índice + HF',
+    pagina: _ts,
+  ),
 };
 
 Widget _dm(BuildContext _) => const NostrDmTestScreen();
@@ -159,3 +164,4 @@ Widget _ir(BuildContext _) => const IrohTestScreen();
 Widget _age(BuildContext _) => const AgendaTestScreen();
 Widget _db(BuildContext _) => const DbTestScreen();
 Widget _ml(BuildContext _) => const MediaServerTestScreen();
+Widget _ts(BuildContext _) => const TestSqlScreen();
