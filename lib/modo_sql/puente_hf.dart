@@ -1,7 +1,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:mimapp/services/hf.dart';
+import 'package:pr_app/services/hf.dart';
 
 import 'indice/indice.dart';
 import 'media_server/media_server.dart';
