@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../services/settings.dart';
+import 'colab_prefabs.dart';
 import 'colab_runtime.dart';
 import 'colab_task_models.dart';
 
@@ -182,8 +183,14 @@ class _ColabTasksScreenState extends State<ColabTasksScreen> {
     return v;
   }
 
-  Future<void> _createTaskDialog() async {
-    final nombre = TextEditingController();
+  /// Preset CDN → cifrar → HF (5 args: URL, maestro, lote, token, repo).
+  void _agregarPrefabCdnHf() {
+    if (_tasks.any((t) => t.id == 'prefab-cdn-hf')) return;
+    setState(() => _tasks.add(ColabPrefabs.cdnCifrarHf()));
+    _persist();
+  }
+
+  Future<void> _createTaskDialog() async {    final nombre = TextEditingController();
     final code = TextEditingController(text: '# Código Python...\nprint("hola", ARG if "ARG" in dir() else "")');
     bool hasArg = false;
     final ok = await showDialog<bool>(
@@ -543,6 +550,11 @@ class _ColabTasksScreenState extends State<ColabTasksScreen> {
               tooltip: 'Borrar terminados',
               onPressed: _pockets.isEmpty ? null : _clearFinished,
               icon: const Icon(Icons.cleaning_services, size: 20),
+            ),
+            IconButton(
+              tooltip: 'Preset CDN → cifrar → HF',
+              onPressed: _agregarPrefabCdnHf,
+              icon: const Icon(Icons.auto_awesome, size: 20),
             ),
             IconButton(
               tooltip: 'Nueva tarea',

@@ -7,6 +7,7 @@ import '../cache/trozo_cache.dart';
 import '../indice/indice.dart';
 import '../db/caja_sql.dart';
 import '../media_server/media_server.dart';
+import '../preview_molde.dart';
 
 /// HERRAMIENTA (una vez): crea `.mld` + índice en TU sql.
 /// Clave ÚNICA: abre tu SQL y deriva el molde.
@@ -90,7 +91,9 @@ class CreateMoldeSql {
     final db =
         molde == null ? baseDatos : 'm_${molde.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_')}';
     final caja = CajaSql();
-    await caja.abrir(db, carpeta: await dirSql());
+    // La SQL va cifrada entera (sqlite3mc ChaCha20) con su propia
+    // clave; adentro nombres+tags van en bruto (sin cifrado manual).
+    await caja.abrir(db, carpeta: await dirSql(), clave: claveSql);
     caja.crearTabla(MediaBase.tablaMoldes, {
       'nombre': 'TEXT UNIQUE',
       'ruta': 'TEXT',
@@ -127,8 +130,8 @@ class CreateMoldeSql {
     if (!caja.campos(MediaBase.tablaArchivos).contains('trozo')) {
       caja.agregarCampo(MediaBase.tablaArchivos, 'trozo', 'INTEGER');
     }
-    // Índice CIFRADO: nombres+tags no van en plano (fase 1: contenido
-    // de columnas; los nombres de archivo .mld/.db siguen visibles).
+    // La SQL va cifrada entera (sqlite3mc); adentro nombres+tags
+    // van en bruto. `*_c` solo se lee (moldes viejos), no se escribe.
     if (!caja.campos(MediaBase.tablaArchivos).contains('nombre_c')) {
       caja.agregarCampo(
           MediaBase.tablaArchivos, 'nombre_c', 'TEXT');
@@ -184,6 +187,10 @@ class CreateMoldeSql {
     Map<String, List<String>>? tagsPorArchivo,
     int trozoClaro = Duro.trozoClaro,
     String? passIndice,
+    // Captura de video (surface oculta del creador). Sin captura,
+    // los videos quedan sin previas (icono+formato).
+    CapturaVideo? captura,
+    void Function(String s)? log,
   }) async {
     MediaBase.exigirNombre('molde', nombre);
     if (clave.isEmpty) {
@@ -221,14 +228,9 @@ class CreateMoldeSql {
     final destino = await MediaBase.archivoMolde(nombre);
     if (await destino.exists()) await destino.delete();
     final sal = Duro.nuevaSal();
-    // Clave del índice del molde (nombres+tags cifrados, no en plano).
-    final moldeKey = await Duro.claveMoldeHilo(
-      clave: clave,
-      molde: nombre,
-      salHex: sal,
-    );
     var offset = 0;
     final filas = <Map<String, Object?>>[];
+    var conPrevias = 0;
     final waf = destino.openSync(mode: FileMode.write);
     try {
       for (final f in fuentes) {
@@ -259,23 +261,66 @@ class CreateMoldeSql {
         }
         final guardado = _largoGuardado(tam, trozoClaro);
         final tagsF = porArchivo[nombreRel] ?? comunes;
+        // En bruto: la SQL ya va cifrada entera, sin cifrado manual.
         final fila = MediaBase.filaArchivo(
           molde: nombre,
-          nombre: '§enc',
-          formato: 'enc',
+          nombre: nombreRel,
+          formato: _formato(nombreRel),
           tamano: tam,
           inicio: offset,
           fin: offset + guardado,
           fecha: fecha,
-          tags: const [],
+          tags: tagsF,
           trozo: trozoClaro,
         );
-        fila['nombre_c'] = await Duro.cifrarTexto(
-            claveMolde: moldeKey, texto: nombreRel);
-        fila['tags_c'] = await Duro.cifrarTexto(
-            claveMolde: moldeKey, texto: tagsF.join('\n'));
         filas.add(fila);
         offset += guardado;
+        // Previas indexadas en la SQL: se generan acá, se guardan
+        // cifradas en el .mld (misma clave del archivo) y el grid
+        // las muestra sin abrir jamás el original.
+        try {
+          final previas = await PreviewMolde.generar(
+            ruta: f.path,
+            formato: _formato(nombreRel),
+            captura: captura,
+          );
+          if (previas.isNotEmpty) conPrevias++;
+          for (var i = 0; i < previas.length; i++) {
+            final bytes = previas[i];            final tmpP = File(
+                '${Directory.systemTemp.path}/prev_${DateTime.now().microsecondsSinceEpoch}_$i.tmp');
+            try {
+              await tmpP.writeAsBytes(bytes, flush: true);
+              final ppacks = await Duro.cifrarArchivoHilo(
+                claveArchivo: claveArchivo,
+                trozoClaro: trozoClaro,
+                ruta: tmpP.path,
+              );
+              var pesc = 0;
+              for (final p in ppacks) {
+                waf.writeFromSync(p);
+                pesc += p.length - Duro.overhead;
+              }
+              if (pesc != bytes.length) continue;
+              final guardadoP = _largoGuardado(bytes.length, trozoClaro);
+              filas.add(MediaBase.filaArchivo(
+                molde: nombre,
+                nombre: PreviewMolde.entrada(nombreRel, i),
+                formato: 'prev',
+                tamano: bytes.length,
+                inicio: offset,
+                fin: offset + guardadoP,
+                fecha: fecha,
+                tags: const [],
+                trozo: trozoClaro,
+              ));
+              offset += guardadoP;
+            } finally {
+              try {
+                if (await tmpP.exists()) await tmpP.delete();
+              } catch (_) {}
+            }
+          }
+        } catch (_) {}
       }
     } finally {
       try {
@@ -301,6 +346,7 @@ class CreateMoldeSql {
       });
       final hechoN = filas.length;
       final hechoTotal = offset;
+      log?.call('· previas guardadas en $conPrevias archivo(s)');
       try {
         caja.cerrar();
       } catch (_) {}
@@ -398,11 +444,119 @@ class CreateMoldeSql {
     try {
       final crudas = caja.listarDonde(
         MediaBase.tablaArchivos,
-        'molde = ?',
+        // Las previas (.prev/) no listan: van por previasDe.
+        'molde = ? AND nombre NOT LIKE \'.prev/%\'',
         [molde],
         por: 'inicio',
       );
       if (crudas.isEmpty) return [];
+      return _mapearFilas(
+          claveSql: claveSql,
+          molde: molde,
+          caja: caja,
+          crudas: crudas);
+    } finally {
+      caja.cerrar();
+    }
+  }
+
+  /// Filtro por tag EN SQL (LIKE sobre columnas en bruto: la SQL ya
+  /// va cifrada entera, no hay cifrado manual que impida matchear).
+  static Future<List<FichaArchivo>> filasPorTag({
+    required String claveSql,
+    required String molde,
+    required String tag,
+  }) async {
+    final t = tag.trim().replaceAll("'", "''");
+    if (t.isEmpty) return filasDe(claveSql: claveSql, molde: molde);
+    final like = '%$t%';
+    final cond = 'molde = ? AND nombre NOT LIKE \'.prev/%\' '
+        'AND (nombre LIKE ? '
+        'OR tag1 LIKE ? OR tag2 LIKE ? OR tag3 LIKE ? OR tag4 LIKE ? '
+        'OR tag5 LIKE ? OR tag6 LIKE ? OR tag7 LIKE ? OR tag8 LIKE ?)';
+    final caja = await _cajaMolde(claveSql, molde);
+    try {
+      final crudas = caja.listarDonde(
+        MediaBase.tablaArchivos,
+        cond,
+        [molde, like, like, like, like, like, like, like, like, like],
+        por: 'inicio',
+      );
+      if (crudas.isEmpty) return [];
+      return _mapearFilas(
+          claveSql: claveSql,
+          molde: molde,
+          caja: caja,
+          crudas: crudas);
+    } finally {
+      caja.cerrar();
+    }
+  }
+
+  /// Previas guardadas de un archivo (del .mld, descifradas con la
+  /// clave del ORIGINAL, no de la entrada previa). Vacío = sin
+  /// previas (moldes viejos: previa al vuelo).
+  static Future<List<Uint8List>> previasDe({
+    required String claveSql,
+    required String molde,
+    required String archivo,
+    TrozoCache? cache,
+    MoldeInfo? info,
+  }) async {
+    final esc =
+        archivo.replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_');
+    final caja = await _cajaMolde(claveSql, molde);
+    List<FichaArchivo> fichas;
+    try {
+      final crudas = caja.listarDonde(
+        MediaBase.tablaArchivos,
+        'molde = ? AND nombre LIKE ? ESCAPE \'\\\'',
+        [molde, '${PreviewMolde.prefijo}$esc#%'],
+        por: 'nombre',
+      );
+      if (crudas.isEmpty) return [];
+      fichas = await _mapearFilas(
+          claveSql: claveSql, molde: molde, caja: caja, crudas: crudas);
+    } finally {
+      caja.cerrar();
+    }
+    final infoOk = info ?? await moldeInfo(claveSql: claveSql, molde: molde);
+    if (infoOk == null) return [];
+    final claveOk = await claveDe(
+      claveSql: claveSql,
+      molde: molde,
+      archivo: archivo,
+      salHex: infoOk.sal,
+    );
+    final fuera = <Uint8List>[];
+    for (final p in fichas) {
+      if (p.tamano <= 0) continue;
+      try {
+        fuera.add(await pedirRango(
+          claveSql: claveSql,
+          molde: molde,
+          archivo: p.nombre,
+          desde: 0,
+          hasta: p.tamano,
+          cache: cache,
+          info: infoOk,
+          filas: fichas,
+          claveArchivo: claveOk,
+        ));
+      } catch (_) {}
+    }
+    return fuera;
+  }
+
+  /// Mapea filas crudas a FichaArchivo (descifra en batch solo las
+  /// legacy con `*_c`; las nuevas ya vienen en bruto y no tocan
+  /// el hilo de descifrado).
+  static Future<List<FichaArchivo>> _mapearFilas({
+    required String claveSql,
+    required String molde,
+    required CajaSql caja,
+    required List<Map<String, Object?>> crudas,
+  }) async {
       final moldeKey =
           await _claveMoldeDe(caja, claveSql, molde);
       // Junta todo lo cifrado y lo descifra en UN solo hilo.
@@ -457,9 +611,6 @@ class CreateMoldeSql {
         fuera.add(FichaArchivo.deMapa(m));
       }
       return fuera;
-    } finally {
-      caja.cerrar();
-    }
   }
 
   /// Mueve un molde de la SQL vieja a su propia SQL (una vez).
@@ -504,18 +655,18 @@ class CreateMoldeSql {
         final nuevas = <Map<String, Object?>>[];
         for (final f in filas) {
           final c = sinId(f);
-          final tags = <String>[];
-          for (var i = 1; i <= MediaBase.maxTags; i++) {
-            final t = '${c['tag$i'] ?? ''}';
-            if (t.isNotEmpty) tags.add(t);
-            c['tag$i'] = '';
+          if ('${c['nombre_c'] ?? ''}'.isNotEmpty) {
+            // Legacy cifrada: se descifra y queda en bruto
+            // (la SQL ya va cifrada entera, sin cifrado manual).
+            final real = await _filaReal(moldeKey, c);
+            c['nombre'] = real['nombre'];
+            c['formato'] = real['formato'];
+            for (var i = 1; i <= MediaBase.maxTags; i++) {
+              c['tag$i'] = real['tag$i'];
+            }
+            c['nombre_c'] = '';
+            c['tags_c'] = '';
           }
-          c['nombre'] = '§enc';
-          c['formato'] = 'enc';
-          c['nombre_c'] = await Duro.cifrarTexto(
-              claveMolde: moldeKey, texto: '${f['nombre'] ?? ''}');
-          c['tags_c'] = await Duro.cifrarTexto(
-              claveMolde: moldeKey, texto: tags.join('\n'));
           nuevas.add(c);
         }
         propia.agregarLote(MediaBase.tablaArchivos, nuevas);
@@ -686,11 +837,12 @@ class CreateMoldeSql {
         throw StateError('test_sql: "$archivo" no está en "$molde"');
       }
       final mapa = <String, Object?>{
-        'tags_c': await Duro.cifrarTexto(
-            claveMolde: moldeKey, texto: saneados.join('\n')),
+        'nombre_c': '',
+        'tags_c': '',
       };
       for (var i = 0; i < MediaBase.maxTags; i++) {
-        mapa['tag${i + 1}'] = '';
+        mapa['tag${i + 1}'] =
+            i < saneados.length ? saneados[i] : '';
       }
       caja.actualizar(MediaBase.tablaArchivos, (f['id'] as int?) ?? 0, mapa);
       olvidarMolde(molde);
@@ -819,10 +971,11 @@ class CreateMoldeSql {
 
   /// Rastrea una carpeta: por cada `.mld` busca su SQL (`m_<n>.db`
   /// al lado o en Download, si no la vieja compartida) y lee sal,
-  /// total y cantidad SIN pass (la SQL de índice es plana; la pass
-  /// del molde se pide al añadir al índice).
+  /// total y cantidad. Las SQL cifradas se abren con [claveSql];
+  /// las legacy en plano se leen igual.
   static Future<List<Map<String, Object?>>> rastrearCarpeta(
-      String dir) async {
+      String dir,
+      {String claveSql = ''}) async {
     final origen = Directory(dir);
     if (!await origen.exists()) {
       throw ArgumentError('rastrear: no existe "$dir"');
@@ -858,7 +1011,7 @@ class CreateMoldeSql {
       for (final c in candidatas) {
         try {
           final caja = CajaSql();
-          await caja.abrirRuta(c);
+          await caja.abrirRuta(c, clave: claveSql);
           try {
             fila = caja.uno(
                 MediaBase.tablaMoldes, 'nombre = ?', [nombre]);
@@ -875,7 +1028,7 @@ class CreateMoldeSql {
       var n = 0;
       try {
         final caja = CajaSql();
-        await caja.abrirRuta(dbOk);
+        await caja.abrirRuta(dbOk, clave: claveSql);
         try {
           n = caja
               .listarDonde(MediaBase.tablaArchivos, 'molde = ?',

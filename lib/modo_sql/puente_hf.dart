@@ -5,6 +5,7 @@ import 'package:pr_app/services/hf.dart';
 
 import 'indice/indice.dart';
 import 'media_server/media_server.dart';
+import 'tool/create_molde_sql.dart';
 
 /// Puente HF de moldes: el índice guarda por molde su repo
 /// (dir/user = `repo_id`), su pass y su token de acceso.
@@ -125,34 +126,57 @@ class PuenteHf {
     return version;
   }
 
-  /// Baja la SQL entera del molde si no está local. Retorna su path.
-  /// El .mld NO se baja: se consulta por rangos (`rangoMld`).
+  /// Baja la SQL entera del molde si no está local, directo a su
+  /// ruta propia (`m_<nombre>.db`, la que `_cajaMolde` sabe abrir),
+  /// y deja apuntado el índice (el índice sabe dónde está cada SQL).
+  /// Retorna su path. El .mld NO se baja: se consulta por rangos.
   Future<String> bajarSql({
     required String passIndice,
     required String nombre,
     String repoType = 'dataset',
   }) async {
+    final destino = await CreateMoldeSql.rutaDbPropia(nombre);
+    if (await File(destino).exists()) {
+      await Indice.actualizarRutas(
+        pass: passIndice,
+        nombre: nombre,
+        dbRuta: destino,
+        mldRuta: '',
+      );
+      return destino;
+    }
     final ent =
         await Indice.entrada(pass: passIndice, nombre: nombre);
     if (ent == null) {
       throw StateError('puente_hf: "$nombre" no está en el índice');
     }
-    final dbRuta = '${ent['db_ruta'] ?? ''}';
-    if (dbRuta.isNotEmpty && await File(dbRuta).exists()) return dbRuta;
     final repo = '${ent['hf_repo'] ?? ''}';
     final token = '${ent['hf_token'] ?? ''}';
     if (repo.isEmpty || token.isEmpty) {
       throw StateError('puente_hf: "$nombre" sin repo/token');
     }
     await init(token);
-    final carpeta = await MediaBase.carpetaMoldes();
-    final path = await _hf.downloadFile(
-      repoId: repo,
-      filename: '$nombre.sql',
-      localDir: carpeta.path,
-      repoType: repoType,
+    final tmp = await Directory.systemTemp.createTemp('hf_sql');
+    try {
+      final bajado = await _hf.downloadFile(
+        repoId: repo,
+        filename: '$nombre.sql',
+        localDir: tmp.path,
+        repoType: repoType,
+      );
+      await File(bajado).copy(destino);
+    } finally {
+      try {
+        await tmp.delete(recursive: true);
+      } catch (_) {}
+    }
+    await Indice.actualizarRutas(
+      pass: passIndice,
+      nombre: nombre,
+      dbRuta: destino,
+      mldRuta: '',
     );
-    return path;
+    return destino;
   }
 
   /// Un RANGO de bytes del .mld remoto (el molde se consulta,

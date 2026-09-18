@@ -6,18 +6,23 @@ import 'package:cryptography/cryptography.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:sqlite3/sqlite3.dart';
 
+import '../db/caja_sql.dart';
 import '../media_server/media_server.dart';
 
 /// ÍNDICE en SQL de verdad (`indice.db` en Download) con SU PROPIA
-/// CLAVE: en reposo el archivo va cifrado entero
-/// (sal+nonce+AES-256-GCM); se descifra a un temporal privado solo
-/// para operar y se vuelve a cifrar. Clave mala = no autentica.
+/// CLAVE: el archivo va cifrado entero con sqlite3mc ChaCha20 y el
+/// cifrado es transparente por página — jamás hay nada descifrado
+/// en disco, sin temporales. Clave mala = no abre.
+/// (El formato viejo de GCM entero se migra solo, una vez.)
 ///
 /// Liviana: por molde solo QUÉ sql + SU pass + dónde está el .mld.
 class Indice {
   static const archivo = 'indice.db';
   static const _viejoDb = 'catalogo.db';
   static const _viejoMlc = 'catalogo.mlc';
+
+  /// Sumidero de avisos (lo viejo y lo automático se loguea siempre).
+  static void Function(String s)? log;
 
   static Future<File> _file() async {
     final carpeta = await MediaBase.carpetaMoldes();
@@ -115,40 +120,109 @@ class Indice {
     }
   }
 
-  /// Cifra el temporal de vuelta al archivo y lo borra.
-  static Future<void> _persistir(String pass, File tmp) async {
-    final claros = await tmp.readAsBytes();
-    final r = Random.secure();
-    final sal = Uint8List.fromList(
-        List<int>.generate(16, (_) => r.nextInt(256)));
-    final nonce = Uint8List.fromList(
-        List<int>.generate(12, (_) => r.nextInt(256)));
-    final key = await _clave(pass, _salHex(sal));
-    final box = await AesGcm.with256bits().encrypt(
-      claros,
-      secretKey: SecretKey(key),
-      nonce: nonce,
-    );
+  /// Abre el índice: SQLite cifrado con sqlite3mc (clave = pass).
+  /// Sin temporales descifrados en disco: el cifrado es transparente
+  /// por página, nunca hay nada en claro fuera del proceso.
+  /// Crea o migra del formato viejo (GCM entero) una sola vez.
+  static Future<CajaSql> _caja(String pass) async {
+    if (pass.isEmpty) {
+      throw ArgumentError('índice: poné su propia clave');
+    }
     final f = await _file();
-    await f.writeAsBytes(
-        [...sal, ...nonce, ...box.concatenation()],
-        flush: true);
-    try {
-      if (await tmp.exists()) await tmp.delete();
-    } catch (_) {}
-    // Migrado a `indice.db`: la vieja ya no se usa.
-    try {
-      final carpeta = await MediaBase.carpetaMoldes();
-      final viejo = File('${carpeta.path}/$_viejoDb');
-      if (await viejo.exists() && viejo.path != f.path) {
-        await viejo.delete();
+    final carpeta = await MediaBase.carpetaMoldes();
+    final caja = CajaSql();
+    if (await f.exists()) {
+      try {
+        await caja.abrirRuta(f.path, clave: pass);
+        _tabla(caja.db);
+        return caja;
+      } catch (_) {
+        caja.cerrar();
       }
+      // No abrió con clave: formato viejo GCM → se migra una vez.
+      await _migrarLegacy(pass, f);
+    }
+    await caja.abrir('indice', carpeta: carpeta.path, clave: pass);
+    _tabla(caja.db);
+    return caja;
+  }
+
+  static Object? _col(Row r, String c) {
+    try {
+      return r[c];
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Migra el índice viejo (AES-GCM entero) al SQLite cifrado.
+  /// Lee todo en memoria, pisa el archivo y escribe el nuevo.
+  static Future<void> _migrarLegacy(String pass, File f) async {
+    log?.call('⚠ índice viejo (GCM entero) → migrando a SQL cifrada…');
+    // _materializar lanza si la clave es mala: no se toca nada.
+    final tmp = await _materializar(pass);
+    final leidas = <Map<String, Object?>>[];
+    final origen = sqlite3.open(tmp.path);
+    try {
+      for (final r in origen.select('SELECT * FROM indice;')) {
+        leidas.add({
+          'nombre': '${_col(r, 'nombre') ?? ''}',
+          'sql': '${_col(r, 'sql') ?? ''}',
+          'pass': '${_col(r, 'pass') ?? ''}',
+          'mld': '${_col(r, 'mld') ?? ''}',
+          'n': (_col(r, 'n') as int?) ?? 0,
+          'total': (_col(r, 'total') as int?) ?? 0,
+          'fecha': (_col(r, 'fecha') as int?) ?? 0,
+          'sal': '${_col(r, 'sal') ?? ''}',
+          'hf_repo': '${_col(r, 'hf_repo') ?? ''}',
+          'hf_token': '${_col(r, 'hf_token') ?? ''}',
+          'version': (_col(r, 'version') as int?) ?? 0,
+        });
+      }
+    } finally {
+      origen.dispose();
+      try {
+        if (await tmp.exists()) await tmp.delete();
+      } catch (_) {}
+    }
+    try {
+      if (await f.exists()) await f.delete();
     } catch (_) {}
+    final carpeta = await MediaBase.carpetaMoldes();
+    final caja = CajaSql();
+    await caja.abrir('indice', carpeta: carpeta.path, clave: pass);
+    try {
+      _tabla(caja.db);
+      for (final m in leidas) {
+        caja.db.execute(
+          'INSERT OR REPLACE INTO indice(nombre, sql, pass, mld, n, '
+          'total, fecha, sal, hf_repo, hf_token, version) '
+          'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);',
+          [
+            m['nombre'],
+            m['sql'],
+            m['pass'],
+            m['mld'],
+            m['n'],
+            m['total'],
+            m['fecha'],
+            m['sal'],
+            m['hf_repo'],
+            m['hf_token'],
+            m['version'],
+          ],
+        );
+      }
+    } finally {
+      caja.cerrar();
+    }
+    log?.call(
+        '✓ índice migrado a SQL cifrada (${leidas.length} molde(s))');
   }
 
   /// Asegura que el índice propio existe (vacío cifrado si es nuevo).
-  /// Borra el `.mlc` viejo si quedó (la `catalogo.db` vieja se adopta,
-  /// no se borra: el primer guardado ya escribe `indice.db`).
+  /// Borra el `.mlc` viejo si quedó (la `catalogo.db` vieja se adopta
+  /// en `_origen`, no se borra: el primer guardado ya escribe nuevo).
   static Future<void> asegurar(String pass) async {
     if (pass.isEmpty) return;
     try {
@@ -156,50 +230,39 @@ class Indice {
       final mlc = File('${carpeta.path}/$_viejoMlc');
       if (await mlc.exists()) await mlc.delete();
     } catch (_) {}
-    final f = await _file();
-    if (!await f.exists()) {
-      final tmp = await _materializar(pass);
-      await _persistir(pass, tmp);
-    }
+    final caja = await _caja(pass);
+    caja.cerrar();
   }
 
   /// Índice liviano: solo QUÉ sql + SU pass (+ .mld y números).
   static Future<List<Map<String, Object?>>> listarRaw(
       String pass) async {
-    final tmp = await _materializar(pass);
+    final caja = await _caja(pass);
     try {
-      final db = sqlite3.open(tmp.path);
-      try {
-        _tabla(db);
-        final rs =
-            db.select('SELECT * FROM indice ORDER BY nombre;');
-        return [
-          for (final r in rs)
-            {
-              'nombre': '${r['nombre'] ?? ''}',
-              'db': '${r['sql'] ?? ''}',
-              'db_ruta': '${r['sql'] ?? ''}',
-              'pass': '${r['pass'] ?? ''}',
-              'mld_ruta': '${r['mld'] ?? ''}',
-              'n': (r['n'] as int?) ?? 0,
-              'total': (r['total'] as int?) ?? 0,
-              'fecha': (r['fecha'] as int?) ?? 0,
-              'sal': '${r['sal'] ?? ''}',
-              'cifrado': 'gcm-c',
-              // HF: dónde vive remoto (repo_id = dir/user), con qué
-              // token entrar y qué versión se subió por última vez.
-              'hf_repo': '${r['hf_repo'] ?? ''}',
-              'hf_token': '${r['hf_token'] ?? ''}',
-              'version': (r['version'] as int?) ?? 0,
-            }
-        ];
-      } finally {
-        db.dispose();
-      }
+      final rs =
+          caja.db.select('SELECT * FROM indice ORDER BY nombre;');
+      return [
+        for (final r in rs)
+          {
+            'nombre': '${r['nombre'] ?? ''}',
+            'db': '${r['sql'] ?? ''}',
+            'db_ruta': '${r['sql'] ?? ''}',
+            'pass': '${r['pass'] ?? ''}',
+            'mld_ruta': '${r['mld'] ?? ''}',
+            'n': (r['n'] as int?) ?? 0,
+            'total': (r['total'] as int?) ?? 0,
+            'fecha': (r['fecha'] as int?) ?? 0,
+            'sal': '${r['sal'] ?? ''}',
+            'cifrado': 'sql-chacha20',
+            // HF: dónde vive remoto (repo_id = dir/user), con qué
+            // token entrar y qué versión se subió por última vez.
+            'hf_repo': '${r['hf_repo'] ?? ''}',
+            'hf_token': '${r['hf_token'] ?? ''}',
+            'version': (r['version'] as int?) ?? 0,
+          }
+      ];
     } finally {
-      try {
-        if (await tmp.exists()) await tmp.delete();
-      } catch (_) {}
+      caja.cerrar();
     }
   }
 
@@ -244,16 +307,14 @@ class Indice {
     String hfToken = '',
     int version = 0,
   }) async {
-    final tmp = await _materializar(pass);
-    final db = sqlite3.open(tmp.path);
+    final caja = await _caja(pass);
     try {
-      _tabla(db);
       // Preserva HF si esta llamada no trae (registros viejos).
       var repo = hfRepo;
       var tok = hfToken;
       var ver = version;
       try {
-        final prev = db.select(
+        final prev = caja.db.select(
             'SELECT hf_repo, hf_token, version FROM indice WHERE nombre = ?;',
             [nombre]);
         if (prev.isNotEmpty && hfRepo.isEmpty && hfToken.isEmpty) {
@@ -262,7 +323,7 @@ class Indice {
           ver = (prev.first['version'] as int?) ?? 0;
         }
       } catch (_) {}
-      db.execute(
+      caja.db.execute(
         'INSERT OR REPLACE INTO indice'
         '(nombre, sql, pass, mld, n, total, fecha, sal, '
         'hf_repo, hf_token, version) '
@@ -282,9 +343,8 @@ class Indice {
         ],
       );
     } finally {
-      db.dispose();
+      caja.cerrar();
     }
-    await _persistir(pass, tmp);
   }
 
   /// Guarda/actualiza los datos HF de un molde (dir/user = repo_id,
@@ -370,15 +430,59 @@ class Indice {
     required String pass,
     required String nombre,
   }) async {
-    final tmp = await _materializar(pass);
-    final db = sqlite3.open(tmp.path);
+    final caja = await _caja(pass);
     try {
-      _tabla(db);
-      db.execute(
+      caja.db.execute(
           'DELETE FROM indice WHERE nombre = ?;', [nombre]);
     } finally {
-      db.dispose();
+      caja.cerrar();
     }
-    await _persistir(pass, tmp);
+  }
+
+  /// Escaneo inverso: "esta SQL, ¿tiene algún molde?"
+  /// Abre la SQL, lee su tabla de moldes (la SQL sabe dónde está
+  /// cada .mld) y registra cada hallazgo con dbRuta = esta SQL.
+  /// El índice aprende dónde está cada SQL. Retorna los nombres.
+  static Future<List<String>> escanearSql({
+    required String pass,
+    required String sqlPath,
+    String claveSql = '',
+  }) async {
+    final caja = CajaSql();
+    await caja.abrirRuta(sqlPath, clave: claveSql);
+    try {
+      late final List<Map<String, Object?>> filas;
+      try {
+        filas = caja.listar(MediaBase.tablaMoldes, por: 'nombre');
+      } catch (_) {
+        return [];
+      }
+      final nombres = <String>[];
+      for (final f in filas) {
+        final nombre = '${f['nombre'] ?? ''}';
+        if (nombre.isEmpty || nombres.contains(nombre)) continue;
+        final legacy =
+            '${f['nombre_c'] ?? ''}'.isNotEmpty;
+        await registrar(
+          pass: pass,
+          nombre: nombre,
+          dbRuta: sqlPath,
+          mldRuta: '${f['ruta'] ?? ''}',
+          n: 0,
+          total: (f['total'] as int?) ?? 0,
+          sal: '${f['sal'] ?? ''}',
+        );
+        nombres.add(nombre);
+        if (legacy) {
+          log?.call('⚠ "$nombre": SQL legacy (nombres/tags cifrados '
+              'a mano) en $sqlPath');
+        } else {
+          log?.call('· "$nombre": SQL nueva (bruto) en $sqlPath');
+        }
+      }
+      return nombres;
+    } finally {
+      caja.cerrar();
+    }
   }
 }

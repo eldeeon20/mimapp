@@ -100,4 +100,66 @@ class CryptoVault {
     return Uint8List.fromList(
         List.generate(len, (_) => r.nextInt(256)));
   }
+
+  /// Cifra un lote v2: `global(cdn_pass + cdn)` con el maestro.
+  /// `PRBX(maestro, [LOTE][u32be len][pass][datos])`.
+  static Future<Uint8List> encryptLote(
+      Uint8List datos, String passMaestro, String passLote) async {
+    final pb = utf8.encode(passLote);
+    final plano = BytesBuilder()
+      ..add([0x4C, 0x4F, 0x54, 0x45]) // LOTE
+      ..add([
+        (pb.length >> 24) & 0xFF,
+        (pb.length >> 16) & 0xFF,
+        (pb.length >> 8) & 0xFF,
+        pb.length & 0xFF
+      ])
+      ..add(pb)
+      ..add(datos);
+    return encrypt(plano.toBytes(), passMaestro);
+  }
+}
+
+/// Lote v2: pass del lote pegada al inicio + contenido, todo con
+/// el maestro. El pass global descifra TODO: pass + dato origen.
+class LoteAbierto {
+  final int version; // 1 o 2
+  final String passLote; // '' en v1
+  final Uint8List contenido;
+  const LoteAbierto({
+    required this.version,
+    required this.passLote,
+    required this.contenido,
+  });
+}
+
+/// Abre v1 (PRBX directo) o v2 (marca LOTE). En v2 devuelve el
+/// pass del lote en texto además del contenido descifrado.
+Future<LoteAbierto?> decryptLote(
+    Uint8List data, String passMaestro) {
+  return _decryptLote(data, passMaestro);
+}
+
+Future<LoteAbierto?> _decryptLote(
+    Uint8List data, String passMaestro) async {
+  try {
+    final pt = await CryptoVault.decrypt(data, passMaestro);
+    if (pt == null) return null;
+    if (pt.length >= 8 &&
+        pt[0] == 0x4C &&
+        pt[1] == 0x4F &&
+        pt[2] == 0x54 &&
+        pt[3] == 0x45) {
+      final len = ByteData.sublistView(pt, 4, 8).getUint32(0, Endian.big);
+      if (len <= 0 || pt.length < 8 + len) return null;
+      final passLote =
+          utf8.decode(Uint8List.sublistView(pt, 8, 8 + len));
+      final contenido = Uint8List.sublistView(pt, 8 + len);
+      return LoteAbierto(
+          version: 2, passLote: passLote, contenido: contenido);
+    }
+    return LoteAbierto(version: 1, passLote: '', contenido: pt);
+  } catch (_) {
+    return null;
+  }
 }

@@ -104,18 +104,22 @@ class ColabKeepAlive {
     }
 
     try {
-      // Formato EXACTO del CLI: Bearer + X-Colab-Tunnel, nada más
-      // (cookies/XSRF/agent de más → 400; sin Bearer → 401).
-      final token = await _auth.getToken();
+      // Formato que andaba (pre-"CLI exacto"): authHeaders completos
+      // (Bearer + Accept + agent) + X-Colab-Tunnel + ?authuser=0.
+      // El mínimo (solo Bearer+Tunnel) devolvía 400 y mataba la
+      // celda al minuto.
+      final headers = await _auth.authHeaders();
+      headers['X-Colab-Tunnel'] = 'Google';
+      const params = {'authuser': '0'};
       final url = Uri.https(
         ColabConfig.colabHost,
         '/tun/m/$ep/keep-alive/',
+        params,
       );
 
-      final response = await http.get(url, headers: {
-        'Authorization': 'Bearer $token',
-        'X-Colab-Tunnel': 'Google',
-      }).timeout(ColabConfig.keepAliveTimeout);
+      final response = await http
+          .get(url, headers: headers)
+          .timeout(ColabConfig.keepAliveTimeout);
 
       if (response.statusCode == 401) {
         stop(avisar: false);

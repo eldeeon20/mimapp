@@ -1,12 +1,18 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
 
 import 'admin/panel_admin.dart';
 import 'app/claves_app.dart';
+import 'cache/previa_cache.dart';
 import 'cache/sesion_cache.dart';
 import 'cache/trozo_cache.dart';
+import 'db/caja_sql.dart';
 import 'indice/indice.dart';
 import 'comun/archivos_fs.dart';
 import 'comun/campos.dart';
@@ -26,6 +32,7 @@ import 'minis/mini_grid.dart';
 import 'preview/cargar_completo.dart';
 import 'preview/visor_preview.dart';
 import 'preview/vista_archivo.dart';
+import 'preview_molde.dart';
 import 'puente_hf.dart';
 import 'tool/create_molde_sql.dart';
 
@@ -54,11 +61,100 @@ class _TestSqlScreenState extends State<TestSqlScreen>
   List<MoldeInfo> _moldes = [];
   MoldeInfo? _infoAbierta;
   List<FichaArchivo> _filas = [];
+
+  /// Filas ya filtradas EN SQL (LIKE). null = sin filtro o fallback RAM.
+  List<FichaArchivo>? _filasTag;
   final _tagFiltroCtrl = TextEditingController();
 
   /// Minis en RAM (clase) + caché local cifrada de trozos (LRU 512KB).
   final _minis = MiniCache();
+
+  /// Previas guardadas por archivo (memo, se llena solo).
+  final _previas = <String, List<Uint8List>>{};
+
+  /// Lee las previas guardadas de un archivo ([] = sin previas,
+  /// moldes viejos: el grid usa mini al vuelo).
+  Future<List<Uint8List>> _previasDe(FichaArchivo f) async {
+    final m = _infoAbierta?.nombre;
+    if (m == null) return [];
+    final ya = _previas[f.nombre];
+    if (ya != null) return ya;
+    // Disco primero (no re-abrir el original).
+    try {
+      final disco = await _previaCache?.leer(archivo: f.nombre);
+      if (disco != null && disco.isNotEmpty) {
+        _previas[f.nombre] = [disco];
+        return [disco];
+      }
+    } catch (_) {}
+    try {
+      final p = await CreateMoldeSql.previasDe(
+        claveSql: _clave,
+        molde: m,
+        archivo: f.nombre,
+        cache: _cache,
+        info: _infoAbierta,
+      );
+      _previas[f.nombre] = p;
+      // Primera a disco (las demás viven en la transición en RAM).
+      if (p.isNotEmpty) {
+        try {
+          await _previaCache?.guardar(archivo: f.nombre, previa: p.first);
+        } catch (_) {}
+      }
+      return p;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// Captura de video (surface oculta mientras se crea).
+  final _captura = CapturaVideo();
   TrozoCache? _cache;
+
+  /// Caché de previas en disco (no re-abrir originales).
+  PreviaCache? _previaCache;
+
+  /// Ajustes: topes de caché (viven en ajustes_modo.json).
+  int _limiteTrozosKb = 512;
+  int _limitePreviasMb = 8;
+
+  Future<File> _ajustesFile() async {
+    final dir = await getApplicationSupportDirectory();
+    return File('${dir.path}/ajustes_modo.json');
+  }
+
+  Future<void> _cargarAjustes() async {
+    try {
+      final f = await _ajustesFile();
+      if (await f.exists()) {
+        final m =
+            jsonDecode(await f.readAsString()) as Map<String, dynamic>;
+        _limiteTrozosKb =
+            ((m['trozosKb'] as num?)?.toInt() ?? 512).clamp(128, 8192);
+        _limitePreviasMb =
+            ((m['previasMb'] as num?)?.toInt() ?? 8).clamp(1, 64);
+      }
+    } catch (_) {}
+    final c = _cache;
+    if (c != null) c.limiteBytes = _limiteTrozosKb * 1024;
+    final p = _previaCache;
+    if (p != null) p.limiteBytes = _limitePreviasMb * 1024 * 1024;
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _guardarAjustes() async {
+    try {
+      final f = await _ajustesFile();
+      await f.writeAsString(
+        jsonEncode({
+          'trozosKb': _limiteTrozosKb,
+          'previasMb': _limitePreviasMb,
+        }),
+        flush: true,
+      );
+    } catch (_) {}
+  }
 
   /// Recordar clave cifrada en la SQL local de la app.
   bool _recordar = true;
@@ -78,11 +174,17 @@ class _TestSqlScreenState extends State<TestSqlScreen>
   /// HF: repo (dir/user) + token por molde + puente.
   final _hfRepoCtrl = TextEditingController();
   final _hfTokenCtrl = TextEditingController();
+  final _hfSqlCtrl = TextEditingController();
   final _puenteHf = PuenteHf();
   bool _hfOcupado = false;
 
   @override
   void dispose() {
+    _filtroT?.cancel();
+    _tagFiltroCtrl.removeListener(_filtroCambio);
+    CajaSql.log = null;
+    Indice.log = null;
+    _captura.cerrar();
     _nombreCtrl.dispose();
     _carpetaCtrl.dispose();
     _claveCtrl.dispose();
@@ -145,6 +247,8 @@ class _TestSqlScreenState extends State<TestSqlScreen>
         clave: _clave,
         tags: tags,
         passIndice: await _passIndice(),
+        captura: _captura,
+        log: _add,
       );
       _add('✓ molde "$nombre.mld" con $n archivos '
           '(uno solo, primero en 0)');
@@ -171,8 +275,40 @@ class _TestSqlScreenState extends State<TestSqlScreen>
   void initState() {
     super.initState();
     _tabs = TabController(length: 5, vsync: this);
+    // Filtro de tag en vivo con debounce: sin esto solo filtraba
+    // cuando otro rebuild lo arrastraba (ej. al abrir una imagen).
+    _tagFiltroCtrl.addListener(_filtroCambio);
+    // Avisos de formato (lo viejo sale en rojo en la bitácora).
+    CajaSql.log = _add;
+    Indice.log = _add;
+    _cargarAjustes();
     WidgetsBinding.instance
         .addPostFrameCallback((_) => _preguntarIndice());
+  }
+
+  /// Debounce del filtro (~300ms): con texto va a SQL (LIKE sobre
+  /// columnas en bruto); vacío vuelve al listado en RAM.
+  Timer? _filtroT;
+  void _filtroCambio() {
+    _filtroT?.cancel();
+    _filtroT = Timer(const Duration(milliseconds: 300), () async {
+      final m = _infoAbierta?.nombre;
+      final t = _tagFiltroCtrl.text.trim();
+      if (m == null || t.isEmpty) {
+        if (mounted) setState(() => _filasTag = null);
+        return;
+      }
+      try {
+        final filas = await CreateMoldeSql.filasPorTag(
+            claveSql: _clave, molde: m, tag: t);
+        if (!mounted) return;
+        // El filtro cambió mientras consultaba: se descarta.
+        if (_tagFiltroCtrl.text.trim() != t) return;
+        setState(() => _filasTag = filas);
+      } catch (e) {
+        _add('✗ filtro tag: $e');
+      }
+    });
   }
 
   /// Al entrar SIEMPRE pide la pass del índice (no se guarda).
@@ -337,8 +473,18 @@ class _TestSqlScreenState extends State<TestSqlScreen>
       final m = await MediaServer.abrir(rutaMld: info.ruta);
       if (!mounted) return;
       // Caché en bruto sobre la sesión (misma pass del índice).
-      final TrozoCache? cache =
-          _sesionCache.abierta ? TrozoCache(sesion: _sesionCache, molde: nombre) : null;
+      final TrozoCache? cache = _sesionCache.abierta
+          ? TrozoCache(
+              sesion: _sesionCache,
+              molde: nombre,
+              limiteBytes: _limiteTrozosKb * 1024)
+          : null;
+      final PreviaCache? pcache = _sesionCache.abierta
+          ? PreviaCache(
+              sesion: _sesionCache,
+              molde: nombre,
+              limiteBytes: _limitePreviasMb * 1024 * 1024)
+          : null;
       if (cache == null) {
         _add('· sin caché (índice bloqueado: solo server)');
       }
@@ -346,6 +492,8 @@ class _TestSqlScreenState extends State<TestSqlScreen>
       setState(() {
         _infoAbierta = info;
         _filas = filas;
+        _filasTag = null;
+        _previas.clear();
         _selArchivo = null;
         _rangoInfo = '';
         _minis.limpiar();
@@ -354,6 +502,7 @@ class _TestSqlScreenState extends State<TestSqlScreen>
         _completos.minis = _minis.minis;
         _rutaExp = const [];
         _cache = cache;
+        _previaCache = pcache;
       });
       _add('✓ abierto "$nombre": ${filas.length} filas de tu SQL, '
           'server solo ve ${fmtBytes(m.total)} crudos, '
@@ -557,6 +706,8 @@ class _TestSqlScreenState extends State<TestSqlScreen>
     setState(() {
       _infoAbierta = null;
       _filas = [];
+      _filasTag = null;
+      _previas.clear();
       _selArchivo = null;
       _rangoInfo = '';
       _rutaExp = const [];
@@ -673,8 +824,10 @@ class _TestSqlScreenState extends State<TestSqlScreen>
     if (!mounted) return;
     try {
       _add('· rastreando "$dir"…');
-      final hallados =
-          await CreateMoldeSql.rastrearCarpeta(dir);
+      final hallados = await CreateMoldeSql.rastrearCarpeta(
+        dir,
+        claveSql: _clave,
+      );
       if (hallados.isEmpty) {
         _add('· sin .mld con SQL en "$dir"');
         return;
@@ -807,6 +960,8 @@ class _TestSqlScreenState extends State<TestSqlScreen>
         if (_infoAbierta?.nombre == nombre) {
           _infoAbierta = null;
           _filas = [];
+          _filasTag = null;
+          _previas.clear();
           _selArchivo = null;
           _rangoInfo = '';
         }
@@ -832,7 +987,11 @@ class _TestSqlScreenState extends State<TestSqlScreen>
   }
 
   /// Filas del abierto con el filtro de tag aplicado.
+  /// Con texto: ya vienen filtradas de SQL. Sin texto o legacy:
+  /// filtro manual en RAM.
   List<FichaArchivo> _filtrados() {
+    final ft = _filasTag;
+    if (ft != null) return ft;
     final t = _tagFiltroCtrl.text.trim();
     return [
       for (final f in _filas)
@@ -899,7 +1058,8 @@ class _TestSqlScreenState extends State<TestSqlScreen>
           _cerrarMolde();
         }
       },
-      child: Column(children: [
+      child: Stack(children: [
+        Column(children: [
         TabBar(
           controller: _tabs,
           isScrollable: true,
@@ -908,7 +1068,7 @@ class _TestSqlScreenState extends State<TestSqlScreen>
             Tab(text: 'Lista'),
             Tab(text: 'Crear'),
             Tab(text: 'Moldes'),
-            Tab(text: 'Admin'),
+            Tab(text: 'Ajustes'),
           ],
         ),
         Expanded(
@@ -925,6 +1085,16 @@ class _TestSqlScreenState extends State<TestSqlScreen>
               _tabAdmin(),
             ],
           ),
+        ),
+        ]),
+        // Surface oculta para capturas de video al crear (1px,
+        // sin esto el mpv no renderiza y no hay frames).
+        Positioned(
+          left: 0,
+          top: 0,
+          width: 1,
+          height: 1,
+          child: _captura.vista(),
         ),
       ]),
     );
@@ -954,37 +1124,84 @@ class _TestSqlScreenState extends State<TestSqlScreen>
   Future<void> _vaciarCache() async {
     try {
       await TrozoCache.limpiarTodo(_sesionCache);
+      await PreviaCache.limpiarTodo(_sesionCache);
       if (!mounted) return;
       setState(() {
         _cacheBytes.clear();
         _cacheResumen = 'vacía';
       });
-      _add('✓ caché vaciada (se reconstruye sola)');
+      _add('✓ cachés vaciadas (trozos + previas, se reconstruyen solas)');
     } catch (e) {
-      _add('✗ vaciar caché: $e');
+      _add('✗ vaciar cachés: $e');
     }
   }
 
-  /// Admin: rutas de cada molde + mover directorios + modo suave.
+  /// Ajustes: cachés (trozos + previas) + admin clásico abajo.
   Widget _tabAdmin() {
     final lista = _entradas.values.toList()
       ..sort((a, b) =>
           '${a['nombre']}'.compareTo('${b['nombre']}'));
-    return PanelAdmin(
-      entradas: lista,
-      onMover: _moverMolde,
-      onEditarRutas: _editarRutas,
-      cacheBytes: _cacheBytes,
-      cacheResumen: _cacheResumen,
-      cacheLimiteKb: 512,
-      onVaciarCache: _vaciarCache,
-      suave: _suave,
-      onSuave: (v) => setState(() {
-        _suave = v;
-        _minis.maxEnVuelo = v ? 2 : 6;
-      }),
-      hilosEnUso: _minis.enVuelo,
-      maxHilos: _minis.maxEnVuelo,
+    return ListView(
+      padding: const EdgeInsets.all(12),
+      children: [
+        const Text('Cachés (sqlite cifradas, misma pass del índice)',
+            style: TextStyle(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 4),
+        Text('Trozos por molde: $_limiteTrozosKb KB '
+            '(bloques del .mld, no re-pedir)'),
+        Slider(
+          min: 128,
+          max: 8192,
+          divisions: 31,
+          value: _limiteTrozosKb.toDouble().clamp(128, 8192),
+          label: '$_limiteTrozosKb KB',
+          onChanged: (v) {
+            setState(
+                () => _limiteTrozosKb = v.toInt().clamp(128, 8192));
+            final c = _cache;
+            if (c != null) c.limiteBytes = _limiteTrozosKb * 1024;
+            _guardarAjustes();
+          },
+        ),
+        Text('Previas por molde: $_limitePreviasMb MB '
+            '(libres: miles de previas mínimas)'),
+        Slider(
+          min: 1,
+          max: 64,
+          divisions: 63,
+          value: _limitePreviasMb.toDouble().clamp(1, 64),
+          label: '$_limitePreviasMb MB',
+          onChanged: (v) {
+            setState(
+                () => _limitePreviasMb = v.toInt().clamp(1, 64));
+            final p = _previaCache;
+            if (p != null) {
+              p.limiteBytes = _limitePreviasMb * 1024 * 1024;
+            }
+            _guardarAjustes();
+          },
+        ),
+        Text(_cacheResumen.isEmpty
+            ? 'Sin medición todavía'
+            : _cacheResumen),
+        const Divider(height: 20),
+        PanelAdmin(
+          entradas: lista,
+          onMover: _moverMolde,
+          onEditarRutas: _editarRutas,
+          cacheBytes: _cacheBytes,
+          cacheResumen: _cacheResumen,
+          cacheLimiteKb: _limiteTrozosKb,
+          onVaciarCache: _vaciarCache,
+          suave: _suave,
+          onSuave: (v) => setState(() {
+            _suave = v;
+            _minis.maxEnVuelo = v ? 2 : 6;
+          }),
+          hilosEnUso: _minis.enVuelo,
+          maxHilos: _minis.maxEnVuelo,
+        ),
+      ],
     );
   }
 
@@ -1028,9 +1245,16 @@ class _TestSqlScreenState extends State<TestSqlScreen>
     final hijos = hijosDe(archivos, _rutaExp);
     return MiniGrid(
       imagenes: _soloImgs(hijos.directos),
+      otros: [
+        for (final f in hijos.directos)
+          if (!_imgs.contains(f.formato.toLowerCase())) f
+      ],
       minis: _minis.minis,
       minisEnRam: _minis.cuantas,
       selNombre: _selArchivo,
+      previas: _previas,
+      previasDe: _previasDe,
+      esVideo: (f) => PreviewMolde.esVideo(f.formato),
       dirs: hijos.subdirs,
       onEntrarDir: (d) =>
           setState(() => _rutaExp = [..._rutaExp, d]),
@@ -1242,6 +1466,33 @@ class _TestSqlScreenState extends State<TestSqlScreen>
     }
   }
 
+  /// Índice: "esta SQL, ¿tiene algún molde?" La SQL dice qué
+  /// moldes trae y dónde está cada .mld; el índice los registra.
+  Future<void> _hfEscanearSql() async {
+    final ruta = _hfSqlCtrl.text.trim();
+    if (ruta.isEmpty) {
+      _add('· poné la ruta de la .db a escanear');
+      return;
+    }
+    try {
+      final nombres = await Indice.escanearSql(
+        pass: await _passIndice(),
+        sqlPath: ruta,
+        claveSql: _clave,
+      );
+      if (nombres.isEmpty) {
+        _add('· sin moldes en "$ruta"');
+      } else {
+        _add('✓ ${nombres.length} molde(s) desde "$ruta": '
+            '${nombres.join(', ')}');
+        await _refrescarMoldes();
+      }
+      if (mounted) setState(() {});
+    } catch (e) {
+      _add('✗ escanear SQL: $e');
+    }
+  }
+
   /// Moldes: clave + recordar + historial + bitácora.
   Widget _tabMoldes() {
     return ListView(
@@ -1301,6 +1552,16 @@ class _TestSqlScreenState extends State<TestSqlScreen>
             label: const Text('Bajar SQL'),
           ),
         ]),
+        const SizedBox(height: 6),
+        campoTexto(_hfSqlCtrl, 'ruta .db suelta para escanear'),
+        const SizedBox(height: 6),
+        Wrap(spacing: 8, children: [
+          FilledButton.tonalIcon(
+            onPressed: _hfEscanearSql,
+            icon: const Icon(Icons.find_in_page_rounded, size: 18),
+            label: const Text('Escanear SQL'),
+          ),
+        ]),
         const Divider(height: 20),
         Row(children: [
           const Text('Bitácora',
@@ -1318,8 +1579,38 @@ class _TestSqlScreenState extends State<TestSqlScreen>
           ),
         ]),
         for (final l in _log)
-          SelectableText(l,
-              style: const TextStyle(fontSize: 11)),
+          if (l.startsWith('⚠'))
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.symmetric(vertical: 4),
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.red.shade900,
+                border: Border.all(color: Colors.redAccent, width: 2),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.warning_amber_rounded,
+                      color: Colors.yellowAccent, size: 32),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: SelectableText(
+                      l,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else
+            SelectableText(l,
+                style: const TextStyle(fontSize: 11)),
       ],
     );
   }
