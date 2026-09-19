@@ -408,15 +408,23 @@ class _ColabTasksScreenState extends State<ColabTasksScreen> {
                 ],
                 if (showCode) ...[
                   const SizedBox(height: 8),
-                  ConstrainedBox(
-                    constraints:
-                        const BoxConstraints(maxHeight: 280),
+                  // Caja fija con scroll PROPIO: antes el campo crecía
+                  // sin límite y el scroll del diálogo le robaba el
+                  // gesto (no se podía editar el script).
+                  SizedBox(
+                    height: 280,
                     child: TextField(
                     controller: codeCtrl,
                     maxLines: null,
+                    expands: true,
+                    textAlignVertical: TextAlignVertical.top,
+                    keyboardType: TextInputType.multiline,
+                    scrollPhysics:
+                        const AlwaysScrollableScrollPhysics(),
                     style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
                     decoration: const InputDecoration(
-                        labelText: 'Python', border: OutlineInputBorder()),
+                        labelText: 'Python (deslizá acá adentro)',
+                        border: OutlineInputBorder()),
                     ),
                   ),
                 ],

@@ -63,6 +63,14 @@ url, lote, token, repo, maestro = lineas[0], lineas[1], lineas[2], lineas[3], li
 nombre = url.split("?")[0].rstrip("/").split("/")[-1] or "lote.bin"
 
 print("fase 1", flush=True)
+# Limpieza de corridas anteriores (el .prbx cambia por URL y
+# si no se acumula en /tmp hasta llenar el disco del runtime).
+shutil.rmtree("/tmp/lote", ignore_errors=True)
+for _v in ("/tmp/lote.pass", "/tmp/lote.pegado"):
+    try:
+        os.remove(_v)
+    except OSError:
+        pass
 sh([sys.executable, "python/deps.py"], GOLO)
 sh([sys.executable, "-m", "pip", "install", "--quiet",
     "-r", "hf/requirements.txt"], GOLO)
@@ -76,6 +84,8 @@ print("fase 2", flush=True)
 sh([sys.executable, "download/cli.py", url, "/tmp/lote",
     "--file", nombre], GOLO)
 crudo = "/tmp/lote/" + nombre
+if not os.path.isfile(crudo) or os.path.getsize(crudo) == 0:
+    raise SystemExit("fase 2 no dejo archivo util en " + crudo)
 
 print("fase 3", flush=True)
 with open("/tmp/lote.pass", "wb") as f:
@@ -96,6 +106,8 @@ print("fase 4", flush=True)
 sh([sys.executable, "python/cli.py", "enc", maestro, "/tmp/lote.pegado",
     "/tmp/" + nombre + ".prbx"], GOLO)
 final = "/tmp/" + nombre + ".prbx"
+if not os.path.isfile(final) or os.path.getsize(final) == 0:
+    raise SystemExit("fase 4 no dejo PRBX util en " + final)
 
 print("fase 5", flush=True)
 sh([sys.executable, "hf/cli.py", token, final, repo,
