@@ -122,6 +122,24 @@ class ToolSec {
   }
 
   // =========================================================================
+  // Lote v2 (igual que golo): global(cdn_pass + cdn) con el maestro.
+  // `PRBX(maestro, [LOTE][u32be len][pass][datos])`.
+  // =========================================================================
+
+  /// Cifra un lote v2 con el pass global (adentro va el pass del lote).
+  Future<Uint8List> processLoteStrong(
+      Uint8List datos, String passMaestro, String passLote) {
+    return CryptoVault.encryptLote(datos, passMaestro, passLote);
+  }
+
+  /// Abre v1 o v2 con el pass global. En v2 devuelve el pass del
+  /// lote en texto además del contenido descifrado.
+  Future<LoteAbierto?> processLoteStrongDecrypt(
+      Uint8List enc, String passMaestro) {
+    return decryptLote(enc, passMaestro);
+  }
+
+  // =========================================================================
   // Android SAF: cifrado sobre el archivo REAL (Descargas, Documents, etc.)
   // =========================================================================
 
