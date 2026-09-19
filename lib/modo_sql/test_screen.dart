@@ -7,9 +7,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
-import '../media/media_player.dart';
 import 'admin/panel_admin.dart';
-import 'app/claves_app.dart';
+import 'preview/dialogo_video.dart';import 'app/claves_app.dart';
 import 'cache/previa_cache.dart';
 import 'cache/sesion_cache.dart';
 import 'cache/trozo_cache.dart';
@@ -129,12 +128,12 @@ class _TestSqlScreenState extends State<TestSqlScreen>
       _previasTocar(f.nombre);
       return ya;
     }
-    // Disco primero (no re-abrir el original).
+    // Disco primero (TODOS los frames: la transición sobrevive).
     try {
-      final disco = await _previaCache?.leer(archivo: f.nombre);
+      final disco = await _previaCache?.leerTodos(archivo: f.nombre);
       if (disco != null && disco.isNotEmpty) {
-        _previasGuardar(f.nombre, [disco]);
-        return [disco];
+        _previasGuardar(f.nombre, disco);
+        return disco;
       }
     } catch (_) {}
     try {
@@ -146,10 +145,10 @@ class _TestSqlScreenState extends State<TestSqlScreen>
         info: _infoAbierta,
       );
       _previasGuardar(f.nombre, p);
-      // Primera a disco (las demás viven en la transición en RAM).
       if (p.isNotEmpty) {
         try {
-          await _previaCache?.guardar(archivo: f.nombre, previa: p.first);
+          await _previaCache?.guardarTodos(
+              archivo: f.nombre, frames: p);
         } catch (_) {}
       }
       return p;
@@ -846,7 +845,7 @@ class _TestSqlScreenState extends State<TestSqlScreen>
   }
 
   /// Reproduce un video: copia descifrada local en la app +
-  /// reproductor de mimapp. (Videos grandes tardan: es el archivo.)
+  /// diálogo con player propio (con surface: se VE, no solo audio).
   Future<void> _reproducirVideo(FichaArchivo f) async {
     final molde = _infoAbierta?.nombre;
     if (molde == null) return;
@@ -872,9 +871,12 @@ class _TestSqlScreenState extends State<TestSqlScreen>
           '${dir.path}/video_${DateTime.now().millisecondsSinceEpoch}'
           '.${f.formato.isEmpty ? 'mp4' : f.formato}');
       await tmp.writeAsBytes(datos, flush: true);
-      await MediaPlayer.ensureService();
-      await MediaPlayer.instance.openPath(tmp.path);
       _add('▶ reproduciendo "${f.nombre}"');
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (_) => DialogoVideo(ruta: tmp.path, titulo: f.nombre),
+      );
     } catch (e) {
       _add('✗ reproducir: $e');
     }

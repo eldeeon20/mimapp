@@ -26,8 +26,47 @@ class PreviaCache {
     throw StateError('previas: blob inválido');
   }
 
-  /// Previa guardada o null = miss.
-  Future<Uint8List?> leer({required String archivo}) async {
+  /// Empaqueta frames: [u32be len][bytes]… (un solo blob por archivo).
+  static Uint8List _empaquetar(List<Uint8List> frames) {
+    var n = 0;
+    for (final f in frames) {
+      n += 4 + f.length;
+    }
+    final fuera = Uint8List(n);
+    final vista = ByteData.sublistView(fuera);
+    var o = 0;
+    for (final f in frames) {
+      vista.setUint32(o, f.length, Endian.big);
+      fuera.setRange(o + 4, o + 4 + f.length, f);
+      o += 4 + f.length;
+    }
+    return fuera;
+  }
+
+  /// Desempaqueta; null si no cierra exacto (filas viejas de 1 frame
+  /// sin empaquetar → se releen de SQL y se pisan solas).
+  static List<Uint8List>? _desempaquetar(Uint8List blob) {
+    try {
+      final vista = ByteData.sublistView(blob);
+      final fuera = <Uint8List>[];
+      var o = 0;
+      while (o < blob.length) {
+        if (o + 4 > blob.length) return null;
+        final len = vista.getUint32(o, Endian.big);
+        o += 4;
+        if (len <= 0 || o + len > blob.length) return null;
+        fuera.add(Uint8List.sublistView(blob, o, o + len));
+        o += len;
+      }
+      if (o != blob.length || fuera.isEmpty) return null;
+      return fuera;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Todos los frames guardados o null = miss.
+  Future<List<Uint8List>?> leerTodos({required String archivo}) async {
     final db = sesion.basePrevias;
     final rs = db.select(
       'SELECT rowid AS id, datos FROM "$tabla" '
@@ -41,24 +80,26 @@ class PreviaCache {
         'UPDATE "$tabla" SET ultimo = ? WHERE rowid = ?;',
         [ahora, rs.first['id'] as int],
       );
-      return _bytes(rs.first['datos']);
+      return _desempaquetar(_bytes(rs.first['datos']));
     } catch (_) {
       return null;
     }
   }
 
-  /// Guarda una previa y evicta lo más viejo si pasa el límite.
-  Future<void> guardar({
+  /// Guarda TODOS los frames (la transición sobrevive a reabrir).
+  Future<void> guardarTodos({
     required String archivo,
-    required Uint8List previa,
+    required List<Uint8List> frames,
   }) async {
+    if (frames.isEmpty) return;
     final db = sesion.basePrevias;
+    final blob = _empaquetar(frames);
     final ahora = DateTime.now().microsecondsSinceEpoch;
     db.execute(
       'INSERT OR REPLACE INTO "$tabla"'
       '(molde, archivo, tamano, ultimo, datos) '
       'VALUES (?, ?, ?, ?, ?);',
-      [molde, archivo, previa.length, ahora, previa],
+      [molde, archivo, blob.length, ahora, blob],
     );
     await _evictar(db);
   }
