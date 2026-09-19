@@ -35,6 +35,9 @@ class ColabService {
   /// Duelo visible: ok/error por modo del ping Dart.
   String espejoDart = '';
 
+  /// Historial del ping Dart (lo muestra el diálogo).
+  List<String> get pingLog => pingDart.historial;
+
   // Espejo local de lo que pinea el servicio (para mostrar en 777).
   // NO pinea: solo display. El ping real está en el isolate de fondo.
 

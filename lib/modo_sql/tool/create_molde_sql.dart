@@ -885,7 +885,12 @@ class CreateMoldeSql {
       if (f == null) {
         throw StateError('test_sql: "$archivo" no está en "$molde"');
       }
+      // OJO: si la fila es legacy (_c), hay que bajar el nombre real
+      // a bruto; si no queda '§enc' para siempre (el _c se limpia abajo).
+      final real = await _filaReal(moldeKey, f);
       final mapa = <String, Object?>{
+        'nombre': real['nombre'],
+        'formato': real['formato'],
         'nombre_c': '',
         'tags_c': '',
       };

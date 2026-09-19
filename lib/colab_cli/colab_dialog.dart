@@ -420,6 +420,16 @@ class _ColabDialogBodyState extends State<_ColabDialogBody> {
                                   }
                                   try {
                                     await widget.sessions.unassign(s.endpoint);
+                                    // Soltada: se frena su ping (Dart).
+                                    // El nativo cae con la X de la 888.
+                                    final svc = ColabService();
+                                    if (svc.activeEndpoint == s.endpoint) {
+                                      try {
+                                        svc.pingDart.stop();
+                                      } catch (_) {}
+                                      svc.activeEndpoint = null;
+                                      svc.espejoDart = '';
+                                    }
                                     await _loadSessions();
                                   } catch (e) {
                                     if (mounted) {
@@ -491,7 +501,8 @@ class _ColabDialogBodyState extends State<_ColabDialogBody> {
                               '(${ColabKeepAlive.fmtDur(ColabService().espejoElapsed)} · '
                               '${ColabService().espejoPings} pings)'
                               '${ColabService().espejoUltimoPing.isNotEmpty ? '\nlog: ${ColabService().espejoUltimoPing}' : ''}'
-                              '${ColabService().espejoDart.isNotEmpty ? '\n${ColabService().espejoDart}' : ''}',
+                              '${ColabService().espejoDart.isNotEmpty ? '\n${ColabService().espejoDart}' : ''}'
+                              '${ColabService().pingLog.isNotEmpty ? '\nlog:\n${ColabService().pingLog.reversed.take(8).join('\n')}' : ''}',
                               style: const TextStyle(fontSize: 12))),
                     ],
                   ),

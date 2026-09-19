@@ -35,6 +35,18 @@ class ColabKeepAlive {
   String errNuestro = '';
   String errCli = '';
 
+  /// Historial corto del ping (tope 30, lo muestra el diálogo).
+  final List<String> historial = [];
+
+  void _bitacora(String s) {
+    historial.add('${DateTime.now().hour.toString().padLeft(2, '0')}:'
+        '${DateTime.now().minute.toString().padLeft(2, '0')}:'
+        '${DateTime.now().second.toString().padLeft(2, '0')} $s');
+    while (historial.length > 30) {
+      historial.removeAt(0);
+    }
+  }
+
   /// Último ping exitoso (null = aún ninguno).
   DateTime? ultimoPing;
 
@@ -71,6 +83,11 @@ class ColabKeepAlive {
     _startTime = DateTime.now();
     pingOk = 0;
     ultimoPing = null;
+    okNuestro = 0;
+    okCli = 0;
+    errNuestro = '';
+    errCli = '';
+    historial.clear();
 
     // Primer ping inmediato
     _ping();
@@ -81,6 +98,7 @@ class ColabKeepAlive {
 
   /// Detiene el daemon. Con [avisar]=true dispara [onDesconectado]
   /// (stop manual de la UI normalmente NO avisa).
+  /// Al terminar limpia los errores (si no quedan fijos en la 888).
   void stop({bool avisar = false, String motivo = 'detenido'}) {
     final ep = _endpoint;
     _timer?.cancel();
@@ -88,6 +106,8 @@ class ColabKeepAlive {
     _endpoint = null;
     _startTime = null;
     _consecutive4xx = 0;
+    errNuestro = '';
+    errCli = '';
     if (avisar && ep != null) {
       try {
         onDesconectado?.call(ep, motivo);
@@ -126,6 +146,8 @@ class ColabKeepAlive {
 
     final rN = await _pingModo(ep, token, cli: false);
     final rC = await _pingModo(ep, token, cli: true);
+    _bitacora(
+        'nuestro=${rN.ok ? 'ok' : rN.error} · cli=${rC.ok ? 'ok' : rC.error}');
     if (rN.ok) {
       okNuestro++;
       errNuestro = '';

@@ -11,6 +11,7 @@ class ColabTask {
   bool hasArg; // con / sin argumento
   String lastArg; // último argumento usado (prefill del pocket)
   String ayuda; // formato del argumento (se muestra al enviar)
+  List<String> campos; // cajas editables (una por línea del argumento)
 
   ColabTask({
     required this.id,
@@ -19,6 +20,7 @@ class ColabTask {
     this.hasArg = false,
     this.lastArg = '',
     this.ayuda = '',
+    this.campos = const [],
   });
 
   factory ColabTask.fromMap(Map<dynamic, dynamic> m) => ColabTask(
@@ -28,6 +30,10 @@ class ColabTask {
         hasArg: m['hasArg'] == true,
         lastArg: (m['lastArg'] ?? '').toString(),
         ayuda: (m['ayuda'] ?? '').toString(),
+        campos: [
+          for (final c in (m['campos'] as List? ?? const []))
+            c.toString()
+        ],
       );
 
   Map<String, dynamic> toMap() => {
@@ -37,6 +43,7 @@ class ColabTask {
         'hasArg': hasArg,
         'lastArg': lastArg,
         'ayuda': ayuda,
+        'campos': campos,
       };
 }
 

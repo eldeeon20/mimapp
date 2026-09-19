@@ -486,6 +486,10 @@ class ServicioMimapp : Service() {
         endpoint = ""
         inicioMs = 0L
         consec4xx = 0
+        // Al terminar se limpia el error: si no queda fijo en la 888.
+        ultimoError = ""
+        errNuestro = ""
+        errCli = ""
         try { prefs().edit().clear().apply() } catch (_: Throwable) {}
         accessToken = ""
         refreshToken = ""

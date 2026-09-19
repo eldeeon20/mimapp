@@ -127,8 +127,31 @@ class _TestSqlScreenState extends State<TestSqlScreen>
   PreviaCache? _previaCache;
 
   /// Ajustes: topes de caché (viven en ajustes_modo.json).
+  /// Previas 50MB..8GB, trozos por molde 1MB..memoria libre,
+  /// global avisa si el total lo alcanza.
   int _limiteTrozosKb = 512;
-  int _limitePreviasMb = 8;
+  int _limitePreviasMb = 256;
+  int _limiteGlobalMb = 1024;
+  int _memLibreMb = 2048;
+
+  Future<File> _ajustesFile() async {
+    final dir = await getApplicationSupportDirectory();
+    return File('${dir.path}/ajustes_modo.json');
+  }
+
+  /// Memoria libre (MB) para topar sliders. /proc en Android.
+  Future<int> _memLibre() async {
+    try {
+      final txt = await File('/proc/meminfo').readAsString();
+      for (final l in txt.split('\n')) {
+        if (l.startsWith('MemAvailable:')) {
+          final kb = int.parse(l.split(RegExp(r'\s+'))[1]);
+          return (kb ~/ 1024).clamp(256, 32768);
+        }
+      }
+    } catch (_) {}
+    return 2048;
+  }
 
   Future<File> _ajustesFile() async {
     final dir = await getApplicationSupportDirectory();
@@ -136,17 +159,23 @@ class _TestSqlScreenState extends State<TestSqlScreen>
   }
 
   Future<void> _cargarAjustes() async {
+    _memLibreMb = await _memLibre();
     try {
       final f = await _ajustesFile();
       if (await f.exists()) {
         final m =
             jsonDecode(await f.readAsString()) as Map<String, dynamic>;
         _limiteTrozosKb =
-            ((m['trozosKb'] as num?)?.toInt() ?? 512).clamp(128, 8192);
+            ((m['trozosKb'] as num?)?.toInt() ?? 512).clamp(1024, 1 << 30);
         _limitePreviasMb =
-            ((m['previasMb'] as num?)?.toInt() ?? 8).clamp(1, 64);
+            ((m['previasMb'] as num?)?.toInt() ?? 256).clamp(50, 8192);
+        _limiteGlobalMb =
+            ((m['globalMb'] as num?)?.toInt() ?? 1024).clamp(100, 16384);
       }
     } catch (_) {}
+    // Trozos con tope de memoria libre (no prometer lo que no hay).
+    final topeKb = _memLibreMb * 1024;
+    if (_limiteTrozosKb > topeKb) _limiteTrozosKb = topeKb;
     final c = _cache;
     if (c != null) c.limiteBytes = _limiteTrozosKb * 1024;
     final p = _previaCache;
@@ -161,10 +190,35 @@ class _TestSqlScreenState extends State<TestSqlScreen>
         jsonEncode({
           'trozosKb': _limiteTrozosKb,
           'previasMb': _limitePreviasMb,
+          'globalMb': _limiteGlobalMb,
         }),
         flush: true,
       );
     } catch (_) {}
+  }
+
+  /// Total de cachés (trozos + previas, todos los moldes).
+  Future<int> _cacheTotal() async {
+    if (!_sesionCache.abierta) return 0;
+    try {
+      final t = await TrozoCache.bytesTotales(_sesionCache);
+      final p = await PreviaCache.bytesTotales(_sesionCache);
+      return t + p;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  /// Avisa en rojo si el total pasó el límite global.
+  Future<void> _chequearGlobal() async {
+    final total = await _cacheTotal();
+    if (!mounted) return;
+    final limite = _limiteGlobalMb * 1024 * 1024;
+    if (total >= limite) {
+      _add('⚠ caché total ${fmtBytes(total)} ≥ límite '
+          'global ${fmtBytes(limite)} (vaciá en Ajustes)');
+      if (mounted) setState(() {});
+    }
   }
 
   /// Recordar clave cifrada en la SQL local de la app.
@@ -1132,6 +1186,7 @@ class _TestSqlScreenState extends State<TestSqlScreen>
         _cacheBytes[molde] = b;
         _cacheResumen = c.resumen();
       });
+      await _chequearGlobal();
     } catch (_) {}
   }
 
@@ -1166,38 +1221,55 @@ class _TestSqlScreenState extends State<TestSqlScreen>
               const Text('Cachés (sqlite cifradas, misma pass del índice)',
                   style: TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 4),
-              Text('Trozos por molde: $_limiteTrozosKb KB '
-                  '(bloques del .mld, no re-pedir)'),
+              Text('Trozos por molde: ${fmtBytes(_limiteTrozosKb * 1024)} '
+                  '(tope: memoria libre ${fmtBytes(_memLibreMb * 1024 * 1024)})'),
               Slider(
-                min: 128,
-                max: 8192,
-                divisions: 31,
-                value: _limiteTrozosKb.toDouble().clamp(128, 8192),
-                label: '$_limiteTrozosKb KB',
+                min: 1024,
+                max: (_memLibreMb * 1024).toDouble(),
+                divisions: 40,
+                value: _limiteTrozosKb.toDouble().clamp(
+                    1024, (_memLibreMb * 1024).toDouble()),
+                label: fmtBytes(_limiteTrozosKb * 1024),
                 onChanged: (v) {
-                  setState(
-                      () => _limiteTrozosKb = v.toInt().clamp(128, 8192));
+                  final tope = _memLibreMb * 1024;
+                  setState(() =>
+                      _limiteTrozosKb = v.toInt().clamp(1024, tope));
                   final c = _cache;
                   if (c != null) c.limiteBytes = _limiteTrozosKb * 1024;
                   _guardarAjustes();
                 },
               ),
-              Text('Previas por molde: $_limitePreviasMb MB '
+              Text('Previas por molde: ${fmtBytes(_limitePreviasMb * 1024 * 1024)} '
                   '(libres: miles de previas mínimas)'),
               Slider(
-                min: 1,
-                max: 64,
-                divisions: 63,
-                value: _limitePreviasMb.toDouble().clamp(1, 64),
-                label: '$_limitePreviasMb MB',
+                min: 50,
+                max: 8192,
+                divisions: 80,
+                value: _limitePreviasMb.toDouble().clamp(50, 8192),
+                label: fmtBytes(_limitePreviasMb * 1024 * 1024),
                 onChanged: (v) {
-                  setState(
-                      () => _limitePreviasMb = v.toInt().clamp(1, 64));
+                  setState(() => _limitePreviasMb =
+                      v.toInt().clamp(50, 8192));
                   final p = _previaCache;
                   if (p != null) {
                     p.limiteBytes = _limitePreviasMb * 1024 * 1024;
                   }
                   _guardarAjustes();
+                },
+              ),
+              Text('Límite global: ${fmtBytes(_limiteGlobalMb * 1024 * 1024)} '
+                  '(avisa en rojo si el total lo alcanza)'),
+              Slider(
+                min: 100,
+                max: 16384,
+                divisions: 80,
+                value: _limiteGlobalMb.toDouble().clamp(100, 16384),
+                label: fmtBytes(_limiteGlobalMb * 1024 * 1024),
+                onChanged: (v) {
+                  setState(() => _limiteGlobalMb =
+                      v.toInt().clamp(100, 16384));
+                  _guardarAjustes();
+                  _chequearGlobal();
                 },
               ),
               Text(_cacheResumen.isEmpty

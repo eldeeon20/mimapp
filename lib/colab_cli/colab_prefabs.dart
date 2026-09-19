@@ -27,6 +27,13 @@ abstract final class ColabPrefabs {
             '3. token HF (write)\n'
             '4. repo dir/user\n'
             '5. pass GLOBAL',
+        campos: const [
+          'URL del CDN',
+          'pass del CDN/lote',
+          'token HF (write)',
+          'repo dir/user',
+          'pass GLOBAL',
+        ],
         code: _kCdnCifrarHf,
       );
 

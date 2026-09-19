@@ -327,6 +327,13 @@ class _ColabTasksScreenState extends State<ColabTasksScreen> {
     }
     final argCtrl = TextEditingController(text: t.lastArg);
     final codeCtrl = TextEditingController(text: t.code);
+    // Una caja por campo (preset): prefill con el último envío por línea.
+    final ultimas = t.lastArg.split('\n');
+    final campoCtrls = [
+      for (var i = 0; i < t.campos.length; i++)
+        TextEditingController(
+            text: i < ultimas.length ? ultimas[i] : ''),
+    ];
     bool showCode = false;
     final sent = await showDialog<bool>(
       context: context,
@@ -335,22 +342,45 @@ class _ColabTasksScreenState extends State<ColabTasksScreen> {
           title: Text('Enviar "${t.nombre}"'),
           content: SizedBox(
             width: 400,
+            child: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Row(children: [
+                if (t.campos.isNotEmpty) ...[
+                  for (var i = 0; i < t.campos.length; i++) ...[
+                    TextField(
+                      controller: campoCtrls[i],
+                      decoration: InputDecoration(
+                        labelText: '${i + 1}. ${t.campos[i]}',
+                        border: const OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                  Row(children: [
+                    const Expanded(
+                      child: Text('Valores del último envío '
+                          '(tocá solo lo que cambia)')),
+                    IconButton(
+                      tooltip: 'Editar Python',
+                      onPressed: () => setD(() => showCode = !showCode),
+                      icon: Icon(showCode ? Icons.close : Icons.edit),
+                    ),
+                  ]),
+                ] else
+                  Row(children: [
                   Expanded(
                     child: TextField(
                       controller: argCtrl,
-                      autofocus: true,
+                      autofocus: t.campos.isEmpty,
                       maxLines: 6,
                       minLines: 3,
                       style: const TextStyle(
                           fontFamily: 'monospace', fontSize: 12),
-                      decoration: InputDecoration(
+                      decoration: const InputDecoration(
                         labelText: 'Argumento (una por línea)',
                         hintText: 'URL\npass\ntoken\nrepo\n...',
-                        border: const OutlineInputBorder(),
+                        border: OutlineInputBorder(),
                       ),
                     ),
                   ),
@@ -405,8 +435,53 @@ class _ColabTasksScreenState extends State<ColabTasksScreen> {
         ),
       ),
     );
-    if (sent != true || !mounted) return;
-    t.lastArg = argCtrl.text;
+    if (sent != true || !mounted) {
+      for (final c in campoCtrls) {
+        c.dispose();
+      }
+      return;
+    }
+    // Une las cajas (o el campo único) y confirma antes de mandar.
+    final campoVals = campoCtrls.map((c) => c.text.trim()).toList();
+    final argFinal = t.campos.isNotEmpty
+        ? campoVals.join('\n')
+        : argCtrl.text;
+    for (final c in campoCtrls) {
+      c.dispose();
+    }
+    if (t.campos.isNotEmpty) {
+      final ok2 = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('¿Mandar así?'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (var i = 0; i < t.campos.length; i++)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Text(
+                    '${i + 1}. ${t.campos[i]}:\n'
+                    '${campoVals[i].isEmpty ? '—' : campoVals[i]}',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ),
+            ],
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Atrás')),
+            FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Mandar')),
+          ],
+        ),
+      );
+      if (ok2 != true || !mounted) return;
+    }
+    t.lastArg = argFinal;
     if (codeCtrl.text != t.code) t.code = codeCtrl.text;
     _persist();
     _addPocket(t, t.lastArg);
@@ -420,6 +495,8 @@ class _ColabTasksScreenState extends State<ColabTasksScreen> {
         code: t.code,
         hasArg: t.hasArg,
         lastArg: t.lastArg,
+        ayuda: t.ayuda,
+        campos: List.of(t.campos),
       ));
     });
     _persist();
