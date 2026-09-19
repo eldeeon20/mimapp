@@ -58,6 +58,7 @@ class ServicioMimapp : Service() {
         const val ACCION_START_PING = "pr_app.START_PING"
         const val ACCION_UPDATE_TOKEN = "pr_app.UPDATE_TOKEN"
         const val ACCION_PING_DART = "pr_app.PING_DART"
+        const val ACCION_STOP_PING = "pr_app.STOP_PING"
         const val ACCION_STOP = "pr_app.STOP"
         /// La UI vive en otro proceso (`:ping`): el estado viaja por
         /// broadcast. La UI pide con PEDIR_ESTADO; el servicio responde
@@ -243,6 +244,11 @@ class ServicioMimapp : Service() {
                     (intent.getIntExtra("pings", 0)),
                 )
                 return START_STICKY
+            }
+            ACCION_STOP_PING -> {
+                // Celda soltada: se frena el ping (Dart ya frenó el suyo).
+                pararPing("celda soltada")
+                return START_NOT_STICKY
             }
         }
         // Restart STICKY pelado (el sistema mató `:ping`): retomar del

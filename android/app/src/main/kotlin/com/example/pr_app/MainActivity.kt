@@ -105,8 +105,7 @@ class MainActivity : AudioServiceActivity() {
                     arrancar(null, i)
                     res.success(true)
                 }
-                "pingDart" -> {
-                    // Push de Dart (único que pinea): duelo + rearma watchdog.
+                "pingDart" -> {                    // Push de Dart (único que pinea): duelo + rearma watchdog.
                     val m = (llamada.arguments as? Map<*, *>) ?: emptyMap<Any, Any>()
                     val i = Intent(this, ServicioMimapp::class.java)
                         .setAction(ServicioMimapp.ACCION_PING_DART)
@@ -127,6 +126,13 @@ class MainActivity : AudioServiceActivity() {
                         .putExtra("accessToken", m["accessToken"] as? String ?: "")
                         .putExtra("refreshToken", m["refreshToken"] as? String ?: "")
                         .putExtra("expiryMs", (m["expiryMs"] as? Number)?.toLong() ?: 0L)
+                    arrancar(null, i)
+                    res.success(true)
+                }
+                "stopPing" -> {
+                    // Celda soltada desde la app: frena el ping nativo.
+                    val i = Intent(this, ServicioMimapp::class.java)
+                        .setAction(ServicioMimapp.ACCION_STOP_PING)
                     arrancar(null, i)
                     res.success(true)
                 }

@@ -10,6 +10,7 @@ import 'colab_keep_alive.dart';
 import 'colab_sessions.dart';
 import 'colab_tasks_screen.dart';
 import '../services/colab_service.dart';
+import '../services/nativo.dart';
 import '../services/settings.dart';
 import '../services/status_notifier.dart';
 
@@ -420,12 +421,15 @@ class _ColabDialogBodyState extends State<_ColabDialogBody> {
                                   }
                                   try {
                                     await widget.sessions.unassign(s.endpoint);
-                                    // Soltada: se frena su ping (Dart).
-                                    // El nativo cae con la X de la 888.
+                                    // Soltada: se frena TODO el ping (Dart +
+                                    // nativo). Soltar = quitar ping.
                                     final svc = ColabService();
                                     if (svc.activeEndpoint == s.endpoint) {
                                       try {
                                         svc.pingDart.stop();
+                                      } catch (_) {}
+                                      try {
+                                        await Nativo.stopPing();
                                       } catch (_) {}
                                       svc.activeEndpoint = null;
                                       svc.espejoDart = '';
