@@ -38,6 +38,8 @@ class Nativo {
 
   /// Crea el servicio `:ping` (proceso independiente) con el bundle.
   /// [expiryMs] = epoch en UTC (sin strings ni zonas).
+  /// [soloAvisos]: el ping lo hace Dart puro; Kotlin solo frente,
+  /// 888 con el duelo y watchdog (jamás pinea).
   static Future<void> startPing({
     required String endpoint,
     required String accessToken,
@@ -45,6 +47,7 @@ class Nativo {
     required int expiryMs,
     required String clientId,
     required String clientSecret,
+    bool soloAvisos = true,
   }) async {
     try {
       await _canal.invokeMethod('startPing', {
@@ -54,6 +57,29 @@ class Nativo {
         'expiryMs': expiryMs,
         'clientId': clientId,
         'clientSecret': clientSecret,
+        'soloAvisos': soloAvisos,
+      });
+    } catch (_) {}
+  }
+
+  /// Push del duelo Dart al nativo: actualiza la 888 y rearma el
+  /// watchdog (si Dart deja de pushear, Kotlin avisa que se detuvo).
+  static Future<void> pingDart({
+    required String endpoint,
+    required int okN,
+    required String errN,
+    required int okC,
+    required String errC,
+    required int pings,
+  }) async {
+    try {
+      await _canal.invokeMethod('pingDart', {
+        'endpoint': endpoint,
+        'okN': okN,
+        'errN': errN,
+        'okC': okC,
+        'errC': errC,
+        'pings': pings,
       });
     } catch (_) {}
   }

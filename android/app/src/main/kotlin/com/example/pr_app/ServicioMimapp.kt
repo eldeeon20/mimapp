@@ -57,6 +57,7 @@ class ServicioMimapp : Service() {
         const val ACCION_CERRAR_STATUS = "pr_app.CERRAR_STATUS"
         const val ACCION_START_PING = "pr_app.START_PING"
         const val ACCION_UPDATE_TOKEN = "pr_app.UPDATE_TOKEN"
+        const val ACCION_PING_DART = "pr_app.PING_DART"
         const val ACCION_STOP = "pr_app.STOP"
         /// La UI vive en otro proceso (`:ping`): el estado viaja por
         /// broadcast. La UI pide con PEDIR_ESTADO; el servicio responde
@@ -85,6 +86,11 @@ class ServicioMimapp : Service() {
         @Volatile var okCli: Int = 0
         @Volatile var errNuestro: String = ""
         @Volatile var errCli: String = ""
+        /// Solo avisos: el ping lo hace Dart puro; Kotlin no pinea,
+        /// solo frente + 888 con el duelo que empuja Dart.
+        @Volatile var soloAvisos: Boolean = false
+        /// Último duelo Dart para la 888.
+        @Volatile var dueloDart: String = ""
         @Volatile var vivo: Boolean = false
         @Volatile var ultimoError: String = ""
         @Volatile var ultimaParada: String = ""
@@ -222,6 +228,22 @@ class ServicioMimapp : Service() {
                 }
                 return START_STICKY
             }
+            ACCION_PING_DART -> {
+                // Push de Dart (único que pinea): duelo + rearma watchdog.
+                if (intent.hasExtra("endpoint") &&
+                    (intent.getStringExtra("endpoint") ?: "").isNotEmpty()
+                ) {
+                    guardarBundle(intent)
+                }
+                pingDart(
+                    (intent.getIntExtra("okN", 0)),
+                    (intent.getStringExtra("errN") ?: ""),
+                    (intent.getIntExtra("okC", 0)),
+                    (intent.getStringExtra("errC") ?: ""),
+                    (intent.getIntExtra("pings", 0)),
+                )
+                return START_STICKY
+            }
         }
         // Restart STICKY pelado (el sistema mató `:ping`): retomar del
         // bundle guardado. Sin bundle no queda servicio (el frente ya se
@@ -289,6 +311,12 @@ class ServicioMimapp : Service() {
         if (i.hasExtra("clientSecret")) {
             clientSecret = i.getStringExtra("clientSecret") ?: clientSecret
         }
+        // Solo avisos por defecto: Kotlin jamás pinea.
+        if (i.hasExtra("soloAvisos")) {
+            soloAvisos = i.getBooleanExtra("soloAvisos", true)
+        } else if (!prefs().contains("soloAvisos")) {
+            soloAvisos = true
+        }
         try {
             val e = prefs().edit()
             if (traeEndpoint) e.putString("endpoint", endpoint)
@@ -301,6 +329,7 @@ class ServicioMimapp : Service() {
             if (i.hasExtra("clientSecret")) {
                 e.putString("clientSecret", clientSecret)
             }
+            e.putBoolean("soloAvisos", soloAvisos)
             e.apply()
         } catch (_: Throwable) {}
     }
@@ -311,6 +340,11 @@ class ServicioMimapp : Service() {
             val ep = (p.getString("endpoint", "") ?: "")
                 .replace(Regex("\\s+"), "")
             if (ep.isEmpty()) return null
+            if (p.contains("soloAvisos")) {
+                soloAvisos = p.getBoolean("soloAvisos", true)
+            } else {
+                soloAvisos = true
+            }
             Bundle(
                 ep,
                 p.getString("accessToken", "") ?: "",
@@ -431,6 +465,9 @@ class ServicioMimapp : Service() {
             return "Secure App" to "Servicio activo · $why"
         }
         var cuerpo = "$endpoint · ${formatoDur(System.currentTimeMillis() - inicioMs)} · $pingsOk pings"
+        if (soloAvisos && dueloDart.isNotEmpty()) {
+            cuerpo += "\n$dueloDart"
+        }
         if (ultimoError.isNotEmpty()) {
             cuerpo += " · error: $ultimoError"
         }
@@ -465,6 +502,13 @@ class ServicioMimapp : Service() {
         ultimoEndpoint = endpoint
         vivo = true
         arrancarFrente()
+        if (soloAvisos) {
+            // El ping lo hace Dart puro; Kotlin solo escucha sus
+            // pushes (rearma watchdog) y avisa si se detienen.
+            // DE NINGÚN MODO pinea Kotlin.
+            actualizar888()
+            return
+        }
         scope.launch {
             hacerPing()
             while (isActive && vivo) {
@@ -473,6 +517,31 @@ class ServicioMimapp : Service() {
                 hacerPing()
             }
         }
+    }
+
+    /// Push de Dart con el duelo del ping (ok/error por modo).
+    /// Rearma el watchdog: si Dart deja de pushear, la alarma avisa
+    /// "abrí la app o cae la celda". Kotlin jamás pinea.
+    private fun pingDart(
+        okN: Int,
+        errN: String,
+        okC: Int,
+        errC: String,
+        pings: Int,
+    ) {
+        if (!vivo) return
+        okNuestro = okN
+        errNuestro = errN
+        okCli = okC
+        errCli = errC
+        pingsOk = pings
+        ultimoError = ""
+        dueloDart = "dart nuestro $okN" +
+            (if (errN.isNotEmpty()) " [$errN]" else "") +
+            " · cli $okC" +
+            (if (errC.isNotEmpty()) " [$errC]" else "")
+        marcarPing()
+        actualizar888()
     }
 
     /// Celda muerta (reauth/404/24h): servicio muerto = celda que se

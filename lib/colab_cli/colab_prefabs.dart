@@ -65,12 +65,12 @@ nombre = url.split("?")[0].rstrip("/").split("/")[-1] or "lote.bin"
 print("fase 1", flush=True)
 sh([sys.executable, "python/deps.py"], GOLO + "/python")
 sh([sys.executable, "-m", "pip", "install", "--quiet",
-    "-r", "requirements.txt"], GOLO + "/hf")
+    "-r", "hf/requirements.txt"], GOLO)
 try:
     import requests  # noqa
 except ImportError:
     sh([sys.executable, "-m", "pip", "install", "--quiet", "requests"],
-       GOLO + "/hf")
+       GOLO)
 
 print("fase 2", flush=True)
 sh([sys.executable, "download/cli.py", url, "/tmp/lote",
@@ -94,12 +94,12 @@ f.close()
 
 print("fase 4", flush=True)
 sh([sys.executable, "python/cli.py", "enc", maestro, "/tmp/lote.pegado",
-    "/tmp/" + nombre + ".prbx"], GOLO + "/python")
+    "/tmp/" + nombre + ".prbx"], GOLO)
 final = "/tmp/" + nombre + ".prbx"
 
 print("fase 5", flush=True)
 sh([sys.executable, "hf/cli.py", token, final, repo,
-    "--repo-type", "dataset", "--private"], GOLO + "/hf")
+    "--repo-type", "dataset", "--private"], GOLO)
 print("ok", flush=True)
 ''';
 }

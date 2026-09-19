@@ -101,6 +101,21 @@ class MainActivity : AudioServiceActivity() {
                         .putExtra("expiryMs", (m["expiryMs"] as? Number)?.toLong() ?: 0L)
                         .putExtra("clientId", m["clientId"] as? String ?: "")
                         .putExtra("clientSecret", m["clientSecret"] as? String ?: "")
+                        .putExtra("soloAvisos", (m["soloAvisos"] as? Boolean) ?: true)
+                    arrancar(null, i)
+                    res.success(true)
+                }
+                "pingDart" -> {
+                    // Push de Dart (único que pinea): duelo + rearma watchdog.
+                    val m = (llamada.arguments as? Map<*, *>) ?: emptyMap<Any, Any>()
+                    val i = Intent(this, ServicioMimapp::class.java)
+                        .setAction(ServicioMimapp.ACCION_PING_DART)
+                        .putExtra("endpoint", m["endpoint"] as? String ?: "")
+                        .putExtra("okN", (m["okN"] as? Number)?.toInt() ?: 0)
+                        .putExtra("errN", m["errN"] as? String ?: "")
+                        .putExtra("okC", (m["okC"] as? Number)?.toInt() ?: 0)
+                        .putExtra("errC", m["errC"] as? String ?: "")
+                        .putExtra("pings", (m["pings"] as? Number)?.toInt() ?: 0)
                     arrancar(null, i)
                     res.success(true)
                 }

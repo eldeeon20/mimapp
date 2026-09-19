@@ -112,9 +112,13 @@ class ColabService {
         expiryMs: t.expiry.millisecondsSinceEpoch,
         clientId: ColabConfig.clientId,
         clientSecret: ColabConfig.clientSecret,
+        // El ping lo hace Dart puro (doble modo); Kotlin solo
+        // frente + 888 con el duelo + watchdog. Jamás pinea.
+        soloAvisos: true,
       );
     } catch (_) {}
     // Ping Dart puro (doble modo: nuestro + CLI, con reporte).
+    // Cada tick empuja el duelo al nativo (888 + rearma watchdog).
     try {
       pingDart.onTick = () {
         espejoDart = 'dart nuestro ${pingDart.okNuestro}'
@@ -123,6 +127,16 @@ class ColabService {
             '${pingDart.errCli.isEmpty ? '' : ' [${pingDart.errCli}]'}';
         try {
           StatusNotifier.instance.refresh();
+        } catch (_) {}
+        try {
+          Nativo.pingDart(
+            endpoint: endpoint,
+            okN: pingDart.okNuestro,
+            errN: pingDart.errNuestro,
+            okC: pingDart.okCli,
+            errC: pingDart.errCli,
+            pings: pingDart.pingOk,
+          );
         } catch (_) {}
       };
       pingDart.start(endpoint);

@@ -436,6 +436,13 @@ class _ColabTasksScreenState extends State<ColabTasksScreen> {
         ),
       ),
     );
+    // Lo editado se guarda siempre (aunque cancele): la próxima
+    // viene pre-rellenada con esto. Solo se MANDA con confirmar.
+    final campoVals = campoCtrls.map((c) => c.text.trim()).toList();
+    if (t.campos.isNotEmpty) {
+      t.lastArg = campoVals.join('\n');
+      _persist();
+    }
     if (sent != true || !mounted) {
       for (final c in campoCtrls) {
         c.dispose();
@@ -443,7 +450,6 @@ class _ColabTasksScreenState extends State<ColabTasksScreen> {
       return;
     }
     // Une las cajas (o el campo único) y confirma antes de mandar.
-    final campoVals = campoCtrls.map((c) => c.text.trim()).toList();
     final argFinal = t.campos.isNotEmpty
         ? campoVals.join('\n')
         : argCtrl.text;
