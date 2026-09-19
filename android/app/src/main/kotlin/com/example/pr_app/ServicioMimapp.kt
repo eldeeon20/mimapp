@@ -11,21 +11,10 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.os.SystemClock
-import java.net.ConnectException
-import java.net.HttpURLConnection
-import java.net.SocketTimeoutException
-import java.net.URL
-import java.net.URLEncoder
-import java.net.UnknownHostException
-import javax.net.ssl.SSLException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelChildren
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
-import org.json.JSONObject
 
 /// Servicio de ping a Colab 100% nativo e independiente (estilo
 /// PingService): vive en proceso `:ping`, NO depende de Flutter ni de
@@ -74,14 +63,11 @@ class ServicioMimapp : Service() {
         const val ALARMA_MS = 90_000L
 
         @Volatile var endpoint: String = ""
-        @Volatile var accessToken: String = ""
-        @Volatile var refreshToken: String = ""
-        @Volatile var expiryMs: Long = 0L
+        // Reloj: Kotlin jamás recibe tokens (ni access, ni refresh, ni
+        // secret, ni expiración). Solo endpoint + clientId para mostrar.
         @Volatile var clientId: String = ""
-        @Volatile var clientSecret: String = ""
         @Volatile var inicioMs: Long = 0L
         @Volatile var pingsOk: Int = 0
-        @Volatile var consec4xx: Int = 0
         /// Duelo de modos: cuántos OK por modo (nuestro vs CLI).
         @Volatile var okNuestro: Int = 0
         @Volatile var okCli: Int = 0
@@ -205,26 +191,16 @@ class ServicioMimapp : Service() {
                 return START_STICKY
             }
             ACCION_UPDATE_TOKEN -> {
-                // Token fresco empujado por la app: pisa sin resetear
-                // contadores, inicio ni loop. En proceso frío primero se
-                // recupera la memoria del bundle (si no, el update
-                // parcial no sabe la celda y no puede retomar).
+                // Reloj: los tokens ya no entran. Se ignora (queda por
+                // compatibilidad con apps viejas que lo empujan).
                 if (endpoint.isEmpty()) {
                     cargarBundle()?.let {
                         endpoint = it.endpoint
-                        if (accessToken.isEmpty()) accessToken = it.accessToken
-                        if (refreshToken.isEmpty()) {
-                            refreshToken = it.refreshToken
-                        }
-                        if (expiryMs == 0L) expiryMs = it.expiryMs
                         if (clientId.isEmpty()) clientId = it.clientId
-                        if (clientSecret.isEmpty()) {
-                            clientSecret = it.clientSecret
-                        }
                     }
                 }
-                if (intent.hasExtra("accessToken")) guardarBundle(intent)
-                if (!vivo && endpoint.isNotEmpty() && accessToken.isNotEmpty()) {
+                if (intent.hasExtra("endpoint")) guardarBundle(intent)
+                if (!vivo && endpoint.isNotEmpty()) {
                     empezarPing()
                 }
                 return START_STICKY
@@ -258,11 +234,7 @@ class ServicioMimapp : Service() {
         val b = cargarBundle()
         if (b != null) {
             endpoint = b.endpoint
-            accessToken = b.accessToken
-            refreshToken = b.refreshToken
-            expiryMs = b.expiryMs
             clientId = b.clientId
-            clientSecret = b.clientSecret
             empezarPing()
             return START_STICKY
         }
@@ -282,40 +254,22 @@ class ServicioMimapp : Service() {
 
     private data class Bundle(
         val endpoint: String,
-        val accessToken: String,
-        val refreshToken: String,
-        val expiryMs: Long,
         val clientId: String,
-        val clientSecret: String,
     )
 
     private fun prefs() =
         getSharedPreferences(PREFS, MODE_PRIVATE)
 
     private fun guardarBundle(i: Intent) {
-        // Solo se pisa lo que el intent TRAE: en proceso frío las
-        // variables están vacías y un update parcial (UPDATE_TOKEN sin
-        // endpoint) jamás debe borrar lo guardado (eso mataba la celda
-        // al cambiar el token con `:ping` caído).
+        // Reloj: jamás se guardan tokens. Si el intent trae (app
+        // vieja), se ignoran y se borran los viejos del prefs.
         // Endpoint saneado: espacios/saltos en la URL → 400 del TFE.
         val epLimpio = i.getStringExtra("endpoint")
             ?.replace(Regex("\\s+"), "") ?: ""
         val traeEndpoint = i.hasExtra("endpoint") && epLimpio.isNotEmpty()
         if (traeEndpoint) endpoint = epLimpio
-        if (i.hasExtra("accessToken")) {
-            accessToken = i.getStringExtra("accessToken") ?: accessToken
-        }
-        if (i.hasExtra("refreshToken")) {
-            refreshToken = i.getStringExtra("refreshToken") ?: refreshToken
-        }
-        if (i.hasExtra("expiryMs")) {
-            expiryMs = i.getLongExtra("expiryMs", expiryMs)
-        }
         if (i.hasExtra("clientId")) {
             clientId = i.getStringExtra("clientId") ?: clientId
-        }
-        if (i.hasExtra("clientSecret")) {
-            clientSecret = i.getStringExtra("clientSecret") ?: clientSecret
         }
         // Solo avisos por defecto: Kotlin jamás pinea.
         if (i.hasExtra("soloAvisos")) {
@@ -326,16 +280,13 @@ class ServicioMimapp : Service() {
         try {
             val e = prefs().edit()
             if (traeEndpoint) e.putString("endpoint", endpoint)
-            if (i.hasExtra("accessToken")) e.putString("accessToken", accessToken)
-            if (i.hasExtra("refreshToken")) {
-                e.putString("refreshToken", refreshToken)
-            }
-            if (i.hasExtra("expiryMs")) e.putLong("expiryMs", expiryMs)
             if (i.hasExtra("clientId")) e.putString("clientId", clientId)
-            if (i.hasExtra("clientSecret")) {
-                e.putString("clientSecret", clientSecret)
-            }
             e.putBoolean("soloAvisos", soloAvisos)
+            // Limpieza: tokens de versiones viejas, fuera.
+            e.remove("accessToken")
+            e.remove("refreshToken")
+            e.remove("expiryMs")
+            e.remove("clientSecret")
             e.apply()
         } catch (_: Throwable) {}
     }
@@ -353,11 +304,7 @@ class ServicioMimapp : Service() {
             }
             Bundle(
                 ep,
-                p.getString("accessToken", "") ?: "",
-                p.getString("refreshToken", "") ?: "",
-                p.getLong("expiryMs", 0L),
                 p.getString("clientId", "") ?: "",
-                p.getString("clientSecret", "") ?: "",
             )
         } catch (_: Throwable) {
             null
@@ -366,11 +313,7 @@ class ServicioMimapp : Service() {
 
     private fun borrarBundle() {
         endpoint = ""
-        accessToken = ""
-        refreshToken = ""
-        expiryMs = 0L
         clientId = ""
-        clientSecret = ""
         ultimoEndpoint = ""
         try { prefs().edit().clear().apply() } catch (_: Throwable) {}
     }
@@ -424,24 +367,6 @@ class ServicioMimapp : Service() {
             .build()
     }
 
-    /// Log de cada ping: queda en la 888 (expandible) y en logcat
-    /// (`adb logcat -s ColabPing`) para ver si está bien.
-    private fun bitacora(info: String) {
-        ultimoPing = info
-        try {
-            android.util.Log.d(TAG_LOG, info)
-        } catch (_: Throwable) {}
-    }
-
-    private fun horaCorta(): String {
-        return try {
-            java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
-                .format(java.util.Date())
-        } catch (_: Throwable) {
-            ""
-        }
-    }
-
     private fun arrancarFrente() {
         val (t, c) = texto888()
         val n = notiServicio(t, c)
@@ -492,37 +417,21 @@ class ServicioMimapp : Service() {
     // ---------------- ping Colab (HTTP, como el CLI) ----------------
 
     private fun empezarPing() {
-        if (endpoint.isEmpty() || accessToken.isEmpty()) {
-            updFrenteSinPing(
-                if (endpoint.isEmpty()) "sin endpoint"
-                else "sin token: reautenticar en Colab"
-            )
+        // Reloj: Kotlin jamás pinea ni toca tokens. Solo frente +
+        // 888 y watchdog sobre los pushes de Dart (único que pinea).
+        if (endpoint.isEmpty()) {
+            updFrenteSinPing("sin endpoint")
             return
         }
         scope.coroutineContext.cancelChildren()
         inicioMs = System.currentTimeMillis()
         pingsOk = 0
-        consec4xx = 0
         ultimoError = ""
         ultimaParada = ""
         ultimoEndpoint = endpoint
         vivo = true
         arrancarFrente()
-        if (soloAvisos) {
-            // El ping lo hace Dart puro; Kotlin solo escucha sus
-            // pushes (rearma watchdog) y avisa si se detienen.
-            // DE NINGÚN MODO pinea Kotlin.
-            actualizar888()
-            return
-        }
-        scope.launch {
-            hacerPing()
-            while (isActive && vivo) {
-                delay(INTERVALO_MS)
-                if (!vivo) break
-                hacerPing()
-            }
-        }
+        actualizar888()
     }
 
     /// Push de Dart con el duelo del ping (ok/error por modo).
@@ -560,15 +469,11 @@ class ServicioMimapp : Service() {
         ultimoEndpoint = ep
         endpoint = ""
         inicioMs = 0L
-        consec4xx = 0
         // Al terminar se limpia el error: si no queda fijo en la 888.
         ultimoError = ""
         errNuestro = ""
         errCli = ""
         try { prefs().edit().clear().apply() } catch (_: Throwable) {}
-        accessToken = ""
-        refreshToken = ""
-        expiryMs = 0L
         // Último parte a la UI antes de detenerse (celda muerta).
         difundirEstado()
         frente = false
@@ -590,198 +495,6 @@ class ServicioMimapp : Service() {
         try { stopSelf() } catch (_: Throwable) {}
     }
 
-    // GET EXACTO del CLI/vscode: Bearer + X-Colab-Tunnel, NADA más.
-    // Devuelve (código, body recortado en 4xx). -1 = ReadTimeout tras
-    // conectar = éxito CLI (el TFE anotó actividad y la VM no contesta).
-    // SocketTimeout SIN conectar = se lanza (neutro, reintenta).
-    private fun pingCodigo(ep: String, token: String): Pair<Int, String> {
-        val url = URL("https://colab.research.google.com/tun/m/$ep/keep-alive/")
-        val c = (url.openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = 10_000
-            readTimeout = 10_000
-            setRequestProperty("Authorization", "Bearer $token")
-            setRequestProperty("X-Colab-Tunnel", "Google")
-        }
-        var conectado = false
-        try {
-            c.connect()
-            conectado = true
-            val code = c.responseCode
-            var body = ""
-            if (code in 400..599) {
-                try {
-                    body = c.errorStream?.bufferedReader()?.use {
-                        it.readText()
-                    }?.replace(Regex("\\s+"), " ")?.trim()?.take(200) ?: ""
-                } catch (_: Throwable) {}
-            }
-            try { c.inputStream?.close() } catch (_: Throwable) {}
-            try { c.errorStream?.close() } catch (_: Throwable) {}
-            return code to body
-        } catch (e: SocketTimeoutException) {
-            if (conectado) return -1 to ""
-            throw e
-        }
-    }
-
-    /// Causa legible por TIPO (nunca texto crudo que puede venir null
-    /// y mostrar solo "red").
-    private fun diagnostico(e: Throwable): String {
-        return when (e) {
-            is UnknownHostException -> "sin DNS/red"
-            is ConnectException -> "sin conexión"
-            is SocketTimeoutException -> "timeout red"
-            is SSLException -> "TLS"
-            else -> e.message?.take(40)?.ifEmpty { null }
-                ?: e.javaClass.simpleName.ifEmpty { "red" }
-        }
-    }
-
-    private fun hacerPing() {
-        val ep = endpoint
-        if (ep.isEmpty()) return
-        if (System.currentTimeMillis() - inicioMs >= LIMITE_24H_MS) {
-            pararPing("límite 24h")
-            return
-        }
-        try {
-            var token = accessToken
-            if (expiryMs > 0 && System.currentTimeMillis() > expiryMs - 60_000) {
-                token = refrescar()
-            }
-            val t0 = SystemClock.elapsedRealtime()
-            val (code, body) = try {
-                pingCodigo(ep, token)
-            } catch (e: SocketTimeoutException) {
-                // ConnectTimeout = no llegó al TFE: neutro, no detiene.
-                consec4xx = 0
-                ultimoError = diagnostico(e)
-                bitacora("timeout-conexión · ${horaCorta()}")
-                actualizar888()
-                return
-            }
-            val ms = SystemClock.elapsedRealtime() - t0
-            if (code == -1) {
-                consec4xx = 0
-                pingsOk++
-                ultimoError = ""
-                bitacora("timeout-lectura=éxito · ${ms}ms · ${horaCorta()}")
-                marcarPing()
-                actualizar888()
-                return
-            }
-            if (code == 401) {
-                // Token sin permiso: refrescar UNA vez y reintentar.
-                // Falla de RED en el reintento ≠ reauth: no detiene.
-                val (reintento, rebody) = try {
-                    token = refrescar()
-                    pingCodigo(ep, token)
-                } catch (e: Throwable) {
-                    consec4xx = 0
-                    ultimoError = diagnostico(e)
-                    bitacora("401→red (${diagnostico(e)}) · ${horaCorta()}")
-                    actualizar888()
-                    return
-                }
-                if (reintento == -1) {
-                    consec4xx = 0
-                    pingsOk++
-                    ultimoError = ""
-                    bitacora("401→refresh→éxito · ${horaCorta()}")
-                    marcarPing()
-                    actualizar888()
-                    return
-                }
-                if (reintento == 401) {
-                    val detalle =
-                        if (rebody.isNotEmpty()) " · $rebody" else ""
-                    // Sin auto-stop: se sigue pingueando y se avisa.
-                    // Solo paran el usuario o el límite de 24h.
-                    ultimoError = "reauth 401$detalle"
-                    bitacora("401→401 reauth (sigo) · ${horaCorta()}")
-                    actualizar888()
-                    return
-                }
-                bitacora("401→refresh→$reintento · ${horaCorta()}")
-                return procesarCodigo(reintento, rebody)
-            }
-            if (code in 200..299) {
-                bitacora("$code · ${ms}ms · ${horaCorta()}")
-            } else if (code >= 400) {
-                bitacora("$code ($consec4xx+1) · ${horaCorta()}")
-            }
-            return procesarCodigo(code, body)
-        } catch (e: Throwable) {
-            // red/refresh: reintenta en el próximo ciclo, NO detiene.
-            consec4xx = 0
-            ultimoError = diagnostico(e)
-            bitacora("excepción (${diagnostico(e)}) · ${horaCorta()}")
-            try { actualizar888() } catch (_: Throwable) {}
-        }
-    }
-
-    private fun procesarCodigo(code: Int, body: String) {
-        // Sin auto-stop por error de ping: se loguea y se sigue.
-        // Solo paran el usuario o el límite de 24h.
-        val detalle = if (body.isNotEmpty()) " · $body" else ""
-        if (code == 404) {
-            consec4xx++
-            ultimoError = "http 404$detalle"
-        } else if (code in 400..499) {
-            consec4xx++
-            ultimoError = "http $code$detalle"
-        } else {
-            consec4xx = 0
-            pingsOk++
-            ultimoError = ""
-            marcarPing()
-        }
-        actualizar888()
-    }
-
-    /// Refresca el access_token por HTTP puro (igual que ColabPingMotor).
-    private fun refrescar(): String {
-        val url = URL("https://oauth2.googleapis.com/token")
-        val c = (url.openConnection() as HttpURLConnection).apply {
-            requestMethod = "POST"
-            connectTimeout = 10_000
-            readTimeout = 10_000
-            doOutput = true
-            setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
-        }
-        val cuerpo = "refresh_token=${URLEncoder.encode(refreshToken, "UTF-8")}" +
-            "&client_id=${URLEncoder.encode(clientId, "UTF-8")}" +
-            "&client_secret=${URLEncoder.encode(clientSecret, "UTF-8")}" +
-            "&grant_type=refresh_token"
-        c.outputStream.use { it.write(cuerpo.toByteArray()) }
-        val code = c.responseCode
-        if (code != 200) {
-            var body = ""
-            try {
-                body = c.errorStream?.bufferedReader()?.use { it.readText() }
-                    ?.replace(Regex("\\s+"), " ")?.trim()?.take(120) ?: ""
-            } catch (_: Throwable) {}
-            ultimoError =
-                if (body.isNotEmpty()) "refresh http $code · $body"
-                else "refresh http $code"
-            throw Exception("refresh $code")
-        }
-        val texto = c.inputStream.bufferedReader().use { it.readText() }
-        val d = JSONObject(texto)
-        accessToken = d.getString("access_token")
-        val expiraEn = d.optLong("expires_in", 3600L)
-        expiryMs = System.currentTimeMillis() + expiraEn * 1000L
-        ultimoError = ""
-        // Persiste el bundle renovado (restart retoma con token vigente).
-        try {
-            prefs().edit()
-                .putString("accessToken", accessToken)
-                .putLong("expiryMs", expiryMs)
-                .apply()
-        } catch (_: Throwable) {}
-        return accessToken
-    }
 
     // ---------------- interruptor de hombre muerto ----------------
 

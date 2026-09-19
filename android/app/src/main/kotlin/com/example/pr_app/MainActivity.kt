@@ -91,16 +91,13 @@ class MainActivity : AudioServiceActivity() {
                     res.success(true)
                 }
                 "startPing" -> {
-                    // expiryMs = epoch (Dart manda UTC: sin parseo ni zonas).
+                    // Reloj: Kotlin jamás recibe tokens (el ping es
+                    // Dart puro). Solo endpoint + clientId para mostrar.
                     val m = (llamada.arguments as? Map<*, *>) ?: emptyMap<Any, Any>()
                     val i = Intent(this, ServicioMimapp::class.java)
                         .setAction(ServicioMimapp.ACCION_START_PING)
                         .putExtra("endpoint", m["endpoint"] as? String ?: "")
-                        .putExtra("accessToken", m["accessToken"] as? String ?: "")
-                        .putExtra("refreshToken", m["refreshToken"] as? String ?: "")
-                        .putExtra("expiryMs", (m["expiryMs"] as? Number)?.toLong() ?: 0L)
                         .putExtra("clientId", m["clientId"] as? String ?: "")
-                        .putExtra("clientSecret", m["clientSecret"] as? String ?: "")
                         .putExtra("soloAvisos", (m["soloAvisos"] as? Boolean) ?: true)
                     arrancar(null, i)
                     res.success(true)
@@ -115,17 +112,6 @@ class MainActivity : AudioServiceActivity() {
                         .putExtra("okC", (m["okC"] as? Number)?.toInt() ?: 0)
                         .putExtra("errC", m["errC"] as? String ?: "")
                         .putExtra("pings", (m["pings"] as? Number)?.toInt() ?: 0)
-                    arrancar(null, i)
-                    res.success(true)
-                }
-                "updateToken" -> {
-                    // Token fresco de la app: pisa sin resetear el loop.
-                    val m = (llamada.arguments as? Map<*, *>) ?: emptyMap<Any, Any>()
-                    val i = Intent(this, ServicioMimapp::class.java)
-                        .setAction(ServicioMimapp.ACCION_UPDATE_TOKEN)
-                        .putExtra("accessToken", m["accessToken"] as? String ?: "")
-                        .putExtra("refreshToken", m["refreshToken"] as? String ?: "")
-                        .putExtra("expiryMs", (m["expiryMs"] as? Number)?.toLong() ?: 0L)
                     arrancar(null, i)
                     res.success(true)
                 }

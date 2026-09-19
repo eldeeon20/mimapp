@@ -36,27 +36,17 @@ class Nativo {
     } catch (_) {}
   }
 
-  /// Crea el servicio `:ping` (proceso independiente) con el bundle.
-  /// [expiryMs] = epoch en UTC (sin strings ni zonas).
-  /// [soloAvisos]: el ping lo hace Dart puro; Kotlin solo frente,
-  /// 888 con el duelo y watchdog (jamás pinea).
+  /// Crea el servicio `:ping` (proceso independiente) con el endpoint.
+  /// Reloj: Kotlin jamás recibe tokens (el ping es Dart puro).
   static Future<void> startPing({
     required String endpoint,
-    required String accessToken,
-    required String refreshToken,
-    required int expiryMs,
     required String clientId,
-    required String clientSecret,
     bool soloAvisos = true,
   }) async {
     try {
       await _canal.invokeMethod('startPing', {
         'endpoint': endpoint,
-        'accessToken': accessToken,
-        'refreshToken': refreshToken,
-        'expiryMs': expiryMs,
         'clientId': clientId,
-        'clientSecret': clientSecret,
         'soloAvisos': soloAvisos,
       });
     } catch (_) {}
@@ -80,22 +70,6 @@ class Nativo {
         'okC': okC,
         'errC': errC,
         'pings': pings,
-      });
-    } catch (_) {}
-  }
-
-  /// Token fresco empujado al servicio (pisa sin resetear el loop).
-  /// El servicio lo ignora si no está pineando.
-  static Future<void> updateToken({
-    required String accessToken,
-    required String refreshToken,
-    required int expiryMs,
-  }) async {
-    try {
-      await _canal.invokeMethod('updateToken', {
-        'accessToken': accessToken,
-        'refreshToken': refreshToken,
-        'expiryMs': expiryMs,
       });
     } catch (_) {}
   }

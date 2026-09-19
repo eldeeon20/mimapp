@@ -107,13 +107,10 @@ class ColabService {
     try {
       await Nativo.startPing(
         endpoint: endpoint,
-        accessToken: t.accessToken,
-        refreshToken: t.refreshToken,
-        expiryMs: t.expiry.millisecondsSinceEpoch,
         clientId: ColabConfig.clientId,
-        clientSecret: ColabConfig.clientSecret,
         // El ping lo hace Dart puro (doble modo); Kotlin solo
-        // frente + 888 con el duelo + watchdog. Jamás pinea.
+        // reloj + 888 con el duelo + watchdog. Jamás pinea ni
+        // recibe tokens.
         soloAvisos: true,
       );
     } catch (_) {}
@@ -149,23 +146,12 @@ class ColabService {
   // la 888. Servicio muerto = celda que se quita sola (ver diálogo).
   // Se deja el hueco sin borrar.
 
-  /// Inicializar: carga tokens, engancha el empuje de token fresco al
-  /// servicio y recupera el espejo de lo que ya pineaba.
-  /// Nada más: el servicio se crea al crear celda, punto.
+  /// Inicializar: carga tokens y recupera el espejo de lo que ya
+  /// pineaba. Nada más: el servicio se crea al crear celda, punto.
+  /// (Kotlin es reloj: no recibe tokens, no hay empuje.)
   Future<void> init() async {
     if (_initialized) return;
     _initialized = true;
-    // App viva → cada refresh Dart empuja el token al servicio `:ping`
-    // (pisa sin resetear). App muerta → el servicio se autoabastece.
-    ColabAuth.onTokensChanged = (t) async {
-      try {
-        await Nativo.updateToken(
-          accessToken: t.accessToken,
-          refreshToken: t.refreshToken,
-          expiryMs: t.expiry.millisecondsSinceEpoch,
-        );
-      } catch (_) {}
-    };
     await auth.loadTokens();
     await _recuperarEspejo();
   }
