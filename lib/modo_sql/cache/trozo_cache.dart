@@ -164,4 +164,25 @@ class TrozoCache {
         'DELETE FROM "$tabla" WHERE molde = ?;', [molde]);
     await sesion.persistir();
   }
+
+  /// Limpieza estática (borrar/recrear molde: los offsets viejos
+  /// envenenan la caché y todo falla con MAC).
+  static Future<void> limpiarMoldeDe(
+      SesionCache sesion, String molde) async {
+    try {
+      sesion.base.execute(
+          'DELETE FROM "$tabla" WHERE molde = ?;', [molde]);
+      await sesion.persistir();
+    } catch (_) {}
+  }
+
+  /// Purga un archivo (MAC falló: paquetes de otro .mld).
+  Future<void> limpiarArchivo(String archivo) async {
+    try {
+      sesion.base.execute(
+          'DELETE FROM "$tabla" WHERE molde = ? AND archivo = ?;',
+          [molde, archivo]);
+      await sesion.persistir();
+    } catch (_) {}
+  }
 }

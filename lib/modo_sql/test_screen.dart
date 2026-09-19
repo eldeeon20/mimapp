@@ -887,6 +887,8 @@ class _TestSqlScreenState extends State<TestSqlScreen>
       guardarCopia(nombre: nombre, datos: datos, log: _add);
 
   /// Edita los tags de UNA entrada (popup en su archivo).
+  /// Sin reabrir el molde: recarga solo las filas (rápido, sin
+  /// prefetch ni server de nuevo). Antes reabría todo y trancaba.
   Future<void> _editarTags(FichaArchivo f) async {
     final molde = _infoAbierta?.nombre;
     if (molde == null) return;
@@ -895,7 +897,19 @@ class _TestSqlScreenState extends State<TestSqlScreen>
       f: f,
       claveSql: _clave,
       molde: molde,
-      onListo: () => _abrir(molde),
+      onListo: () async {
+        try {
+          final filas = await CreateMoldeSql.filasDe(
+              claveSql: _clave, molde: molde);
+          if (!mounted) return;
+          setState(() {
+            _filas = filas;
+            _filasTag = null;
+          });
+        } catch (e) {
+          _add('✗ refrescar tags: $e');
+        }
+      },
       log: _add,
     );
   }
@@ -1173,6 +1187,12 @@ class _TestSqlScreenState extends State<TestSqlScreen>
         passIndice: await _passIndice(),
       );
       await ClavesApp().borrar(nombre);
+      // Sin caché vieja: los offsets del .mld borrado envenenan.
+      if (_sesionCache.abierta) {
+        await TrozoCache.limpiarMoldeDe(_sesionCache, nombre);
+        await PreviaCache.limpiarMoldeDe(_sesionCache, nombre);
+        _add('· caché invalidada de "$nombre"');
+      }
       if (!mounted) return;
       setState(() {
         if (_infoAbierta?.nombre == nombre) {

@@ -95,6 +95,7 @@ class MiniCache {
             cache: cache,
             info: info,
             filas: filas,
+            log: log,
           );
           final b = Uint8List.fromList(datos);
           minis[f.nombre] = b;

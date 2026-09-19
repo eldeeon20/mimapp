@@ -782,6 +782,7 @@ class CreateMoldeSql {
     MoldeInfo? info,
     List<FichaArchivo>? filas,
     Uint8List? claveArchivo,
+    void Function(String s)? log,
   }) async {
     final k = _k(claveSql, molde);
     var infoOk = info ?? _memoInfo[k];
@@ -854,18 +855,30 @@ class CreateMoldeSql {
       for (var i = primero; i <= ultimo; i++)
         PaqueteCrudo(i, crudos[i]!)
     ];
-    return Duro.descifrarRangoHilo(
-      claveArchivo: claveOk,
-      rango: RangoCrudo(
-        modo: 'gcm-c',
-        archivo: archivo,
-        desde: desde,
-        hasta: hasta,
-        trozo: f.trozo,
-        tamano: f.tamano,
-        paquetes: packs,
-      ),
-    );
+    try {
+      return await Duro.descifrarRangoHilo(
+        claveArchivo: claveOk,
+        rango: RangoCrudo(
+          modo: 'gcm-c',
+          archivo: archivo,
+          desde: desde,
+          hasta: hasta,
+          trozo: f.trozo,
+          tamano: f.tamano,
+          paquetes: packs,
+        ),
+      );
+    } catch (e) {
+      // MAC falló: la caché puede tener paquetes de otro .mld
+      // (borrar/recrear con mismos nombres). Se purga el archivo
+      // y se avisa; el próximo intento relee del server.
+      if ('$e'.contains('no autentica') && cache != null) {
+        await cache.limpiarArchivo(archivo);
+        log?.call('⚠ caché envenenada de "$archivo" '
+            '(molde "$molde"): purgada, reintentá');
+      }
+      rethrow;
+    }
   }
 
   static Future<List<MoldeInfo>> listarMoldes({

@@ -137,6 +137,15 @@ class PreviaCache {
         'DELETE FROM "$tabla" WHERE molde = ?;', [molde]);
   }
 
+  /// Limpieza estática (borrar/recrear molde).
+  static Future<void> limpiarMoldeDe(
+      SesionCache sesion, String molde) async {
+    try {
+      sesion.basePrevias.execute(
+          'DELETE FROM "$tabla" WHERE molde = ?;', [molde]);
+    } catch (_) {}
+  }
+
   static Future<void> limpiarTodo(SesionCache sesion) async {
     sesion.basePrevias.execute('DELETE FROM "$tabla";');
   }
