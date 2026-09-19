@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../media/media_player.dart';
 import 'admin/panel_admin.dart';
 import 'app/claves_app.dart';
 import 'cache/previa_cache.dart';
@@ -779,6 +780,111 @@ class _TestSqlScreenState extends State<TestSqlScreen>
     );
   }
 
+  /// Visor de video: sus 17 previas en transición + tags,
+  /// reproducir (copia local a la app + reproductor) o guardar
+  /// en Descargas (como las fotos).
+  Future<void> _verVideo(FichaArchivo f) async {
+    final molde = _infoAbierta?.nombre;
+    if (molde == null || !mounted) return;
+    final frames = await _previasDe(f);
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => Dialog(
+        insetPadding: EdgeInsets.zero,
+        backgroundColor: Colors.black,
+        child: Column(
+          children: [
+            AppBar(
+              backgroundColor: Colors.black,
+              title: Text(f.nombre,
+                  style: const TextStyle(fontSize: 13)),
+              leading: IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: () => Navigator.pop(ctx),
+              ),
+            ),
+            Expanded(
+              child: frames.isNotEmpty
+                  ? CiclaPrevia(frames: frames)
+                  : const Icon(Icons.movie_rounded,
+                      size: 64, color: Colors.grey),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Wrap(
+                spacing: 8,
+                alignment: WrapAlignment.center,
+                children: [
+                  FilledButton.tonalIcon(
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      _editarTags(f);
+                    },
+                    icon: const Icon(Icons.label_rounded, size: 18),
+                    label: const Text('Tags'),
+                  ),
+                  FilledButton.tonalIcon(
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      _reproducirVideo(f);
+                    },
+                    icon: const Icon(Icons.play_arrow_rounded, size: 18),
+                    label: const Text('Reproducir'),
+                  ),
+                  FilledButton.tonalIcon(
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      _recuperar(f);
+                    },
+                    icon:
+                        const Icon(Icons.download_rounded, size: 18),
+                    label: const Text('Guardar'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Reproduce un video: copia descifrada local en la app +
+  /// reproductor de mimapp. (Videos grandes tardan: es el archivo.)
+  Future<void> _reproducirVideo(FichaArchivo f) async {
+    final molde = _infoAbierta?.nombre;
+    if (molde == null) return;
+    if (f.tamano > 500 * 1024 * 1024) {
+      _add('✗ reproducir "${f.nombre}": ${fmtBytes(f.tamano)}, '
+          'muy grande para RAM (bajalo por rangos)');
+      return;
+    }
+    _add('· preparando video "${f.nombre}"…');
+    try {
+      final datos = await CreateMoldeSql.pedirRango(
+        claveSql: _clave,
+        molde: molde,
+        archivo: f.nombre,
+        desde: 0,
+        hasta: f.tamano,
+        cache: _cache,
+        info: _infoAbierta,
+        filas: _filas,
+      );
+      final dir = await getApplicationSupportDirectory();
+      final tmp = File(
+          '${dir.path}/video_${DateTime.now().millisecondsSinceEpoch}'
+          '.${f.formato.isEmpty ? 'mp4' : f.formato}');
+      await tmp.writeAsBytes(datos, flush: true);
+      await MediaPlayer.ensureService();
+      await MediaPlayer.instance.openPath(tmp.path);
+      _add('▶ reproduciendo "${f.nombre}"');
+    } catch (e) {
+      _add('✗ reproducir: $e');
+    }
+  }
+
   /// Guarda copia en Descargas (bytes ya descifrados).
   Future<void> _guardarCopia(String nombre, Uint8List datos) =>
       guardarCopia(nombre: nombre, datos: datos, log: _add);
@@ -1438,7 +1544,13 @@ class _TestSqlScreenState extends State<TestSqlScreen>
           _hastaCtrl.text = '${f.tamano}';
           _rangoInfo = '';
         });
-        _recuperar(f);
+        // Videos: visor de sus 17 previas + reproducir/guardar.
+        // El resto: flujo normal (visor o recuperar).
+        if (PreviewMolde.esVideo(f.formato)) {
+          _verVideo(f);
+        } else {
+          _recuperar(f);
+        }
       },
     );
   }
@@ -1504,8 +1616,13 @@ class _TestSqlScreenState extends State<TestSqlScreen>
               _hastaCtrl.text = '${f.tamano}';
               _rangoInfo = '';
             });
-            // Tap = preview directo (visor si es imagen, si no abre).
-            _recuperar(f);
+            // Tap = preview directo (visor si es imagen, video si es
+            // video, si no abre).
+            if (PreviewMolde.esVideo(f.formato)) {
+              _verVideo(f);
+            } else {
+              _recuperar(f);
+            }
           },
           onTags: _editarTags,
           onRecuperar: _descargarArchivo,

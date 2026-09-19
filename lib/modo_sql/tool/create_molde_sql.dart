@@ -404,23 +404,45 @@ class CreateMoldeSql {
     return tam + n * Duro.overhead;
   }
 
-  /// Previas en paralelo (de a 4): una lenta no frena a las demás.
-  /// Orden de salida = orden de entrada.
+  /// Previas en paralelo (imágenes de a 4) + videos en SERIE.
+  /// Un solo Player compartido: 4 videos a la vez mezclan los frames
+  /// y varios moldes terminan con la misma previa. Orden preservado.
   static Future<List<List<Uint8List>>> _previasParalelo(
       List<_PrevPend> pends, CapturaVideo? captura) async {
-    final fuera = <List<Uint8List>>[];
-    for (var i = 0; i < pends.length; i += 4) {
-      final grupo =
-          pends.sublist(i, (i + 4).clamp(0, pends.length));
+    final fuera = List<List<Uint8List>>.filled(
+        pends.length, const <Uint8List>[]);
+    // Videos primero, uno por vez (el Player es único).
+    for (var i = 0; i < pends.length; i++) {
+      if (!PreviewMolde.esVideo(pends[i].formato)) continue;
+      try {
+        fuera[i] = await PreviewMolde.generar(
+          ruta: pends[i].ruta,
+          formato: pends[i].formato,
+          captura: captura,
+        );
+      } catch (_) {
+        fuera[i] = const <Uint8List>[];
+      }
+    }
+    // Imágenes en paralelo de a 4 (hilos aislados, no se mezclan).
+    final idx = [
+      for (var i = 0; i < pends.length; i++)
+        if (!PreviewMolde.esVideo(pends[i].formato)) i
+    ];
+    for (var j = 0; j < idx.length; j += 4) {
+      final grupo = idx.sublist(
+          j, (j + 4).clamp(0, idx.length));
       final res = await Future.wait(
-        grupo.map((p) => PreviewMolde.generar(
-              ruta: p.ruta,
-              formato: p.formato,
+        grupo.map((k) => PreviewMolde.generar(
+              ruta: pends[k].ruta,
+              formato: pends[k].formato,
               captura: captura,
             ).then<List<Uint8List>>((v) => v,
                 onError: (_) => <Uint8List>[])),
       );
-      fuera.addAll(res);
+      for (var g = 0; g < grupo.length; g++) {
+        fuera[grupo[g]] = res[g];
+      }
     }
     return fuera;
   }
@@ -961,12 +983,15 @@ class CreateMoldeSql {
       );
       for (final p in previas) {
         final n = '${p['nombre'] ?? ''}';
-        final base = n.startsWith(PreviewMolde.prefijo)
-            ? n
-                .substring(PreviewMolde.prefijo.length)
-                .split('#')
-                .first
-            : '';
+        // Base = entre el prefijo y el ÚLTIMO '#' (el nombre
+        // puede traer '#' adentro; el índice va al final).
+        var base = '';
+        if (n.startsWith(PreviewMolde.prefijo)) {
+          final resto =
+              n.substring(PreviewMolde.prefijo.length);
+          final h = resto.lastIndexOf('#');
+          base = h < 0 ? resto : resto.substring(0, h);
+        }
         if (base.isEmpty || !vistos.contains(base)) {
           caja.quitar(MediaBase.tablaArchivos, (p['id'] as int?) ?? 0);
           borradas++;

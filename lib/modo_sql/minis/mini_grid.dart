@@ -73,6 +73,17 @@ class MiniGrid extends StatelessWidget {
     return i < 0 ? nombre : nombre.substring(i + 1);
   }
 
+  /// Cuadro estático: fotograma 1 (ahorro en grid).
+  static Widget _estatica(Uint8List b) {
+    return Image.memory(
+      b,
+      fit: BoxFit.cover,
+      gaplessPlayback: true,
+      cacheWidth: 256,
+      cacheHeight: 256,
+    );
+  }
+
   /// Mini con previa primero: si el molde nuevo trae previas
   /// guardadas usa la primera (memoiza en el mapa del modo);
   /// si no, mini al vuelo (moldes viejos).
@@ -197,17 +208,8 @@ class MiniGrid extends StatelessWidget {
               // Previas guardadas: transición si hay varias.
               final pv = previas[f.nombre];
               if (pv != null && pv.isNotEmpty) {
-                return _cuadro(
-                    f,
-                    pv.length == 1
-                        ? Image.memory(
-                            pv.first,
-                            fit: BoxFit.cover,
-                            gaplessPlayback: true,
-                            cacheWidth: 256,
-                            cacheHeight: 256,
-                          )
-                        : _Cicla(frames: pv));
+                // Grid estatico: fotograma 1 (la transicion es del visor).
+                return _cuadro(f, _estatica(pv.first));
               }
               final mini = minis[f.nombre];
               final Widget hijo;
@@ -270,7 +272,7 @@ class MiniGrid extends StatelessWidget {
                 if (pv != null) {
                   // Videos con frames: transición; sin frames: icono.
                   if (pv.isNotEmpty && esVideo(f)) {
-                    return _cuadro(f, _Cicla(frames: pv));
+                    return _cuadro(f, _estatica(pv.first));
                   }
                   return _cuadro(f, _TileIcono(f: f, esVideo: esVideo(f)));
                 }
@@ -284,7 +286,7 @@ class MiniGrid extends StatelessWidget {
                     final p = snap.data ?? const <Uint8List>[];
                     previas[f.nombre] = p;
                     if (p.isNotEmpty && esVideo(f)) {
-                      return _cuadro(f, _Cicla(frames: p));
+                      return _cuadro(f, _estatica(p.first));
                     }
                     return _cuadro(
                         f, _TileIcono(f: f, esVideo: esVideo(f)));
@@ -299,15 +301,15 @@ class MiniGrid extends StatelessWidget {
 }
 
 /// Transición: cicla los frames de la previa cada 900ms.
-class _Cicla extends StatefulWidget {
+class CiclaPrevia extends StatefulWidget {
   final List<Uint8List> frames;
   const _Cicla({required this.frames});
 
   @override
-  State<_Cicla> createState() => _CiclaEstado();
+  State<CiclaPrevia> createState() => _CiclaPreviaEstado();
 }
 
-class _CiclaEstado extends State<_Cicla> {
+class _CiclaPreviaEstado extends State<CiclaPrevia> {
   int _i = 0;
   Timer? _t;
 
