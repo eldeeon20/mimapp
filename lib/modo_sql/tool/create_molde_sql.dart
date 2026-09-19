@@ -236,10 +236,16 @@ class CreateMoldeSql {
     final prevPend = <_PrevPend>[];
     final waf = destino.openSync(mode: FileMode.write);
     try {
+      var idx = 0;
       for (final f in fuentes) {
         final nombreRel = rel(f);
+        idx++;
         if (nombreRel.isEmpty) continue;
         final tam = await f.length();
+        // Progreso real: el cifrado por trozos no avisa solo.
+        // Sin esto la bitácora se queda en "cifrando…" horas.
+        log?.call('· [$idx/${fuentes.length}] $nombreRel '
+            '(${(tam / 1048576).toStringAsFixed(1)}MB)');
         final fecha = (await f.lastModified()).millisecondsSinceEpoch;
         final claveArchivo = await Duro.claveArchivoHilo(
           clave: clave,
@@ -294,7 +300,14 @@ class CreateMoldeSql {
     // Previas en paralelo (de a 4) + anexado serial al .mld.
     // Se guardan cifradas (misma clave del archivo) e indexadas
     // en la SQL; el grid las muestra sin abrir el original.
+    // Los videos van en SERIE y en tiempo real: avisar antes.
     try {
+      if (prevPend.isNotEmpty) {
+        final nVid =
+            prevPend.where((p) => PreviewMolde.esVideo(p.formato)).length;
+        log?.call('· previas: ${prevPend.length} archivos'
+            '${nVid > 0 ? ' ($nVid videos, en tiempo real)' : ''}…');
+      }
       final hechas = await _previasParalelo(prevPend, captura);
       if (hechas.isNotEmpty) {
         final app = destino.openSync(mode: FileMode.append);
