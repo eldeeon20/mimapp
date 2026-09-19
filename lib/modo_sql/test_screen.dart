@@ -70,7 +70,42 @@ class _TestSqlScreenState extends State<TestSqlScreen>
   final _minis = MiniCache();
 
   /// Previas guardadas por archivo (memo, se llena solo).
+  /// Tope RAM 1GB (512MB en suave): lo viejo sale primero.
   final _previas = <String, List<Uint8List>>{};
+  int _previasBytes = 0;
+
+  int get _previasTope =>
+      _suave ? 512 * 1024 * 1024 : 1024 * 1024 * 1024;
+
+  void _previasGuardar(String nombre, List<Uint8List> p) {
+    final vieja = _previas[nombre];
+    if (vieja != null) {
+      _previasBytes -= vieja.fold(0, (a, b) => a + b.length);
+      _previas.remove(nombre);
+    }
+    _previas[nombre] = p;
+    _previasBytes += p.fold(0, (a, b) => a + b.length);
+    _previasEvictar();
+  }
+
+  void _previasEvictar() {
+    while (_previasBytes > _previasTope && _previas.length > 1) {
+      final vieja = _previas.keys.first;
+      final b = _previas.remove(vieja)!;
+      _previasBytes -= b.fold(0, (a, x) => a + x.length);
+      for (final k in _previasFut.keys.toList()) {
+        if (k.endsWith('\n$vieja')) _previasFut.remove(k);
+      }
+    }
+  }
+
+  /// LRU: la usada vuelve al fondo.
+  void _previasTocar(String nombre) {
+    final p = _previas[nombre];
+    if (p == null) return;
+    _previas.remove(nombre);
+    _previas[nombre] = p;
+  }
 
   /// Futuros memoizados: el MISMO future por archivo (si se crea uno
   /// nuevo en cada build, el FutureBuilder reconsulta SQL y
@@ -89,12 +124,15 @@ class _TestSqlScreenState extends State<TestSqlScreen>
   Future<List<Uint8List>> _cargarPrevias(
       String m, FichaArchivo f) async {
     final ya = _previas[f.nombre];
-    if (ya != null) return ya;
+    if (ya != null) {
+      _previasTocar(f.nombre);
+      return ya;
+    }
     // Disco primero (no re-abrir el original).
     try {
       final disco = await _previaCache?.leer(archivo: f.nombre);
       if (disco != null && disco.isNotEmpty) {
-        _previas[f.nombre] = [disco];
+        _previasGuardar(f.nombre, [disco]);
         return [disco];
       }
     } catch (_) {}
@@ -106,7 +144,7 @@ class _TestSqlScreenState extends State<TestSqlScreen>
         cache: _cache,
         info: _infoAbierta,
       );
-      _previas[f.nombre] = p;
+      _previasGuardar(f.nombre, p);
       // Primera a disco (las demás viven en la transición en RAM).
       if (p.isNotEmpty) {
         try {
@@ -573,6 +611,16 @@ class _TestSqlScreenState extends State<TestSqlScreen>
       _add('✓ abierto "$nombre": ${filas.length} filas de tu SQL, '
           'server solo ve ${fmtBytes(m.total)} crudos, '
           'caché local 512KB lista');
+      // Diagnóstico: nombres repetidos (ej. video 4 veces).
+      final vistos = <String>{};
+      var dups = 0;
+      for (final f in filas) {
+        if (!vistos.add(f.nombre)) dups++;
+      }
+      if (dups > 0) {
+        _add('⚠ $dups fila(s) duplicadas en "$nombre" '
+            '(botón Quitar duplicados en Lista)');
+      }
       // Prefetch EN ORDEN del nivel actual (los carriles las sacan
       // en orden y el grid se llena sin saltar grillas).
       _preFetchMinis(
@@ -1067,24 +1115,22 @@ class _TestSqlScreenState extends State<TestSqlScreen>
     ];
   }
 
-  /// Encola minis en orden de índice (sin await: la cola manda).
+  /// Encola previas en orden (sin await: la cola manda).
+  /// El molde v2 ya trae la previa calculada: se calientan previas,
+  /// NO minis (la mini descifra el archivo entero, derroche).
+  /// Moldes viejos: cada cuadro pide su mini perezoso al verse.
   void _preFetchMinis(
       String molde, MoldeInfo info, List<FichaArchivo> filas) {
     var n = 0;
     for (final f in filas) {
-      if (!_imgs.contains(f.formato.toLowerCase())) continue;
+      if (!_imgs.contains(f.formato.toLowerCase()) &&
+          !PreviewMolde.esVideo(f.formato.toLowerCase())) {
+        continue;
+      }
       if (n >= 60) break;
       n++;
       // Sin await a propósito: entra a la cola en orden.
-      _minis.de(
-        claveSql: _clave,
-        molde: molde,
-        f: f,
-        imgs: _imgs,
-        cache: _cache,
-        info: info,
-        filas: filas,
-      );
+      _previasDe(f);
     }
   }
 
@@ -1288,11 +1334,16 @@ class _TestSqlScreenState extends State<TestSqlScreen>
             cacheResumen: _cacheResumen,
             cacheLimiteKb: _limiteTrozosKb,
             onVaciarCache: _vaciarCache,
-            suave: _suave,
-            onSuave: (v) => setState(() {
-              _suave = v;
-              _minis.maxEnVuelo = v ? 2 : 6;
-            }),
+          suave: _suave,
+          onSuave: (v) => setState(() {
+            _suave = v;
+            _minis.maxEnVuelo = v ? 2 : 6;
+            // Suave = 512MB RAM, libre = 1GB (minis + previas).
+            _minis.topeBytes =
+                v ? 512 * 1024 * 1024 : 1024 * 1024 * 1024;
+            _minis.limpiar();
+            _previasEvictar();
+          }),
             hilosEnUso: _minis.enVuelo,
             maxHilos: _minis.maxEnVuelo,
           ),

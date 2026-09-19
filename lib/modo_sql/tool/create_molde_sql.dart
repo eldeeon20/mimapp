@@ -953,6 +953,25 @@ class CreateMoldeSql {
           borradas++;
         }
       }
+      // Previas huérfanas (.prev/x#i sin archivo x): se van también.
+      final previas = caja.listarDonde(
+        MediaBase.tablaArchivos,
+        'molde = ? AND nombre LIKE \'.prev/%\'',
+        [molde],
+      );
+      for (final p in previas) {
+        final n = '${p['nombre'] ?? ''}';
+        final base = n.startsWith(PreviewMolde.prefijo)
+            ? n
+                .substring(PreviewMolde.prefijo.length)
+                .split('#')
+                .first
+            : '';
+        if (base.isEmpty || !vistos.contains(base)) {
+          caja.quitar(MediaBase.tablaArchivos, (p['id'] as int?) ?? 0);
+          borradas++;
+        }
+      }
       olvidarMolde(molde);
       return borradas;
     } finally {

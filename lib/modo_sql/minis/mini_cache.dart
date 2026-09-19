@@ -30,7 +30,9 @@ class MiniCache {
   int bytesEnRam = 0;
 
   /// Presupuesto RAM de minis (lo viejo sale primero).
-  int topeBytes = 8 * 1024 * 1024;
+  /// Guarda bytes completos (el 256px lo hace el Image al pintar).
+  /// 1GB normal / 512MB en suave (lo pone la pantalla).
+  int topeBytes = 1024 * 1024 * 1024;
 
   int get cuantas => minis.length;
 
@@ -64,6 +66,12 @@ class MiniCache {
     void Function(String)? log,
   }) {
     final k = '$molde\n${f.nombre}';
+    // LRU: lo ya descifrado vuelve al fondo (no se evicta por scrollear).
+    final m0 = minis[f.nombre];
+    if (m0 != null) {
+      minis.remove(f.nombre);
+      minis[f.nombre] = m0;
+    }
     final ya = futs[k];
     if (ya != null) return ya;
     final fut = () async {
