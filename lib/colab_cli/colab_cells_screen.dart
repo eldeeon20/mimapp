@@ -292,20 +292,24 @@ print("Python:", sys.version.split()[0])''';
                             ),
                           ],
                         ),
-                        TextField(
-                          controller: cell.code,
-                          maxLines: null,
-                          minLines: 3,
-                          style: const TextStyle(
-                              fontSize: 13, fontFamily: 'monospace'),
-                          decoration: InputDecoration(
-                            isDense: true,
-                            filled: true,
-                            fillColor: const Color(0xFF111827),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(8),
+                        ConstrainedBox(
+                          constraints:
+                              const BoxConstraints(maxHeight: 320),
+                          child: TextField(
+                            controller: cell.code,
+                            maxLines: null,
+                            expands: false,
+                            style: const TextStyle(
+                                fontSize: 13, fontFamily: 'monospace'),
+                            decoration: InputDecoration(
+                              isDense: true,
+                              filled: true,
+                              fillColor: const Color(0xFF111827),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              hintText: 'Código Python...',
                             ),
-                            hintText: 'Código Python...',
                           ),
                         ),
                         if (cell.output.isNotEmpty) ...[

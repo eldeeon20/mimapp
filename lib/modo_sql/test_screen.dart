@@ -1137,69 +1137,79 @@ class _TestSqlScreenState extends State<TestSqlScreen>
   }
 
   /// Ajustes: cachés (trozos + previas) + admin clásico abajo.
+  /// (PanelAdmin ya es ListView: va en Expanded, no anidado.)
   Widget _tabAdmin() {
     final lista = _entradas.values.toList()
       ..sort((a, b) =>
           '${a['nombre']}'.compareTo('${b['nombre']}'));
-    return ListView(
-      padding: const EdgeInsets.all(12),
+    return Column(
       children: [
-        const Text('Cachés (sqlite cifradas, misma pass del índice)',
-            style: TextStyle(fontWeight: FontWeight.bold)),
-        const SizedBox(height: 4),
-        Text('Trozos por molde: $_limiteTrozosKb KB '
-            '(bloques del .mld, no re-pedir)'),
-        Slider(
-          min: 128,
-          max: 8192,
-          divisions: 31,
-          value: _limiteTrozosKb.toDouble().clamp(128, 8192),
-          label: '$_limiteTrozosKb KB',
-          onChanged: (v) {
-            setState(
-                () => _limiteTrozosKb = v.toInt().clamp(128, 8192));
-            final c = _cache;
-            if (c != null) c.limiteBytes = _limiteTrozosKb * 1024;
-            _guardarAjustes();
-          },
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Cachés (sqlite cifradas, misma pass del índice)',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 4),
+              Text('Trozos por molde: $_limiteTrozosKb KB '
+                  '(bloques del .mld, no re-pedir)'),
+              Slider(
+                min: 128,
+                max: 8192,
+                divisions: 31,
+                value: _limiteTrozosKb.toDouble().clamp(128, 8192),
+                label: '$_limiteTrozosKb KB',
+                onChanged: (v) {
+                  setState(
+                      () => _limiteTrozosKb = v.toInt().clamp(128, 8192));
+                  final c = _cache;
+                  if (c != null) c.limiteBytes = _limiteTrozosKb * 1024;
+                  _guardarAjustes();
+                },
+              ),
+              Text('Previas por molde: $_limitePreviasMb MB '
+                  '(libres: miles de previas mínimas)'),
+              Slider(
+                min: 1,
+                max: 64,
+                divisions: 63,
+                value: _limitePreviasMb.toDouble().clamp(1, 64),
+                label: '$_limitePreviasMb MB',
+                onChanged: (v) {
+                  setState(
+                      () => _limitePreviasMb = v.toInt().clamp(1, 64));
+                  final p = _previaCache;
+                  if (p != null) {
+                    p.limiteBytes = _limitePreviasMb * 1024 * 1024;
+                  }
+                  _guardarAjustes();
+                },
+              ),
+              Text(_cacheResumen.isEmpty
+                  ? 'Sin medición todavía'
+                  : _cacheResumen),
+              const Divider(height: 12),
+            ],
+          ),
         ),
-        Text('Previas por molde: $_limitePreviasMb MB '
-            '(libres: miles de previas mínimas)'),
-        Slider(
-          min: 1,
-          max: 64,
-          divisions: 63,
-          value: _limitePreviasMb.toDouble().clamp(1, 64),
-          label: '$_limitePreviasMb MB',
-          onChanged: (v) {
-            setState(
-                () => _limitePreviasMb = v.toInt().clamp(1, 64));
-            final p = _previaCache;
-            if (p != null) {
-              p.limiteBytes = _limitePreviasMb * 1024 * 1024;
-            }
-            _guardarAjustes();
-          },
-        ),
-        Text(_cacheResumen.isEmpty
-            ? 'Sin medición todavía'
-            : _cacheResumen),
-        const Divider(height: 20),
-        PanelAdmin(
-          entradas: lista,
-          onMover: _moverMolde,
-          onEditarRutas: _editarRutas,
-          cacheBytes: _cacheBytes,
-          cacheResumen: _cacheResumen,
-          cacheLimiteKb: _limiteTrozosKb,
-          onVaciarCache: _vaciarCache,
-          suave: _suave,
-          onSuave: (v) => setState(() {
-            _suave = v;
-            _minis.maxEnVuelo = v ? 2 : 6;
-          }),
-          hilosEnUso: _minis.enVuelo,
-          maxHilos: _minis.maxEnVuelo,
+        Expanded(
+          child: PanelAdmin(
+            entradas: lista,
+            onMover: _moverMolde,
+            onEditarRutas: _editarRutas,
+            cacheBytes: _cacheBytes,
+            cacheResumen: _cacheResumen,
+            cacheLimiteKb: _limiteTrozosKb,
+            onVaciarCache: _vaciarCache,
+            suave: _suave,
+            onSuave: (v) => setState(() {
+              _suave = v;
+              _minis.maxEnVuelo = v ? 2 : 6;
+            }),
+            hilosEnUso: _minis.enVuelo,
+            maxHilos: _minis.maxEnVuelo,
+          ),
         ),
       ],
     );

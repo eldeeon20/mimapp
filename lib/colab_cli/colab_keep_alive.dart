@@ -121,33 +121,10 @@ class ColabKeepAlive {
           .get(url, headers: headers)
           .timeout(ColabConfig.keepAliveTimeout);
 
-      if (response.statusCode == 401) {
-        stop(avisar: false);
-        try {
-          onDesconectado?.call(ep, 'Colab 401: reautenticar');
-        } catch (_) {}
-        return;
-      }
-      if (response.statusCode == 404) {
+      // Sin auto-stop por error de ping: se cuenta y se sigue.
+      // Solo paran el usuario o el límite de 24h.
+      if (response.statusCode >= 400 && response.statusCode < 500) {
         _consecutive4xx++;
-        if (_consecutive4xx >= 2) {
-          stop(avisar: false);
-          try {
-            onDesconectado?.call(ep, 'Colab 404: celda muerta');
-          } catch (_) {}
-          return;
-        }
-      } else if (response.statusCode >= 400 &&
-          response.statusCode < 500) {
-        _consecutive4xx++;
-        if (_consecutive4xx >= 2) {
-          stop(avisar: false);
-          try {
-            onDesconectado?.call(
-                ep, 'Colab devolvió ${response.statusCode} (celda muerta)');
-          } catch (_) {}
-          return;
-        }
       } else {
         _consecutive4xx = 0;
         pingOk++;

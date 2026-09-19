@@ -608,9 +608,11 @@ class ServicioMimapp : Service() {
                 if (reintento == 401) {
                     val detalle =
                         if (rebody.isNotEmpty()) " · $rebody" else ""
+                    // Sin auto-stop: se sigue pingueando y se avisa.
+                    // Solo paran el usuario o el límite de 24h.
                     ultimoError = "reauth 401$detalle"
-                    bitacora("401→401 reauth · ${horaCorta()}")
-                    pararPing("reauth 401: reautenticar en Colab")
+                    bitacora("401→401 reauth (sigo) · ${horaCorta()}")
+                    actualizar888()
                     return
                 }
                 bitacora("401→refresh→$reintento · ${horaCorta()}")
@@ -632,21 +634,15 @@ class ServicioMimapp : Service() {
     }
 
     private fun procesarCodigo(code: Int, body: String) {
+        // Sin auto-stop por error de ping: se loguea y se sigue.
+        // Solo paran el usuario o el límite de 24h.
         val detalle = if (body.isNotEmpty()) " · $body" else ""
         if (code == 404) {
             consec4xx++
             ultimoError = "http 404$detalle"
-            if (consec4xx >= 2) {
-                pararPing("celda muerta (404)")
-                return
-            }
         } else if (code in 400..499) {
             consec4xx++
             ultimoError = "http $code$detalle"
-            if (consec4xx >= 2) {
-                pararPing("celda muerta ($code)")
-                return
-            }
         } else {
             consec4xx = 0
             pingsOk++

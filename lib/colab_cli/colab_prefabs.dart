@@ -21,6 +21,12 @@ abstract final class ColabPrefabs {
         id: 'prefab-cdn-hf',
         nombre: prefabCdnHfNombre,
         hasArg: true,
+        ayuda: 'Una por línea, en orden:\n'
+            '1. URL del CDN\n'
+            '2. pass del CDN/lote\n'
+            '3. token HF (write)\n'
+            '4. repo dir/user\n'
+            '5. pass GLOBAL',
         code: _kCdnCifrarHf,
       );
 

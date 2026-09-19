@@ -343,10 +343,14 @@ class _ColabTasksScreenState extends State<ColabTasksScreen> {
                     child: TextField(
                       controller: argCtrl,
                       autofocus: true,
-                      decoration: const InputDecoration(
-                        labelText: 'Argumento',
-                        hintText: 'comando / ruta / URI / valor...',
-                        border: OutlineInputBorder(),
+                      maxLines: 6,
+                      minLines: 3,
+                      style: const TextStyle(
+                          fontFamily: 'monospace', fontSize: 12),
+                      decoration: InputDecoration(
+                        labelText: 'Argumento (una por línea)',
+                        hintText: 'URL\npass\ntoken\nrepo\n...',
+                        border: const OutlineInputBorder(),
                       ),
                     ),
                   ),
@@ -356,15 +360,34 @@ class _ColabTasksScreenState extends State<ColabTasksScreen> {
                     icon: Icon(showCode ? Icons.close : Icons.edit),
                   ),
                 ]),
+                if (t.ayuda.trim().isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.shade900,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: SelectableText(
+                      t.ayuda,
+                      style: const TextStyle(
+                          fontSize: 12, color: Colors.lightBlueAccent),
+                    ),
+                  ),
+                ],
                 if (showCode) ...[
                   const SizedBox(height: 8),
-                  TextField(
+                  ConstrainedBox(
+                    constraints:
+                        const BoxConstraints(maxHeight: 280),
+                    child: TextField(
                     controller: codeCtrl,
                     maxLines: null,
-                    minLines: 4,
                     style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
                     decoration: const InputDecoration(
                         labelText: 'Python', border: OutlineInputBorder()),
+                    ),
                   ),
                 ],
               ],
