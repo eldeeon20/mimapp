@@ -63,7 +63,7 @@ url, lote, token, repo, maestro = lineas[0], lineas[1], lineas[2], lineas[3], li
 nombre = url.split("?")[0].rstrip("/").split("/")[-1] or "lote.bin"
 
 print("fase 1", flush=True)
-sh([sys.executable, "python/deps.py"], GOLO + "/python")
+sh([sys.executable, "python/deps.py"], GOLO)
 sh([sys.executable, "-m", "pip", "install", "--quiet",
     "-r", "hf/requirements.txt"], GOLO)
 try:
