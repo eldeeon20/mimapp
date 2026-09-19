@@ -7,14 +7,15 @@ import 'colab_config.dart';
 
 /// Daemon keep-alive para mantener la sesión de Colab activa sin pestaña.
 ///
-/// Envía GET a /tun/m/<endpoint>/keep-alive/ cada 60s con X-Colab-Tunnel: Google.
-/// Corta tras 2 errores 4xx consecutivos o 24 horas.
-///
-/// El ping vive en el singleton [ColabService]: sigue corriendo aunque se
-/// cierre el diálogo. Con el servicio en primer plano activo (888) el
-/// proceso sobrevive si la UI se va a fondo y el Timer sigue disparando.
-/// Cada ping refresca [StatusNotifier] (contador de tiempo activo) y ante
-/// un corte avisa con notificación una sola vez ([onDesconectado]).
+/// Puro Dart (anda en app y en web): GET a /tun/m/<endpoint>/keep-alive/
+/// cada 60s. Doble modo por ciclo para diagnosticar:
+///   nuestro: Bearer + X-Colab-Tunnel (+ Accept/agent + ?authuser=0)
+///   cli:     Bearer + X-Colab-Tunnel + Accept + X-Colab-Client-Agent
+///            + ?authuser=0 (igual que google-colab-cli)
+/// Reporta el error de CADA modo (okNuestro/okCli/errNuestro/errCli).
+/// Ningún error detiene: solo paran el usuario o el límite de 24h.
+/// [proxyUrl]: proxy web opcional (`https://host/prefijo/` se antepone,
+/// `http://host:puerto` va por HttpClient en nativo).
 class ColabKeepAlive {
   final ColabAuth _auth;
   Timer? _timer;
@@ -22,8 +23,17 @@ class ColabKeepAlive {
   String? _endpoint;
   DateTime? _startTime;
 
+  /// Proxy web opcional (vacío = directo).
+  String proxyUrl = '';
+
   /// Cantidad de pings OK desde el inicio (para el contador de la UI).
   int pingOk = 0;
+
+  /// Duelo de modos.
+  int okNuestro = 0;
+  int okCli = 0;
+  String errNuestro = '';
+  String errCli = '';
 
   /// Último ping exitoso (null = aún ninguno).
   DateTime? ultimoPing;
@@ -88,54 +98,98 @@ class ColabKeepAlive {
     } catch (_) {}
   }
 
+  /// Un ciclo: pingeo en los dos modos y reporto cada error.
+  /// Nunca detiene: los errores solo se anotan.
   Future<void> _ping() async {
-    if (_endpoint == null) return;
-    final ep = _endpoint!;
+    final ep = _endpoint;
+    if (ep == null) return;
 
     // Verificar límite de 24h
     if (_startTime != null &&
-        DateTime.now().difference(_startTime!) >= ColabConfig.keepAliveMaxDuration) {
-      final motivo = 'límite 24h alcanzado';
-      stop(avisar: false);
+        DateTime.now().difference(_startTime!) >=
+            ColabConfig.keepAliveMaxDuration) {
+      stop(avisar: true, motivo: 'límite 24h alcanzado');
+      return;
+    }
+
+    String token;
+    try {
+      token = await _auth.getToken();
+    } catch (e) {
+      errNuestro = 'token: $e';
+      errCli = 'token: $e';
       try {
-        onDesconectado?.call(ep, motivo);
+        onTick?.call();
       } catch (_) {}
       return;
     }
 
-    try {
-      // Formato que andaba (pre-"CLI exacto"): authHeaders completos
-      // (Bearer + Accept + agent) + X-Colab-Tunnel + ?authuser=0.
-      // El mínimo (solo Bearer+Tunnel) devolvía 400 y mataba la
-      // celda al minuto.
-      final headers = await _auth.authHeaders();
-      headers['X-Colab-Tunnel'] = 'Google';
-      const params = {'authuser': '0'};
-      final url = Uri.https(
-        ColabConfig.colabHost,
-        '/tun/m/$ep/keep-alive/',
-        params,
-      );
-
-      final response = await http
-          .get(url, headers: headers)
-          .timeout(ColabConfig.keepAliveTimeout);
-
-      // Sin auto-stop por error de ping: se cuenta y se sigue.
-      // Solo paran el usuario o el límite de 24h.
-      if (response.statusCode >= 400 && response.statusCode < 500) {
-        _consecutive4xx++;
-      } else {
-        _consecutive4xx = 0;
-        pingOk++;
-        ultimoPing = DateTime.now();
-      }
-    } catch (_) {
-      // Timeout/red: reintenta, no cuenta como error
+    final rN = await _pingModo(ep, token, cli: false);
+    final rC = await _pingModo(ep, token, cli: true);
+    if (rN.ok) {
+      okNuestro++;
+      errNuestro = '';
+    } else {
+      errNuestro = rN.error;
+    }
+    if (rC.ok) {
+      okCli++;
+      errCli = '';
+    } else {
+      errCli = rC.error;
+    }
+    if (rN.ok || rC.ok) {
       _consecutive4xx = 0;
+      pingOk++;
+      ultimoPing = DateTime.now();
+    } else {
+      _consecutive4xx++;
     }
     try {
       onTick?.call();
     } catch (_) {}
+  }
+
+  /// Un ping en un modo. ok=true con 2xx o timeout de lectura
+  /// (el TFE anota y la VM no contesta: éxito CLI).
+  Future<({bool ok, String error})> _pingModo(
+    String ep,
+    String token, {
+    required bool cli,
+  }) async {
+    try {
+      final path = '/tun/m/$ep/keep-alive/';
+      final url = proxyUrl.isEmpty
+          ? Uri.https(ColabConfig.colabHost, path, {'authuser': '0'})
+          : Uri.parse(
+              '${proxyUrl.endsWith('/') ? proxyUrl.substring(0, proxyUrl.length - 1) : proxyUrl}'
+              'https://${ColabConfig.colabHost}$path?authuser=0');
+      final headers = <String, String>{
+        'Authorization': 'Bearer $token',
+        'X-Colab-Tunnel': 'Google',
+        'Accept': 'application/json',
+        if (cli) 'X-Colab-Client-Agent': 'colab-cli',
+      };
+      final response = await http
+          .get(url, headers: headers)
+          .timeout(ColabConfig.keepAliveTimeout);
+      final code = response.statusCode;
+      if (code >= 200 && code < 300) return (ok: true, error: '');
+      var body = '';
+      try {
+        body = response.body.replaceAll(RegExp(r'\s+'), ' ').trim();
+        if (body.length > 120) body = body.substring(0, 120);
+      } catch (_) {}
+      return (
+        ok: false,
+        error: 'http $code${body.isEmpty ? '' : ' · $body'}'
+      );
+    } on TimeoutException {
+      // Timeout de lectura = éxito (TFE anotó, la VM no contesta).
+      return (ok: true, error: '');
+    } catch (e) {
+      // Red: neutro, reintenta en el próximo ciclo.
+      return (ok: false, error: 'red: $e');
+    }
   }
 }

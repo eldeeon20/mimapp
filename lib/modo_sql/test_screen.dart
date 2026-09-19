@@ -72,11 +72,22 @@ class _TestSqlScreenState extends State<TestSqlScreen>
   /// Previas guardadas por archivo (memo, se llena solo).
   final _previas = <String, List<Uint8List>>{};
 
+  /// Futuros memoizados: el MISMO future por archivo (si se crea uno
+  /// nuevo en cada build, el FutureBuilder reconsulta SQL y
+  /// redescifra en cada rebuild: eso frenaba el grid).
+  final _previasFut = <String, Future<List<Uint8List>>>{};
+
   /// Lee las previas guardadas de un archivo ([] = sin previas,
   /// moldes viejos: el grid usa mini al vuelo).
-  Future<List<Uint8List>> _previasDe(FichaArchivo f) async {
+  Future<List<Uint8List>> _previasDe(FichaArchivo f) {
     final m = _infoAbierta?.nombre;
-    if (m == null) return [];
+    if (m == null) return Future.value(const <Uint8List>[]);
+    return _previasFut.putIfAbsent(
+        '$m\n${f.nombre}', () => _cargarPrevias(m, f));
+  }
+
+  Future<List<Uint8List>> _cargarPrevias(
+      String m, FichaArchivo f) async {
     final ya = _previas[f.nombre];
     if (ya != null) return ya;
     // Disco primero (no re-abrir el original).
@@ -494,6 +505,7 @@ class _TestSqlScreenState extends State<TestSqlScreen>
         _filas = filas;
         _filasTag = null;
         _previas.clear();
+        _previasFut.clear();
         _selArchivo = null;
         _rangoInfo = '';
         _minis.limpiar();
@@ -708,6 +720,7 @@ class _TestSqlScreenState extends State<TestSqlScreen>
       _filas = [];
       _filasTag = null;
       _previas.clear();
+        _previasFut.clear();
       _selArchivo = null;
       _rangoInfo = '';
       _rutaExp = const [];
@@ -962,6 +975,7 @@ class _TestSqlScreenState extends State<TestSqlScreen>
           _filas = [];
           _filasTag = null;
           _previas.clear();
+        _previasFut.clear();
           _selArchivo = null;
           _rangoInfo = '';
         }

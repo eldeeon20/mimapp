@@ -41,6 +41,10 @@ class _BrowserWebViewsHostState extends State<BrowserWebViewsHost>
   bool _torBusy = false;
   String? _torMsg;
 
+  /// Auto-Tor al abrir la web: el toggle nace en ON (se intenta una vez
+  /// por sesión; si falla queda OFF y el usuario lo prende a mano).
+  bool _torAutoTried = false;
+
   /// Flag histórico: YA NO desmonta vistas (fix negro al volver).
   /// Se deja en false siempre; antes true desmontaba a SizedBox.
   bool _enFondo = false;
@@ -71,6 +75,14 @@ class _BrowserWebViewsHostState extends State<BrowserWebViewsHost>
     t.addListener(_syncUrl);
     t.closePanels = _cerrarPaneles;
     WidgetsBinding.instance.addObserver(this);
+    // Tor por defecto: al abrir la web se prende solo (una vez).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_torAutoTried || !mounted) return;
+      _torAutoTried = true;
+      if (!TorService.instance.proxyOn) {
+        _cambiarTor(BrowserTabs.instance);
+      }
+    });
   }
 
   @override
@@ -368,6 +380,40 @@ class _BrowserWebViewsHostState extends State<BrowserWebViewsHost>
             }),
           ),
           _torToggle(tabs),
+          ListTile(
+            leading: _torBusy
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.refresh_rounded),
+            title: const Text('Re-bootstrap Tor'),
+            subtitle: const Text('nuevo circuito + recarga',
+                style: TextStyle(fontSize: 11, color: Colors.white54)),
+            onTap: _torBusy
+                ? null
+                : () async {
+                    setState(() {
+                      _menuOpen = false;
+                      _torBusy = true;
+                      _torMsg = 're-bootstrap…';
+                    });
+                    try {
+                      await TorService.instance.rebootstrap();
+                      try {
+                        await tabs.reload(tabs.active.id);
+                      } catch (_) {}
+                      if (mounted) {
+                        setState(
+                            () => _torMsg = 'circuito nuevo, página recargada');
+                      }
+                    } catch (e) {
+                      if (mounted) setState(() => _torMsg = 'ERROR: $e');
+                    } finally {
+                      if (mounted) setState(() => _torBusy = false);
+                    }
+                  },
+          ),
           ListTile(
             leading: const Icon(Icons.close),
             title: const Text('Cerrar Web'),

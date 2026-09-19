@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../colab_cli/colab_auth.dart';
 import '../colab_cli/colab_config.dart';
+import '../colab_cli/colab_keep_alive.dart';
 import '../colab_cli/colab_sessions.dart';
 // import 'notification_service.dart'; // COMENTADO: no usar, la activa ya existe (777).
 import 'nativo.dart';
@@ -26,6 +27,13 @@ class ColabService {
 
   final ColabAuth auth = ColabAuth();
   late final ColabSessions sessions = ColabSessions(auth);
+
+  /// Ping Dart puro (doble modo + reporte). El nativo queda para
+  /// frente/avisos; el diagnóstico real sale de acá.
+  late final ColabKeepAlive pingDart = ColabKeepAlive(auth);
+
+  /// Duelo visible: ok/error por modo del ping Dart.
+  String espejoDart = '';
 
   // Espejo local de lo que pinea el servicio (para mostrar en 777).
   // NO pinea: solo display. El ping real está en el isolate de fondo.
@@ -102,6 +110,19 @@ class ColabService {
         clientId: ColabConfig.clientId,
         clientSecret: ColabConfig.clientSecret,
       );
+    } catch (_) {}
+    // Ping Dart puro (doble modo: nuestro + CLI, con reporte).
+    try {
+      pingDart.onTick = () {
+        espejoDart = 'dart nuestro ${pingDart.okNuestro}'
+            '${pingDart.errNuestro.isEmpty ? '' : ' [${pingDart.errNuestro}]'}'
+            ' · cli ${pingDart.okCli}'
+            '${pingDart.errCli.isEmpty ? '' : ' [${pingDart.errCli}]'}';
+        try {
+          StatusNotifier.instance.refresh();
+        } catch (_) {}
+      };
+      pingDart.start(endpoint);
     } catch (_) {}
     StatusNotifier.instance.reanudar();
     StatusNotifier.instance.refresh();

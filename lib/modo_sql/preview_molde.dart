@@ -104,17 +104,23 @@ class CapturaVideo {
   /// genera (sin surface el mpv no renderiza y no hay captura).
   Widget vista() => Video(controller: controller);
 
-  Future<List<Uint8List>> frames(String ruta,
-      {int tope = 17}) async {
+  Future<List<Uint8List>> frames(String ruta, {int tope = 17}) async {
     final fuera = <Uint8List>[];
     try {
       await player.setVolume(0);
-      await player.open(Media(ruta), play: false);
+      // Reproduciendo muteado: en play:false el mpv no renderiza
+      // y no hay frames ni duración.
+      await player.open(Media(ruta));
       final dur = await player.stream.duration
           .firstWhere((d) => d > Duration.zero)
-          .timeout(const Duration(seconds: 10), onTimeout: () => Duration.zero);
+          .timeout(const Duration(seconds: 15),
+              onTimeout: () => Duration.zero);
       if (dur <= Duration.zero) return fuera;
-      if ((player.state.width ?? 0) <= 0) return fuera;
+      final ancho = await player.stream.width
+          .firstWhere((w) => (w ?? 0) > 0)
+          .timeout(const Duration(seconds: 15),
+              onTimeout: () => 0);
+      if (ancho <= 0) return fuera;
       for (var i = 0; i < tope; i++) {
         final t = dur * (i + 1) ~/ (tope + 1);
         final shot = await _fotoEn(t);

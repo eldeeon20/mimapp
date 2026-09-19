@@ -490,7 +490,8 @@ class _ColabDialogBodyState extends State<_ColabDialogBody> {
                               'Ping cada 60s: ${ColabService().activeEndpoint} '
                               '(${ColabKeepAlive.fmtDur(ColabService().espejoElapsed)} · '
                               '${ColabService().espejoPings} pings)'
-                              '${ColabService().espejoUltimoPing.isNotEmpty ? '\nlog: ${ColabService().espejoUltimoPing}' : ''}',
+                              '${ColabService().espejoUltimoPing.isNotEmpty ? '\nlog: ${ColabService().espejoUltimoPing}' : ''}'
+                              '${ColabService().espejoDart.isNotEmpty ? '\n${ColabService().espejoDart}' : ''}',
                               style: const TextStyle(fontSize: 12))),
                     ],
                   ),

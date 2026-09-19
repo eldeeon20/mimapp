@@ -80,6 +80,11 @@ class ServicioMimapp : Service() {
         @Volatile var inicioMs: Long = 0L
         @Volatile var pingsOk: Int = 0
         @Volatile var consec4xx: Int = 0
+        /// Duelo de modos: cuántos OK por modo (nuestro vs CLI).
+        @Volatile var okNuestro: Int = 0
+        @Volatile var okCli: Int = 0
+        @Volatile var errNuestro: String = ""
+        @Volatile var errCli: String = ""
         @Volatile var vivo: Boolean = false
         @Volatile var ultimoError: String = ""
         @Volatile var ultimaParada: String = ""
@@ -97,6 +102,10 @@ class ServicioMimapp : Service() {
             "ultimoEndpoint" to ultimoEndpoint,
             "inicioMs" to inicioMs,
             "pingsOk" to pingsOk,
+            "okNuestro" to okNuestro,
+            "okCli" to okCli,
+            "errNuestro" to errNuestro,
+            "errCli" to errCli,
             "ultimoError" to ultimoError,
             "ultimaParada" to ultimaParada,
             "ultimoPing" to ultimoPing,
