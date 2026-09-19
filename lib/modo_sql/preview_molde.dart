@@ -120,7 +120,7 @@ class CapturaVideo {
           .firstWhere((w) => (w ?? 0) > 0)
           .timeout(const Duration(seconds: 15),
               onTimeout: () => 0);
-      if (ancho <= 0) return fuera;
+      if ((ancho ?? 0) <= 0) return fuera;
       for (var i = 0; i < tope; i++) {
         final t = dur * (i + 1) ~/ (tope + 1);
         final shot = await _fotoEn(t);
