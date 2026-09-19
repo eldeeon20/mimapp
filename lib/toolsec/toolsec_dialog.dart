@@ -8,18 +8,25 @@ import 'package:saf_stream/saf_stream.dart';
 import 'package:saf_util/saf_util.dart';
 import 'package:saf_util/saf_util_platform_interface.dart';
 
+import '../services/crypto_vault.dart';
 import 'toolsec.dart';
 
 /// Diálogo ToolSec: cifra/descifra archivos con XOR por semilla.
+/// Modo LOTE v2 (igual que golo): `PRBX(maestro, [LOTE][len][pass][datos])`.
+/// Cifrar lote pide maestro + pass del lote; abrir lote pide el maestro
+/// y muestra la pass del lote + guarda el contenido.
 ///
 /// Android (SAF): cifra SOBRE el archivo real elegido (Descargas, etc).
 /// Si no puede escribir, pregunta si querés guardar una copia cifrada.
 Future<void> showToolSecDialog(BuildContext context) async {
   final seedCtrl = TextEditingController();
+  final maestroCtrl = TextEditingController();
+  final loteCtrl = TextEditingController();
   SafDocumentFile? safDoc;
   String? filePath;
   String? fileName;
   bool processing = false;
+  bool esLote = false;
   String? resultMsg;
   String? hexPreview;
 
@@ -90,24 +97,160 @@ Future<void> showToolSecDialog(BuildContext context) async {
     }
   }
 
+  /// Lee el archivo elegido completo (SAF por tramos o ruta directa).
+  Future<Uint8List?> leerElegido() async {
+    if (Platform.isAndroid && safDoc != null) {
+      final out = BytesBuilder();
+      var start = 0;
+      const paso = 1024 * 1024;
+      while (true) {
+        final t = await SafStream()
+            .readFileBytes(safDoc!.uri, start: start, count: paso);
+        final b = Uint8List.fromList(t);
+        if (b.isEmpty) break;
+        out.add(b);
+        if (b.length < paso) break;
+        start += b.length;
+      }
+      return out.toBytes();
+    }
+    if (filePath != null) {
+      return await File(filePath!).readAsBytes();
+    }
+    return null;
+  }
+
+  /// Lote v2: pega pass + archivo y cifra con el maestro → copia .prbx.
+  /// Nunca toca el original (el nombre sale del contenido en HF/golo).
+  Future<void> doLoteEnc(void Function(void Function()) setDlgState) async {
+    setDlgState(() {
+      processing = true;
+      resultMsg = null;
+      hexPreview = null;
+    });
+    try {
+      final raw = await leerElegido();
+      if (raw == null || raw.isEmpty) {
+        setDlgState(() => resultMsg = 'Elegí un archivo primero');
+        return;
+      }
+      final ts = ToolSec('lote');
+      final enc = await ts.processLoteStrong(
+          raw, maestroCtrl.text, loteCtrl.text);
+      final base = (fileName ?? 'lote').split('/').last;
+      final saved = (Platform.isAndroid && safDoc != null)
+          ? await ToolSec.saveSafCopy(enc, '$base.prbx')
+          : await _saveInternalCopy('$base.prbx', enc);
+      setDlgState(() {
+        resultMsg = 'Lote v2 guardado como:\n$saved';
+        hexPreview = _toHex(enc.take(50));
+      });
+    } catch (e) {
+      setDlgState(() => resultMsg = 'Error: $e');
+    } finally {
+      setDlgState(() => processing = false);
+    }
+  }
+
+  /// Abre lote v1/v2 con el maestro: muestra la pass del lote (v2)
+  /// y guarda el contenido al lado.
+  Future<void> doLoteDec(void Function(void Function()) setDlgState) async {
+    setDlgState(() {
+      processing = true;
+      resultMsg = null;
+      hexPreview = null;
+    });
+    try {
+      final raw = await leerElegido();
+      if (raw == null || raw.isEmpty) {
+        setDlgState(() => resultMsg = 'Elegí un archivo primero');
+        return;
+      }
+      final ts = ToolSec('lote');
+      final LoteAbierto? ab =
+          await ts.processLoteStrongDecrypt(raw, maestroCtrl.text);
+      if (ab == null) {
+        setDlgState(() =>
+            resultMsg = 'Error: maestro mal o datos alterados');
+        return;
+      }
+      final base = (fileName ?? 'lote').split('/').last;
+      final nombreOut = base.endsWith('.prbx')
+          ? '${base.substring(0, base.length - 5)}.dec'
+          : '$base.dec';
+      final saved = (Platform.isAndroid && safDoc != null)
+          ? await ToolSec.saveSafCopy(ab.contenido, nombreOut)
+          : await _saveInternalCopy(nombreOut, ab.contenido);
+      setDlgState(() {
+        resultMsg = 'Lote v${ab.version} abierto →\n$saved'
+            '${ab.passLote.isNotEmpty ? '\npass del lote: ${ab.passLote}' : ''}';
+        hexPreview = _toHex(ab.contenido.take(50));
+      });
+    } catch (e) {
+      setDlgState(() => resultMsg = 'Error: $e');
+    } finally {
+      setDlgState(() => processing = false);
+    }
+  }
+
   await showDialog(
     context: context,
     builder: (ctx) => StatefulBuilder(
       builder: (ctx, setDlgState) => AlertDialog(
-        title: const Text('ToolSec — XOR por semilla'),
+        title: const Text('ToolSec — archivo o lote v2'),
         content: SizedBox(
           width: 400,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              TextField(
-                controller: seedCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Semilla (clave)',
-                  hintText: 'Escribí tu semilla...',
-                  border: OutlineInputBorder(),
-                ),
+              // Modo: archivo suelto (XOR) o lote v2 (igual que golo).
+              SegmentedButton<bool>(
+                segments: const [
+                  ButtonSegment(
+                      value: false,
+                      label: Text('Archivo'),
+                      icon: Icon(Icons.insert_drive_file_outlined)),
+                  ButtonSegment(
+                      value: true,
+                      label: Text('Lote v2'),
+                      icon: Icon(Icons.inventory_2_outlined)),
+                ],
+                selected: {esLote},
+                onSelectionChanged: (s) => setDlgState(() {
+                  esLote = s.first;
+                  resultMsg = null;
+                  hexPreview = null;
+                }),
               ),
+              const SizedBox(height: 12),
+              if (!esLote)
+                TextField(
+                  controller: seedCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Semilla (clave)',
+                    hintText: 'Escribí tu semilla...',
+                    border: OutlineInputBorder(),
+                  ),
+                )
+              else ...[
+                TextField(
+                  controller: maestroCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Pass GLOBAL (maestro)',
+                    hintText: 'La que sella el lote...',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: loteCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Pass del lote (solo al cifrar)',
+                    hintText: 'Va pegada adentro...',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ],
               const SizedBox(height: 12),
               OutlinedButton.icon(
                 onPressed: processing
@@ -196,19 +339,41 @@ Future<void> showToolSecDialog(BuildContext context) async {
             onPressed: () => Navigator.pop(ctx),
             child: const Text('Cerrar'),
           ),
-          FilledButton(
-            onPressed: ((safDoc == null && filePath == null) ||
-                    processing ||
-                    seedCtrl.text.isEmpty)
-                ? null
-                : () => doEncrypt(setDlgState),
-            child: const Text('Cifrar / Descifrar'),
-          ),
+          if (!esLote)
+            FilledButton(
+              onPressed: ((safDoc == null && filePath == null) ||
+                      processing ||
+                      seedCtrl.text.isEmpty)
+                  ? null
+                  : () => doEncrypt(setDlgState),
+              child: const Text('Cifrar / Descifrar'),
+            )
+          else ...[
+            OutlinedButton(
+              onPressed: ((safDoc == null && filePath == null) ||
+                      processing ||
+                      maestroCtrl.text.isEmpty)
+                  ? null
+                  : () => doLoteDec(setDlgState),
+              child: const Text('Abrir lote'),
+            ),
+            FilledButton(
+              onPressed: ((safDoc == null && filePath == null) ||
+                      processing ||
+                      maestroCtrl.text.isEmpty ||
+                      loteCtrl.text.isEmpty)
+                  ? null
+                  : () => doLoteEnc(setDlgState),
+              child: const Text('Cifrar lote'),
+            ),
+          ],
         ],
       ),
     ),
   );
   seedCtrl.dispose();
+  maestroCtrl.dispose();
+  loteCtrl.dispose();
 }
 
 String _toHex(Iterable<int> bytes) =>
