@@ -422,6 +422,7 @@ class _ColabTasksScreenState extends State<ColabTasksScreen> {
                 ],
               ],
             ),
+            ),
           ),
           actions: [
             TextButton(

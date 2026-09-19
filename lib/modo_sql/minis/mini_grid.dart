@@ -303,7 +303,7 @@ class MiniGrid extends StatelessWidget {
 /// Transición: cicla los frames de la previa cada 900ms.
 class CiclaPrevia extends StatefulWidget {
   final List<Uint8List> frames;
-  const _Cicla({required this.frames});
+  const CiclaPrevia({super.key, required this.frames});
 
   @override
   State<CiclaPrevia> createState() => _CiclaPreviaEstado();

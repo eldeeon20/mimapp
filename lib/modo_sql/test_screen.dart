@@ -192,11 +192,6 @@ class _TestSqlScreenState extends State<TestSqlScreen>
     return 2048;
   }
 
-  Future<File> _ajustesFile() async {
-    final dir = await getApplicationSupportDirectory();
-    return File('${dir.path}/ajustes_modo.json');
-  }
-
   Future<void> _cargarAjustes() async {
     _memLibreMb = await _memLibre();
     try {
