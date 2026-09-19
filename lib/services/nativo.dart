@@ -85,7 +85,8 @@ class Nativo {
   }
 
   /// Token fresco empujado al servicio (pisa sin resetear el loop).
-  /// El servicio lo ignora si no está pineando.  static Future<void> updateToken({
+  /// El servicio lo ignora si no está pineando.
+  static Future<void> updateToken({
     required String accessToken,
     required String refreshToken,
     required int expiryMs,
