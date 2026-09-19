@@ -1242,8 +1242,18 @@ class _TestSqlScreenState extends State<TestSqlScreen>
   /// El molde v2 ya trae la previa calculada: se calientan previas,
   /// NO minis (la mini descifra el archivo entero, derroche).
   /// Moldes viejos: cada cuadro pide su mini perezoso al verse.
+  /// Entra/sale de subcarpeta + prefetch de ese nivel (de a una,
+  /// sin congelar). Antes solo había prefetch al abrir el molde y
+  /// entrar a una carpeta con videos largaba todo junto.
+  void _entrarDir(List<String> nueva) {
+    setState(() => _rutaExp = nueva);
+    final info = _infoAbierta;
+    if (info == null) return;
+    _preFetchMinis(info.nombre, info, hijosDe(_filas, nueva).directos);
+  }
+
   void _preFetchMinis(
-      String molde, MoldeInfo info, List<FichaArchivo> filas) {
+      String molde, MoldeInfo info, List<FichaArchivo> filas) async {
     var n = 0;
     for (final f in filas) {
       if (!_imgs.contains(f.formato.toLowerCase()) &&
@@ -1252,8 +1262,12 @@ class _TestSqlScreenState extends State<TestSqlScreen>
       }
       if (n >= 60) break;
       n++;
-      // Sin await a propósito: entra a la cola en orden.
-      _previasDe(f);
+      // DE A UNA y cediendo el turno: 60 descifrados juntos
+      // congelaban la pantalla al abrir la carpeta.
+      try {
+        await _previasDe(f);
+      } catch (_) {}
+      await Future<void>.delayed(Duration.zero);
     }
   }
 
@@ -1526,8 +1540,7 @@ class _TestSqlScreenState extends State<TestSqlScreen>
       previasDe: _previasDe,
       esVideo: (f) => PreviewMolde.esVideo(f.formato),
       dirs: hijos.subdirs,
-      onEntrarDir: (d) =>
-          setState(() => _rutaExp = [..._rutaExp, d]),
+      onEntrarDir: (d) => _entrarDir([..._rutaExp, d]),
       encabezado: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1539,8 +1552,7 @@ class _TestSqlScreenState extends State<TestSqlScreen>
           migasRuta(
             molde: _infoAbierta!.nombre,
             ruta: _rutaExp,
-            onRuta: (nueva) =>
-                setState(() => _rutaExp = nueva),
+            onRuta: _entrarDir,
             onSalir: _cerrarMolde,
           ),
         ],
@@ -1625,7 +1637,7 @@ class _TestSqlScreenState extends State<TestSqlScreen>
           molde: _infoAbierta!.nombre,
           archivos: archivos,
           ruta: _rutaExp,
-          onRuta: (nueva) => setState(() => _rutaExp = nueva),
+          onRuta: _entrarDir,
           sel: _selArchivo,
           onSel: (f) {
             setState(() {
