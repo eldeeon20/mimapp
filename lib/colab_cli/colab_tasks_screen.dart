@@ -184,10 +184,16 @@ class _ColabTasksScreenState extends State<ColabTasksScreen> {
   }
 
   /// Preset CDN → cifrar → HF (5 args: URL, maestro, lote, token, repo).
-  void _agregarPrefabCdnHf() {
-    if (_tasks.any((t) => t.id == 'prefab-cdn-hf')) return;
-    setState(() => _tasks.add(ColabPrefabs.cdnCifrarHf()));
+  /// Cada toque = OTRA tarea (ids únicos) y se abre directo para
+  /// rellenar. Antes: si ya había una no hacía nada en silencio.
+  Future<void> _agregarPrefabCdnHf() async {
+    final t = ColabPrefabs.cdnCifrarHf();
+    t.id = 'prefab-cdn-hf-${taskUid()}';
+    t.nombre = 'CDN → HF ${_tasks.where((x) => x.id.startsWith('prefab-cdn-hf')).length + 1}';
+    setState(() => _tasks.add(t));
     _persist();
+    if (!mounted) return;
+    await _enviar(t);
   }
 
   Future<void> _createTaskDialog() async {    final nombre = TextEditingController();
