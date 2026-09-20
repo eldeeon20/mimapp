@@ -130,6 +130,33 @@ class PreviaCache {
     }
   }
 
+  /// UN solo frame (el primero) para el grid de videos.
+  /// Lee la misma fila pero desempaqueta solo el primer frame.
+  Future<Uint8List?> leerUno({required String archivo}) async {
+    final db = sesion.basePrevias;
+    final rs = db.select(
+      'SELECT rowid AS id, datos FROM "$tabla" '
+      'WHERE molde = ? AND archivo = ?;',
+      [molde, archivo],
+    );
+    if (rs.isEmpty) return null;
+    try {
+      final ahora = DateTime.now().microsecondsSinceEpoch;
+      db.execute(
+        'UPDATE "$tabla" SET ultimo = ? WHERE rowid = ?;',
+        [ahora, rs.first['id'] as int],
+      );
+      final blob = _bytes(rs.first['datos']);
+      final vista = ByteData.sublistView(blob);
+      if (blob.length < 4) return null;
+      final len = vista.getUint32(0, Endian.big);
+      if (len <= 0 || 4 + len > blob.length) return null;
+      return Uint8List.sublistView(blob, 4, 4 + len);
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<int> bytesEnCache() async => _total(sesion.basePrevias);
 
   Future<void> limpiarMolde() async {

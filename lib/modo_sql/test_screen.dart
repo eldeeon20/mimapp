@@ -71,8 +71,15 @@ class _TestSqlScreenState extends State<TestSqlScreen>
 
   /// Previas guardadas por archivo (memo, se llena solo).
   /// Tope RAM 1GB (512MB en suave): lo viejo sale primero.
+  /// SOBREVIVE al cambio de molde: al abrir otro se guarda el mapa
+  /// en el stash y se restaura al volver (máx 3 moldes; volver no
+  /// re-descifra nada).
   final _previas = <String, List<Uint8List>>{};
   int _previasBytes = 0;
+
+  /// Stash de previas por molde (mapa + bytes).
+  final _previasStash = <String, Map<String, List<Uint8List>>>{};
+  final _previasBytesStash = <String, int>{};
 
   int get _previasTope =>
       _suave ? 512 * 1024 * 1024 : 1024 * 1024 * 1024;
@@ -99,12 +106,91 @@ class _TestSqlScreenState extends State<TestSqlScreen>
     }
   }
 
+  /// Guarda el mapa RAM actual en el stash del molde que se deja.
+  void _previasStashGuardar() {
+    final m = _infoAbierta?.nombre;
+    if (m == null || m.isEmpty) return;
+    _previasStash[m] = Map.of(_previas);
+    _previasBytesStash[m] = _previasBytes;
+    _unoStash[m] = Map.of(_uno);
+    // Máx 3 moldes en RAM: el más viejo se suelta entero.
+    while (_previasStash.length > 3) {
+      final vieja = _previasStash.keys.first;
+      _previasStash.remove(vieja);
+      _previasBytesStash.remove(vieja);
+    }
+    while (_unoStash.length > 3) {
+      _unoStash.remove(_unoStash.keys.first);
+    }
+  }
+
+  /// Restaura el mapa RAM del molde que se abre ([] = primera vez).
+  /// Los futures memoizados de otros moldes se podan (los bytes
+  /// mandan: `_cargarPrevias` mira `_previas` primero, sin SQL).
+  void _previasStashRestaurar(String molde) {
+    _previas
+      ..clear()
+      ..addAll(_previasStash[molde] ?? const {});
+    _previasBytes = _previasBytesStash[molde] ?? 0;
+    _uno
+      ..clear()
+      ..addAll(_unoStash[molde] ?? const {});
+    for (final k in _previasFut.keys.toList()) {
+      if (!k.startsWith('$molde\n')) _previasFut.remove(k);
+    }
+    for (final k in _unoFut.keys.toList()) {
+      if (!k.startsWith('$molde\n')) _unoFut.remove(k);
+    }
+  }
+
   /// LRU: la usada vuelve al fondo.
   void _previasTocar(String nombre) {
     final p = _previas[nombre];
     if (p == null) return;
     _previas.remove(nombre);
     _previas[nombre] = p;
+  }
+
+  /// Primer frame por archivo (solo grid de videos: 1 en vez de 17).
+  /// Vive en RAM con el mismo stash por molde que `_previas`.
+  final _uno = <String, Uint8List>{};
+  final _unoFut = <String, Future<Uint8List?>>{};
+  final _unoStash = <String, Map<String, Uint8List>>{};
+
+  /// Lee UN frame para el grid (disco primero, SQL después).
+  /// Los videos JAMÁS tocan el original para mostrarse.
+  Future<Uint8List?> _previaUnoDe(FichaArchivo f) {
+    final m = _infoAbierta?.nombre;
+    if (m == null) return Future.value(null);
+    final ya = _uno[f.nombre];
+    if (ya != null) return Future.value(ya);
+    return _unoFut.putIfAbsent('$m\n${f.nombre}', () => _cargarUno(m, f));
+  }
+
+  Future<Uint8List?> _cargarUno(String m, FichaArchivo f) async {
+    final ya = _uno[f.nombre];
+    if (ya != null) return ya;
+    // Disco primero (1 frame, misma fila que los 17).
+    try {
+      final disco = await _previaCache?.leerUno(archivo: f.nombre);
+      if (disco != null && disco.isNotEmpty) {
+        _uno[f.nombre] = disco;
+        return disco;
+      }
+    } catch (_) {}
+    try {
+      final b = await CreateMoldeSql.previaUno(
+        claveSql: _clave,
+        molde: m,
+        archivo: f.nombre,
+        cache: _cache,
+        info: _infoAbierta,
+      );
+      if (b != null && b.isNotEmpty) _uno[f.nombre] = b;
+      return b;
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Futuros memoizados: el MISMO future por archivo (si se crea uno
@@ -280,6 +366,8 @@ class _TestSqlScreenState extends State<TestSqlScreen>
   void dispose() {
     _filtroT?.cancel();
     _tagFiltroCtrl.removeListener(_filtroCambio);
+    _tabs.removeListener(_alCambiarTab);
+    _tabs.dispose();
     CajaSql.log = null;
     Indice.log = null;
     _captura.cerrar();
@@ -292,7 +380,6 @@ class _TestSqlScreenState extends State<TestSqlScreen>
     _hastaCtrl.dispose();
     _indiceCtrl.dispose();
     _sesionCache.cerrar();
-    _tabs.dispose();
     super.dispose();
   }
 
@@ -373,6 +460,7 @@ class _TestSqlScreenState extends State<TestSqlScreen>
   void initState() {
     super.initState();
     _tabs = TabController(length: 5, vsync: this);
+    _tabs.addListener(_alCambiarTab);
     // Filtro de tag en vivo con debounce: sin esto solo filtraba
     // cuando otro rebuild lo arrastraba (ej. al abrir una imagen).
     _tagFiltroCtrl.addListener(_filtroCambio);
@@ -587,16 +675,17 @@ class _TestSqlScreenState extends State<TestSqlScreen>
         _add('· sin caché (índice bloqueado: solo server)');
       }
       if (!mounted) return;
+      // La RAM de previas sobrevive: se guarda la del molde que se
+      // deja y se restaura la del que se abre (volver = instantáneo).
+      _previasStashGuardar();
+      _previasStashRestaurar(nombre);
       setState(() {
         _infoAbierta = info;
         _filas = filas;
         _filasTag = null;
-        _previas.clear();
-        _previasFut.clear();
         _selArchivo = null;
         _rangoInfo = '';
         _minis.limpiar();
-        _completos.limpiar();
         // Misma referencia: el visor reusa lo que el grid descifró.
         _completos.minis = _minis.minis;
         _rutaExp = const [];
@@ -606,6 +695,19 @@ class _TestSqlScreenState extends State<TestSqlScreen>
       _add('✓ abierto "$nombre": ${filas.length} filas de tu SQL, '
           'server solo ve ${fmtBytes(m.total)} crudos, '
           'caché local 512KB lista');
+      // v1 o v2 en el log: v2 = trae previas guardadas (.prev/).
+      final duenosPrev = <String>{};
+      for (final f in filas) {
+        final n = f.nombre;
+        if (!PreviewMolde.esPrevia(n)) continue;
+        final h = n.lastIndexOf('#');
+        duenosPrev.add(h < 0 ? n : n.substring(0, h));
+      }
+      _add(duenosPrev.isEmpty
+          ? '· molde v1 (sin previas guardadas: el grid no toca '
+              'originales, muestra icono hasta que pidas)'
+          : '· molde v2 (${duenosPrev.length} archivo(s) con previa '
+              'guardada: el grid sale de RAM/disco, jamás del original)');
       // Diagnóstico: nombres repetidos (ej. video 4 veces).
       final vistos = <String>{};
       var dups = 0;
@@ -777,6 +879,7 @@ class _TestSqlScreenState extends State<TestSqlScreen>
   /// Visor de video: sus 17 previas en transición + tags,
   /// reproducir (copia local a la app + reproductor) o guardar
   /// en Descargas (como las fotos).
+  /// Tap = contenido o nada: abre con los frames listos.
   Future<void> _verVideo(FichaArchivo f) async {
     final molde = _infoAbierta?.nombre;
     if (molde == null || !mounted) return;
@@ -934,6 +1037,7 @@ class _TestSqlScreenState extends State<TestSqlScreen>
   /// Cierra el molde y vuelve a la RAÍZ (la lista de moldes
   /// en la misma pestaña: el grid/lista la muestran solos).
   void _cerrarMolde() {
+    _previasStashGuardar();
     setState(() {
       _infoAbierta = null;
       _filas = [];
@@ -1256,19 +1360,27 @@ class _TestSqlScreenState extends State<TestSqlScreen>
       String molde, MoldeInfo info, List<FichaArchivo> filas) async {
     var n = 0;
     for (final f in filas) {
-      if (!_imgs.contains(f.formato.toLowerCase()) &&
-          !PreviewMolde.esVideo(f.formato.toLowerCase())) {
+      final formato = f.formato.toLowerCase();
+      final esVid = PreviewMolde.esVideo(formato);
+      if (!_imgs.contains(formato) && !esVid) {
         continue;
       }
       if (n >= 60) break;
       n++;
       // DE A UNA y cediendo el turno: 60 descifrados juntos
       // congelaban la pantalla al abrir la carpeta.
+      // Videos: 1 frame (los 17 solo los trae el visor).
       try {
-        await _previasDe(f);
+        if (esVid) {
+          await _previaUnoDe(f);
+        } else {
+          await _previasDe(f);
+        }
       } catch (_) {}
       await Future<void>.delayed(Duration.zero);
     }
+    // Prefetch listo = Admin con números reales.
+    _medirCache();
   }
 
   /// Tags frescos de un archivo (tras editar tags + reabrir).
@@ -1358,11 +1470,28 @@ class _TestSqlScreenState extends State<TestSqlScreen>
   final Map<String, int> _cacheBytes = {};
   String _cacheResumen = '';
 
+  /// Total SIEMPRE visible (disco trozos+previas todos los moldes +
+  /// RAM previas + RAM minis). Sin esto eras adivino.
+  String _cacheTotalStr = '';
+
+  /// Al entrar a Admin se mide de verdad (antes nadie llamaba esto).
+  void _alCambiarTab() {
+    if (_tabs.index == 4) _medirCache();
+  }
+
   Future<void> _medirCache() async {
-    final c = _cache;
-    final molde = _infoAbierta?.nombre;
-    if (c == null || molde == null) return;
     try {
+      final totalDisco = await _cacheTotal();
+      final totalRam = _previasBytes + _minis.bytesEnRam;
+      final total = totalDisco + totalRam;
+      if (!mounted) return;
+      setState(() {
+        _cacheTotalStr = 'Total caché: ${fmtBytes(total)} '
+            '(disco ${fmtBytes(totalDisco)} + RAM ${fmtBytes(totalRam)})';
+      });
+      final c = _cache;
+      final molde = _infoAbierta?.nombre;
+      if (c == null || molde == null) return;
       final b = await c.bytesEnCache();
       if (!mounted) return;
       setState(() {
@@ -1455,6 +1584,10 @@ class _TestSqlScreenState extends State<TestSqlScreen>
                   _chequearGlobal();
                 },
               ),
+              Text(_cacheTotalStr.isEmpty
+                  ? 'Total caché: sin medir (entrá a Admin para medir)'
+                  : _cacheTotalStr,
+                  style: const TextStyle(fontWeight: FontWeight.bold)),
               Text(_cacheResumen.isEmpty
                   ? 'Sin medición todavía'
                   : _cacheResumen),
@@ -1534,10 +1667,13 @@ class _TestSqlScreenState extends State<TestSqlScreen>
           if (!_imgs.contains(f.formato.toLowerCase())) f
       ],
       minis: _minis.minis,
-      minisEnRam: _minis.cuantas,
+      // Previas en RAM (lo que el grid muestra sin tocar original).
+      minisEnRam: _previas.length + _uno.length,
       selNombre: _selArchivo,
       previas: _previas,
       previasDe: _previasDe,
+      previaUno: _uno,
+      previaUnoDe: _previaUnoDe,
       esVideo: (f) => PreviewMolde.esVideo(f.formato),
       dirs: hijos.subdirs,
       onEntrarDir: (d) => _entrarDir([..._rutaExp, d]),
@@ -1556,16 +1692,6 @@ class _TestSqlScreenState extends State<TestSqlScreen>
             onSalir: _cerrarMolde,
           ),
         ],
-      ),
-      miniDe: (f) => _minis.de(
-        claveSql: _clave,
-        molde: _infoAbierta!.nombre,
-        f: f,
-        imgs: _imgs,
-        cache: _cache,
-        info: _infoAbierta,
-        filas: _filas,
-        log: _add,
       ),
       onTap: (f) {
         setState(() {

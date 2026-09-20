@@ -586,6 +586,7 @@ class CreateMoldeSql {
     required String archivo,
     TrozoCache? cache,
     MoldeInfo? info,
+    bool soloPrimero = false,
   }) async {
     final esc =
         archivo.replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_');
@@ -628,8 +629,30 @@ class CreateMoldeSql {
           claveArchivo: claveOk,
         ));
       } catch (_) {}
+      // Grid de video: 1 solo frame (los 17 solo en el visor).
+      if (soloPrimero && fuera.isNotEmpty) break;
     }
     return fuera;
+  }
+
+  /// UN solo frame (el primero) para el grid de videos.
+  /// El grid jamás pide los 17: esos solo los trae el visor.
+  static Future<Uint8List?> previaUno({
+    required String claveSql,
+    required String molde,
+    required String archivo,
+    TrozoCache? cache,
+    MoldeInfo? info,
+  }) async {
+    final l = await previasDe(
+      claveSql: claveSql,
+      molde: molde,
+      archivo: archivo,
+      cache: cache,
+      info: info,
+      soloPrimero: true,
+    );
+    return l.isEmpty ? null : l.first;
   }
 
   /// Mapea filas crudas a FichaArchivo (descifra en batch solo las

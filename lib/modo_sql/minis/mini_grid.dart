@@ -32,8 +32,9 @@ class MiniGrid extends StatelessWidget {
   /// Encabezado arriba del grid (título + filtro).
   final Widget encabezado;
 
-  /// Pide la mini de un archivo (memoizada en MiniCache).
-  final Future<Uint8List?> Function(FichaArchivo f) miniDe;
+  /// Pide la previa guardada de un archivo (memoizada en el modo).
+  /// NULL si no hay: icono. El grid JAMÁS toca el original
+  /// (sin tap no se descifra nada grande).
 
   /// Tap en un cuadro (selecciona + abre Recuperar).
   final void Function(FichaArchivo f) onTap;
@@ -43,6 +44,13 @@ class MiniGrid extends StatelessWidget {
 
   /// Lee las previas guardadas de un archivo ([] = sin previas).
   final Future<List<Uint8List>> Function(FichaArchivo f) previasDe;
+
+  /// Primer frame por nombre (solo grid de videos: 1 en vez de 17).
+  final Map<String, Uint8List> previaUno;
+
+  /// Lee UN frame de un video (null = sin previa: icono, jamás el
+  /// original para mostrarse).
+  final Future<Uint8List?> Function(FichaArchivo f) previaUnoDe;
 
   /// ¿Es video? (transición si tiene frames, icono si no).
   final bool Function(FichaArchivo f) esVideo;
@@ -58,11 +66,11 @@ class MiniGrid extends StatelessWidget {
     required this.minis,
     required this.minisEnRam,
     required this.selNombre,
-    required this.encabezado,
-    required this.miniDe,
     required this.onTap,
     required this.previas,
     required this.previasDe,
+    required this.previaUno,
+    required this.previaUnoDe,
     required this.esVideo,
     this.dirs = const [],
     required this.onEntrarDir,
@@ -84,9 +92,8 @@ class MiniGrid extends StatelessWidget {
     );
   }
 
-  /// Mini con previa primero: si el molde nuevo trae previas
-  /// guardadas usa la primera (memoiza en el mapa del modo);
-  /// si no, mini al vuelo (moldes viejos).
+  /// Mini con previa guardada o null (icono).
+  /// Sin previa = icono, NUNCA mini al vuelo del original.
   Future<Uint8List?> _miniConPrevia(FichaArchivo f) async {
     try {
       final p = await previasDe(f);
@@ -95,7 +102,7 @@ class MiniGrid extends StatelessWidget {
         return p.first;
       }
     } catch (_) {}
-    return miniDe(f);
+    return null;
   }
 
   /// Marco común: borde selección + tap + nombre abajo.
@@ -268,28 +275,33 @@ class MiniGrid extends StatelessWidget {
               itemCount: otros.length,
               itemBuilder: (_, i) {
                 final f = otros[i];
+                // Grid de video = 1 frame (RAM o nada: icono al toque,
+                // el frame llega en fondo sin tocar el original).
+                final u = previaUno[f.nombre];
+                if (u != null) {
+                  return _cuadro(f, _estatica(u));
+                }
                 final pv = previas[f.nombre];
                 if (pv != null) {
-                  // Videos con frames: transición; sin frames: icono.
+                  // Ya están los 17 (los trajo el visor): frame 1.
                   if (pv.isNotEmpty && esVideo(f)) {
                     return _cuadro(f, _estatica(pv.first));
                   }
                   return _cuadro(f, _TileIcono(f: f, esVideo: esVideo(f)));
                 }
-                return FutureBuilder<List<Uint8List>>(
-                  future: previasDe(f),
+                return FutureBuilder<Uint8List?>(
+                  future: previaUnoDe(f),
                   builder: (_, snap) {
                     if (snap.connectionState != ConnectionState.done) {
                       return _cuadro(
                           f, _TileIcono(f: f, esVideo: esVideo(f)));
                     }
-                    final p = snap.data ?? const <Uint8List>[];
-                    previas[f.nombre] = p;
-                    if (p.isNotEmpty && esVideo(f)) {
-                      return _cuadro(f, _estatica(p.first));
+                    final b = snap.data;
+                    if (b == null || !esVideo(f)) {
+                      return _cuadro(
+                          f, _TileIcono(f: f, esVideo: esVideo(f)));
                     }
-                    return _cuadro(
-                        f, _TileIcono(f: f, esVideo: esVideo(f)));
+                    return _cuadro(f, _estatica(b));
                   },
                 );
               },

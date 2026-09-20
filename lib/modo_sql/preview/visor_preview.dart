@@ -125,6 +125,7 @@ class _VisorPreviewState extends State<VisorPreview> {
             future: widget.cargar(a),
             builder: (_, snap) {
               if (snap.connectionState != ConnectionState.done) {
+                // Tap = original o nada (sin previa de relleno).
                 return const Center(
                   child: Icon(Icons.image_outlined,
                       size: 64, color: Colors.grey),
