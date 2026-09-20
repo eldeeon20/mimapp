@@ -66,6 +66,7 @@ class MiniGrid extends StatelessWidget {
     required this.minis,
     required this.minisEnRam,
     required this.selNombre,
+    required this.encabezado,
     required this.onTap,
     required this.previas,
     required this.previasDe,
