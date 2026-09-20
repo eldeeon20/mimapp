@@ -56,59 +56,28 @@ class Settings {
     try {
       final dir = await getApplicationSupportDirectory();
       final file = File('${dir.path}/config.pr');
+      Uint8List? enc;
       if (await file.exists()) {
-        final enc = await file.readAsBytes();
-        Uint8List? plain;
-        bool needsMigration = false;
-        if (CryptoVault.isEnvelope(enc)) {
-          // Formato nuevo (AES-256-GCM). null = masterKey incorrecta.
-          plain = await CryptoVault.decrypt(enc, masterKey);
-        } else {
-          // Legado XOR: descifrar y marcar para migrar a V2 al guardar.
-          plain = ToolSec(masterKey).processBytes(enc);
-          needsMigration = true;
+        enc = await file.readAsBytes();
+      } else {
+        // Sin principal: probar el respaldo (corte a mitad de escritura).
+        final bak = File('${dir.path}/config.pr.bak');
+        if (await bak.exists()) {
+          print('Settings.load: uso respaldo .bak');
+          enc = await bak.readAsBytes();
         }
-        if (plain == null) {
-          print('Settings.load: envelope V2 no autenticado, defaults');
-          return;
-        }
-        final map = jsonDecode(utf8.decode(plain)) as Map<String, dynamic>;
-        mediaShowUri = map['mediaShowUri'] as bool? ?? false;
-        natEnabled = map['natEnabled'] as bool? ?? false;
-        webDarkMode = map['webDarkMode'] as bool? ?? true;
-        if (map['accounts'] is Map) {
-          accounts = Map<String, dynamic>.from(map['accounts']);
-        }
-        if (map['tasks'] is List) {
-          tasks = map['tasks']
-              .whereType<Map>()
-              .map((e) => Map<String, dynamic>.from(e))
-              .toList();
-        }
-        if (map['pockets'] is List) {
-          pockets = map['pockets']
-              .whereType<Map>()
-              .map((e) => Map<String, dynamic>.from(e))
-              .toList();
-        }
-        if (map['pkarrKeys'] is List) {
-          pkarrKeys = map['pkarrKeys']
-              .whereType<Map>()
-              .map((e) => Map<String, dynamic>.from(e))
-              .toList();
-        }
-        if (map['nostrKeys'] is List) {
-          nostrKeys = map['nostrKeys']
-              .whereType<Map>()
-              .map((e) => Map<String, dynamic>.from(e))
-              .toList();
-        }
-        colabClientId = map['colabClientId'] as String? ?? '';
-        colabClientSecret = map['colabClientSecret'] as String? ?? '';
-        torrentRoot = map['torrentRoot'] as String? ?? '';
-        if (needsMigration) {
-          // Legado XOR -> re-guardar ya como envelope V2 (AES-GCM).
-          await save();
+      }
+      if (enc != null) {
+        final ok = await _cargarBytes(enc);
+        if (!ok) {
+          // Principal corrupto: probar el respaldo antes de defaultear.
+          try {
+            final bak = File('${dir.path}/config.pr.bak');
+            if (await bak.exists()) {
+              print('Settings.load: principal corrupto, uso .bak');
+              await _cargarBytes(await bak.readAsBytes());
+            }
+          } catch (_) {}
         }
       }
     } catch (e) {
@@ -116,6 +85,67 @@ class Settings {
       print('Settings.load error: $e');
     } finally {
       _loaded = true;
+    }
+  }
+
+  /// Descifra y vuelca un config.pr en memoria. true = ok.
+  Future<bool> _cargarBytes(Uint8List enc) async {
+    try {
+      Uint8List? plain;
+      bool needsMigration = false;
+      if (CryptoVault.isEnvelope(enc)) {
+        // Formato nuevo (AES-256-GCM). null = masterKey incorrecta.
+        plain = await CryptoVault.decrypt(enc, masterKey);
+      } else {
+        // Legado XOR: descifrar y marcar para migrar a V2 al guardar.
+        plain = ToolSec(masterKey).processBytes(enc);
+        needsMigration = true;
+      }
+      if (plain == null) {
+        print('Settings.load: envelope V2 no autenticado, defaults');
+        return false;
+      }
+      final map = jsonDecode(utf8.decode(plain)) as Map<String, dynamic>;
+      mediaShowUri = map['mediaShowUri'] as bool? ?? false;
+      natEnabled = map['natEnabled'] as bool? ?? false;
+      webDarkMode = map['webDarkMode'] as bool? ?? true;
+      if (map['accounts'] is Map) {
+        accounts = Map<String, dynamic>.from(map['accounts']);
+      }
+      if (map['tasks'] is List) {
+        tasks = map['tasks']
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList();
+      }
+      if (map['pockets'] is List) {
+        pockets = map['pockets']
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList();
+      }
+      if (map['pkarrKeys'] is List) {
+        pkarrKeys = map['pkarrKeys']
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList();
+      }
+      if (map['nostrKeys'] is List) {
+        nostrKeys = map['nostrKeys']
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList();
+      }
+      colabClientId = map['colabClientId'] as String? ?? '';
+      colabClientSecret = map['colabClientSecret'] as String? ?? '';
+      torrentRoot = map['torrentRoot'] as String? ?? '';
+      if (needsMigration) {
+        // Legado XOR -> re-guardar ya como envelope V2 (AES-GCM).
+        save();
+      }
+      return true;
+    } catch (_) {
+      return false;
     }
   }
 
@@ -139,7 +169,19 @@ class Settings {
           await ToolSec(masterKey).processBytesStrong(Uint8List.fromList(plain));
       final dir = await getApplicationSupportDirectory();
       final file = File('${dir.path}/config.pr');
-      await file.writeAsBytes(enc);
+      final tmp = File('${dir.path}/config.pr.tmp');
+      final bak = File('${dir.path}/config.pr.bak');
+      // Atómico: tmp + rename (matar la app a mitad no corrompe).
+      await tmp.writeAsBytes(enc, flush: true);
+      try {
+        if (await file.exists()) {
+          // Respaldo del último bueno (load lo usa si el principal falla).
+          try {
+            await file.copy(bak.path);
+          } catch (_) {}
+        }
+      } catch (_) {}
+      await tmp.rename(file.path);
     } catch (e) {
       print('Settings.save error: $e');
     }
