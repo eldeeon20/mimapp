@@ -46,6 +46,9 @@ class PreviewMolde {
   /// Genera las previas de un archivo local. Imágenes en hilo
   /// aparte; videos con [captura] (surface oculta del que crea).
   /// Sin captura, los videos quedan sin previa (icono+formato).
+  /// OJO: las fotos se generan en el hilo principal (el decoder
+  /// `dart:ui` NO anda en `Isolate.run`: fallaba silencioso y los
+  /// moldes salían sin previas). El codec es async nativo, no traba.
   static Future<List<Uint8List>> generar({
     required String ruta,
     required String formato,
@@ -55,7 +58,7 @@ class PreviewMolde {
       if (captura == null) return [];
       return captura.frames(ruta);
     }
-    return Isolate.run(() => _previaImagen(ruta));
+    return _previaImagen(ruta);
   }
 
   /// Lee las previas guardadas de un archivo (del .mld, descifradas).
