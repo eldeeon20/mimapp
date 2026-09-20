@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../services/crypto_vault.dart';
 
@@ -81,7 +82,13 @@ class AgendaStore extends ChangeNotifier {
     _loaded = false;
     _abierta = false;
     items.clear();
-    final f = await _file();
+    // Download primero; si no está, la vieja privada (migra sola
+    // al próximo guardado).
+    File f = await _file();
+    if (!await f.exists()) {
+      final vieja = await _fileLegacy();
+      if (await vieja.exists()) f = vieja;
+    }
     if (await f.exists()) {
       try {
         final raw = await f.readAsBytes();
@@ -119,6 +126,31 @@ class AgendaStore extends ChangeNotifier {
   }
 
   Future<File> _file() async {
+    // Como sql test: Download/agenda visible, sin depender de la
+    // app privada. Sin permiso → appSupport de antes (fallback).
+    try {
+      if (Platform.isAndroid) {
+        var st = await Permission.manageExternalStorage.status;
+        if (!st.isGranted) {
+          st = await Permission.manageExternalStorage.request();
+        }
+        if (!st.isGranted) {
+          var s2 = await Permission.storage.status;
+          if (!s2.isGranted) {
+            s2 = await Permission.storage.request();
+          }
+          if (!s2.isGranted) return _fileLegacy();
+        }
+        final dir = Directory('/storage/emulated/0/Download/agenda');
+        await dir.create(recursive: true);
+        return File('${dir.path}/$_fileName');
+      }
+    } catch (_) {}
+    return _fileLegacy();
+  }
+
+  /// Ubicación vieja (privada): solo lectura para migrar.
+  Future<File> _fileLegacy() async {
     final dir = await getApplicationSupportDirectory();
     return File('${dir.path}/$_fileName');
   }
@@ -155,6 +187,13 @@ class AgendaStore extends ChangeNotifier {
       final enc = await CryptoVault.encrypt(
           Uint8List.fromList(json), _pass);
       await f.writeAsBytes(enc, flush: true);
+      // Migrada a Download: se borra la copia privada vieja.
+      try {
+        final vieja = await _fileLegacy();
+        if (vieja.path != f.path && await vieja.exists()) {
+          await vieja.delete();
+        }
+      } catch (_) {}
       return true;
     } catch (_) {
       return false;
