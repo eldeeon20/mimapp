@@ -68,6 +68,8 @@ dependencies:
   web_socket_channel: ^3.0.1
   audio_service: ^0.18.15
   koni_archive: ^0.9.0
+  # Previas del molde en AVIF (libavif): solo la previa, el original intacto.
+  flutter_avif: ^3.1.0
 
 dev_dependencies:
   flutter_test:

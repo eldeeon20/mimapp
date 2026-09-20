@@ -174,8 +174,9 @@ class _TestSqlScreenState extends State<TestSqlScreen>
     try {
       final disco = await _previaCache?.leerUno(archivo: f.nombre);
       if (disco != null && disco.isNotEmpty) {
-        _uno[f.nombre] = disco;
-        return disco;
+        final vis = await PreviewMolde.mostrable(disco);
+        _uno[f.nombre] = vis;
+        return vis;
       }
     } catch (_) {}
     try {
@@ -186,7 +187,11 @@ class _TestSqlScreenState extends State<TestSqlScreen>
         cache: _cache,
         info: _infoAbierta,
       );
-      if (b != null && b.isNotEmpty) _uno[f.nombre] = b;
+      if (b != null && b.isNotEmpty) {
+        final vis = await PreviewMolde.mostrable(b);
+        _uno[f.nombre] = vis;
+        return vis;
+      }
       return b;
     } catch (_) {
       return null;
@@ -218,8 +223,13 @@ class _TestSqlScreenState extends State<TestSqlScreen>
     try {
       final disco = await _previaCache?.leerTodos(archivo: f.nombre);
       if (disco != null && disco.isNotEmpty) {
-        _previasGuardar(f.nombre, disco);
-        return disco;
+        // AVIF → mostrable (una vez; RAM memoiza).
+        final vis = <Uint8List>[];
+        for (final b in disco) {
+          vis.add(await PreviewMolde.mostrable(b));
+        }
+        _previasGuardar(f.nombre, vis);
+        return vis;
       }
     } catch (_) {}
     try {
@@ -230,14 +240,20 @@ class _TestSqlScreenState extends State<TestSqlScreen>
         cache: _cache,
         info: _infoAbierta,
       );
-      _previasGuardar(f.nombre, p);
+      final vis = <Uint8List>[];
+      for (final b in p) {
+        vis.add(await PreviewMolde.mostrable(b));
+      }
+      _previasGuardar(f.nombre, vis);
       if (p.isNotEmpty) {
         try {
+          // En disco se guarda el ORIGINAL (AVIF chico); en RAM el
+          // mostrable. La próxima sale de disco sin tocar el molde.
           await _previaCache?.guardarTodos(
               archivo: f.nombre, frames: p);
         } catch (_) {}
       }
-      return p;
+      return vis;
     } catch (_) {
       return [];
     }

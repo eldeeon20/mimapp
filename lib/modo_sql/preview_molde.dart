@@ -1,10 +1,10 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:isolate';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/widgets.dart';
+import 'package:flutter_avif/flutter_avif.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
@@ -13,10 +13,10 @@ import 'package:media_kit_video/media_kit_video.dart';
 /// formato `prev`, misma clave del archivo) y el grid/list las
 /// muestran sin abrir jamás el original.
 ///
-/// Imágenes: 1 PNG de 320px. Videos: frames con el media de
-/// mimapp (seek + screenshot sobre surface oculta). Vacío = sin
-/// previa (el grid muestra icono+formato).
-/// Moldes viejos (sin previas guardadas): previa al vuelo como antes.
+/// Imágenes: 1 AVIF de 320px (el original no se toca). Videos:
+/// frames JPEG con el media de mimapp (seek + screenshot sobre
+/// surface oculta). Vacío = sin previa (el grid muestra icono).
+/// Moldes viejos (previas PNG): se muestran igual (passthrough).
 class PreviewMolde {
   /// Prefijo de las entradas de previa dentro del molde.
   static const prefijo = '.prev/';
@@ -64,9 +64,57 @@ class PreviewMolde {
   /// Lee las previas guardadas de un archivo (del .mld, descifradas).
   /// El lector real lo hace `CreateMoldeSql.previasDe`.
   static String patronDe(String nombreRel) => '$prefijo$nombreRel#%';
+
+  /// ¿Es AVIF? (magic `....ftypavif` en offset 4).
+  static bool esAvif(Uint8List b) {
+    if (b.length < 12) return false;
+    if (b[4] != 0x66 || b[5] != 0x74 || b[6] != 0x79 || b[7] != 0x70) {
+      return false;
+    }
+    if (b.length < 12) return false;
+    final marca = String.fromCharCodes(b.sublist(8, 12));
+    return marca == 'avif';
+  }
+
+  /// Previa lista para mostrar: AVIF → PNG en memoria, el resto pasa
+  /// igual (JPEG de video, PNG de moldes viejos). Una vez por previa
+  /// (el modo memoiza en RAM).
+  static Future<Uint8List> mostrable(Uint8List b) async {
+    if (!esAvif(b)) return b;
+    try {
+      final frames = await decodeAvif(b);
+      if (frames.isEmpty) return b;
+      final img = frames.first.image;
+      try {
+        final data =
+            await img.toByteData(format: ui.ImageByteFormat.png);
+        final out = data?.buffer.asUint8List();
+        if (out == null || out.isEmpty) return b;
+        return Uint8List.fromList(out);
+      } finally {
+        try {
+          img.dispose();
+        } catch (_) {}
+      }
+    } catch (_) {
+      return b;
+    }
+  }
+
+  /// PNG → AVIF para guardar (solo previas). Si falla, PNG original.
+  static Future<Uint8List> aAvif(Uint8List png) async {
+    try {
+      final a = await encodeAvif(png);
+      if (a.isEmpty) return png;
+      return a;
+    } catch (_) {
+      return png;
+    }
+  }
 }
 
-/// Una previa de imagen: PNG de 320px (corre en hilo aparte).
+/// Una previa de imagen: AVIF de 320px (corre en el hilo principal:
+/// `dart:ui` no anda en isolates). Si el AVIF falla, PNG.
 /// (Sin encoder jpeg a mano: `ImageByteFormat` no tiene jpeg.)
 Future<List<Uint8List>> _previaImagen(String ruta) async {
   try {
@@ -82,7 +130,8 @@ Future<List<Uint8List>> _previaImagen(String ruta) async {
           .toByteData(format: ui.ImageByteFormat.png);
       final b = data?.buffer.asUint8List();
       if (b == null || b.isEmpty) return [];
-      return [Uint8List.fromList(b)];
+      // Solo la previa va en AVIF; el original no se toca.
+      return [await PreviewMolde.aAvif(Uint8List.fromList(b))];
     } finally {
       frame.image.dispose();
       codec.dispose();
