@@ -367,7 +367,10 @@ class CreateMoldeSql {
           } catch (_) {}
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      // Ruidoso: antes tragaba todo y el molde salía v1 sin aviso.
+      log?.call('✗ previas: $e');
+    }
     final caja =
         await abrirIndice(claveSql: clave, molde: nombre);
     try {
