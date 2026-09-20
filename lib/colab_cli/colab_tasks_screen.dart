@@ -326,7 +326,17 @@ class _ColabTasksScreenState extends State<ColabTasksScreen> {
   /// Enviar: crea un pocket de la tarea. Con argumento pide el valor
   /// (con lápiz opcional para tocar el Python de la plantilla).
   Future<void> _enviar(ColabTask t) async {
-    if (!_connected) return;
+    if (!_connected) {
+      // Ruidoso: antes volvía en silencio y parecía que el botón
+      // no hacía nada (ni abría ni guardaba).
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('Sin conexión al runtime: no se puede enviar')),
+        );
+      }
+      return;
+    }
     if (!t.hasArg) {
       _addPocket(t, '');
       return;
@@ -456,6 +466,14 @@ class _ColabTasksScreenState extends State<ColabTasksScreen> {
     if (t.campos.isNotEmpty) {
       t.lastArg = campoVals.join('\n');
       _persist();
+      // Prueba visible en el celu: si esto sale, quedó en config.pr.
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text(
+                  '✓ "${t.nombre}" guardado (${campoVals.where((v) => v.isNotEmpty).length}/${campoVals.length} campos)')),
+        );
+      }
     }
     if (sent != true || !mounted) {
       for (final c in campoCtrls) {
