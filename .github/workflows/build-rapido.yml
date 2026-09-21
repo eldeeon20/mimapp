@@ -126,11 +126,15 @@ jobs:
       - name: Fetch Dart packages
         run: flutter pub get
 
-      # flutter_avif_android trae Java 11 + Kotlin 17 y AGP 8 lo rechaza:
-      # se le sube el Java a 17 en el pub-cache (el plugin no tiene release nuevo).
+      # flutter_avif_android 3.1.0 trae Java 11 + un FlutterAvifPlugin.java
+      # viejo duplicado del .kt (Redeclaration) y AGP 8 lo rechaza:
+      # se borra el .java y se sube el Java a 17 en el pub-cache.
       - name: Parche JVM plugin avif
         run: |
-          F="$PUB_CACHE/hosted/pub.dev/flutter_avif_android-3.1.0/android/build.gradle"
+          PC="$HOME/.pub-cache"
+          F="$PC/hosted/pub.dev/flutter_avif_android-3.1.0/android/build.gradle"
+          J="$PC/hosted/pub.dev/flutter_avif_android-3.1.0/android/src/main/java/com/teknorota/flutter_avif/FlutterAvifPlugin.java"
+          [ -f "$J" ] && rm -v "$J" || echo "java ya ausente"
           if [ -f "$F" ]; then
             sed -i 's/JavaVersion.VERSION_11/JavaVersion.VERSION_17/g' "$F"
             grep -n "VERSION_17" "$F" | head -3
