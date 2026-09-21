@@ -113,28 +113,58 @@ class PreviewMolde {
   }
 }
 
+/// Achica un ui.Image a [ancho] px dibujando directo (sin PNG
+/// intermedio: el codec nativo no abre AVIF y era un rodeo).
+Future<Uint8List?> _achicarUi(ui.Image src, int ancho) async {
+  try {
+    if (src.width <= 0 || src.height <= 0) return null;
+    final alto = (src.height * ancho / src.width).round();
+    if (alto <= 0) return null;
+    final rec = ui.PictureRecorder();
+    final c = ui.Canvas(rec);
+    c.drawImageRect(
+      src,
+      ui.Rect.fromLTWH(0, 0, src.width.toDouble(), src.height.toDouble()),
+      ui.Rect.fromLTWH(0, 0, ancho.toDouble(), alto.toDouble()),
+      ui.Paint()..filterQuality = ui.FilterQuality.medium,
+    );
+    final pic = rec.endRecording();
+    final out = await pic.toImage(ancho, alto);
+    try {
+      final data =
+          await out.toByteData(format: ui.ImageByteFormat.png);
+      final b = data?.buffer.asUint8List();
+      if (b == null || b.isEmpty) return null;
+      return Uint8List.fromList(b);
+    } finally {
+      out.dispose();
+    }
+  } catch (_) {
+    return null;
+  }
+}
+
 /// Una previa de imagen: AVIF de 320px (corre en el hilo principal:
 /// `dart:ui` no anda en isolates). Si el AVIF falla, PNG.
-/// Si el ORIGINAL es AVIF (el codec nativo no lo abre), se decodifica
-/// con libavif primero. El original nunca se modifica.
+/// Si el ORIGINAL es AVIF (el codec nativo no lo abre): libavif →
+/// achicado directo → AVIF. Sin PNG en el medio.
+/// El original nunca se modifica.
 /// (Sin encoder jpeg a mano: `ImageByteFormat` no tiene jpeg.)
 Future<List<Uint8List>> _previaImagen(String ruta) async {
   try {
-    var bytes = await File(ruta).readAsBytes();
+    final bytes = await File(ruta).readAsBytes();
     if (bytes.isEmpty) return [];
-    // Origen AVIF: a PNG completo primero, después a 320px.
+    // Origen AVIF: libavif + achique directo (sin rodeos).
     if (PreviewMolde.esAvif(bytes)) {
       try {
         final fs = await decodeAvif(bytes);
         if (fs.isEmpty) return [];
-        final data = await fs.first.image
-            .toByteData(format: ui.ImageByteFormat.png);
-        final full = data?.buffer.asUint8List();
+        final chica = await _achicarUi(fs.first.image, 320);
         try {
           fs.first.image.dispose();
         } catch (_) {}
-        if (full == null || full.isEmpty) return [];
-        bytes = Uint8List.fromList(full);
+        if (chica == null || chica.isEmpty) return [];
+        return [await PreviewMolde.aAvif(chica)];
       } catch (_) {
         return [];
       }

@@ -797,7 +797,8 @@ class _TestSqlScreenState extends State<TestSqlScreen>
     'jpeg',
     'gif',
     'webp',
-    'bmp'
+    'bmp',
+    'avif'
   };
   static const _textos = {
     'txt',
@@ -814,7 +815,22 @@ class _TestSqlScreenState extends State<TestSqlScreen>
     'ini',
     'cfg',
     'yaml',
-    'yml'
+    'yml',
+    'py',
+    'dart',
+    'sh',
+    'java',
+    'kt',
+    'c',
+    'h',
+    'cpp',
+    'rs',
+    'go',
+    'rb',
+    'php',
+    'sql',
+    'toml',
+    'lua'
   };
 
   /// Recupera un archivo en RAM (descifrado desde su rango SQL) y lo
