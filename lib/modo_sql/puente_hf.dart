@@ -64,10 +64,11 @@ class PuenteHf {
     }
   }
 
-  /// Sube el molde (.mld + su SQL) y marca la versión.
+  /// Sube el molde (.mld + su SQL + respaldo del índice) y marca
+  /// la versión.
   /// El SQL que sube apunta al molde de HF (`hf://repo/nombre.mld`,
   /// editado en una COPIA: tu SQL local sigue al .mld local).
-  /// Solo el SQL del molde (el índice no viaja).
+  /// El índice viaja como respaldo cifrado (lleva repos+tokens).
   /// Retorna la versión subida (ms actual).
   Future<int> subirMolde({
     required String passIndice,
@@ -142,6 +143,23 @@ class PuenteHf {
     }
     await Indice.marcarVersion(
         pass: passIndice, nombre: nombre, version: version);
+    // Respaldo del índice (cifrado con tu clave: repos+tokens).
+    try {
+      final carpeta = await MediaBase.carpetaMoldes();
+      final idx = File('${carpeta.path}/${Indice.archivo}');
+      if (await idx.exists()) {
+        log?.call('· subiendo ${Indice.archivo} (respaldo)…');
+        await _hf.uploadFile(
+          repoId: repo,
+          localFilePath: idx.path,
+          pathInRepo: Indice.archivo,
+          commitMessage: commit,
+          repoType: repoType,
+        );
+      }
+    } catch (e) {
+      log?.call('⚠ índice no subido: $e');
+    }
     log?.call('✓ $nombre en $repo v$version');
     return version;
   }
