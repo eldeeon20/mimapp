@@ -54,7 +54,7 @@ dependencies:
   media_kit_libs_video: ^1.0.7
   file_picker: ^8.1.2
   flutter_inappwebview: ^6.1.5
-  dart_ipfs: ^1.11.7
+  dart_ipfs: ^1.9.0
   camera: ^0.11.0
   url_launcher: ^6.3.1
   permission_handler: ^11.3.1
@@ -74,11 +74,6 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
-
-# flutter_avif pide protobuf 3 pero dart_ipfs pide protobuf 6:
-# se fuerza el 6 (si avif fallara en runtime, el código cae a PNG).
-dependency_overrides:
-  protobuf: ^6.0.0
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is
