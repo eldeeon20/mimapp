@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 import '../media_server/media_server.dart';
+import '../preview_molde.dart';
 
 /// Visor pantalla completa: deslizá a los costados para la
 /// preview siguiente/anterior, pellizcá para zoom (InteractiveViewer).
@@ -45,6 +46,9 @@ class _VisorPreviewState extends State<VisorPreview> {
 
   /// Bytes ya cargados por índice (para Guardar sin re-pedir).
   final Map<int, Uint8List> _listos = {};
+
+  /// Decodificados AVIF por índice (mostrar; Guardar usa el original).
+  final Map<int, Future<Uint8List>> _vis = {};
 
   @override
   void initState() {
@@ -139,19 +143,49 @@ class _VisorPreviewState extends State<VisorPreview> {
                 );
               }
               _listos[n] = b;
-              return InteractiveViewer(
-                transformationController: _zoom,
-                // Sin ampliar el pan va al PageView (deslizar cambia).
-                panEnabled: _ampliado,
-                scaleEnabled: true,
-                minScale: 1,
-                maxScale: 6,
-                child: Center(
-                  child: Image.memory(b,
-                      fit: BoxFit.contain,
-                      gaplessPlayback: true),
-                ),
-              );
+              // Original AVIF: se muestra decodificado (Guardar sigue
+              // con el original intacto).
+              final Widget vista = PreviewMolde.esAvif(b)
+                  ? FutureBuilder<Uint8List>(
+                      future: _vis.putIfAbsent(
+                          n, () => PreviewMolde.mostrable(b)),
+                      builder: (_, vsnap) {
+                        final vb = vsnap.data;
+                        if (vb == null) {
+                          return const Center(
+                            child: Icon(Icons.image_outlined,
+                                size: 64, color: Colors.grey),
+                          );
+                        }
+                        return InteractiveViewer(
+                          transformationController: _zoom,
+                          // Sin ampliar el pan va al PageView (deslizar cambia).
+                          panEnabled: _ampliado,
+                          scaleEnabled: true,
+                          minScale: 1,
+                          maxScale: 6,
+                          child: Center(
+                            child: Image.memory(vb,
+                                fit: BoxFit.contain,
+                                gaplessPlayback: true),
+                          ),
+                        );
+                      },
+                    )
+                  : InteractiveViewer(
+                      transformationController: _zoom,
+                      // Sin ampliar el pan va al PageView (deslizar cambia).
+                      panEnabled: _ampliado,
+                      scaleEnabled: true,
+                      minScale: 1,
+                      maxScale: 6,
+                      child: Center(
+                        child: Image.memory(b,
+                            fit: BoxFit.contain,
+                            gaplessPlayback: true),
+                      ),
+                    );
+              return vista;
             },
           );
         },

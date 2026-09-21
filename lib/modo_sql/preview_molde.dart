@@ -115,11 +115,30 @@ class PreviewMolde {
 
 /// Una previa de imagen: AVIF de 320px (corre en el hilo principal:
 /// `dart:ui` no anda en isolates). Si el AVIF falla, PNG.
+/// Si el ORIGINAL es AVIF (el codec nativo no lo abre), se decodifica
+/// con libavif primero. El original nunca se modifica.
 /// (Sin encoder jpeg a mano: `ImageByteFormat` no tiene jpeg.)
 Future<List<Uint8List>> _previaImagen(String ruta) async {
   try {
-    final bytes = await File(ruta).readAsBytes();
+    var bytes = await File(ruta).readAsBytes();
     if (bytes.isEmpty) return [];
+    // Origen AVIF: a PNG completo primero, después a 320px.
+    if (PreviewMolde.esAvif(bytes)) {
+      try {
+        final fs = await decodeAvif(bytes);
+        if (fs.isEmpty) return [];
+        final data = await fs.first.image
+            .toByteData(format: ui.ImageByteFormat.png);
+        final full = data?.buffer.asUint8List();
+        try {
+          fs.first.image.dispose();
+        } catch (_) {}
+        if (full == null || full.isEmpty) return [];
+        bytes = Uint8List.fromList(full);
+      } catch (_) {
+        return [];
+      }
+    }
     final codec = await ui.instantiateImageCodec(
       bytes,
       targetWidth: 320,
