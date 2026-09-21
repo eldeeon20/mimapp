@@ -671,8 +671,38 @@ class _TestSqlScreenState extends State<TestSqlScreen>
           claveSql: _clave, molde: nombre);
       // USER abre su SQL (info+filas); el server solo abre el .mld.
       // Sin tu SQL el server no sabe qué trae el molde.
-      // El server solo abre el .mld (sin SQL, sin clave).
-      final m = await MediaServer.abrir(rutaMld: info.ruta);
+      // Sin .mld local no se rompe: los trozos vienen de HF por
+      // rangos (remoto) y quedan en caché (solo lo pedido).
+      MoldeAbierto? m;
+      try {
+        m = await MediaServer.abrir(rutaMld: info.ruta);
+      } catch (_) {
+        m = null;
+      }
+      // Remoto del molde (repo+token del índice): pedirRango lo usa
+      // solo para los trozos que la caché no tiene.
+      try {
+        final ent = await Indice.entrada(
+            pass: await _passIndice(), nombre: nombre);
+        final repo = '${ent?['hf_repo'] ?? ''}';
+        final token = '${ent?['hf_token'] ?? ''}';
+        if (repo.isNotEmpty && token.isNotEmpty) {
+          CreateMoldeSql.remoto =
+              (molde, absoluto, largo) => PuenteHf.rangoMld(
+                    repo: repo,
+                    nombre: molde,
+                    start: absoluto,
+                    // HTTP Range inclusivo: [absoluto, absoluto+largo).
+                    end: absoluto + largo - 1,
+                    token: token,
+                  );
+          _add('· remoto HF listo ($repo: solo lo no cacheado)');
+        } else {
+          CreateMoldeSql.remoto = null;
+        }
+      } catch (_) {
+        CreateMoldeSql.remoto = null;
+      }
       if (!mounted) return;
       // Caché en bruto sobre la sesión (misma pass del índice).
       final TrozoCache? cache = _sesionCache.abierta
@@ -709,7 +739,7 @@ class _TestSqlScreenState extends State<TestSqlScreen>
         _previaCache = pcache;
       });
       _add('✓ abierto "$nombre": ${filas.length} filas de tu SQL, '
-          'server solo ve ${fmtBytes(m.total)} crudos, '
+          '${m == null ? 'sin .mld local (HF por rangos)' : 'server solo ve ${fmtBytes(m.total)} crudos'}, '
           'caché local 512KB lista');
       // v1 o v2 en el log: v2 = trae previas guardadas (.prev/).
       final duenosPrev = <String>{};

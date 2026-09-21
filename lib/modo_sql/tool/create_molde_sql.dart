@@ -658,6 +658,12 @@ class CreateMoldeSql {
     return l.isEmpty ? null : l.first;
   }
 
+  /// Fuente remota de trozos crudos (por si no hay .mld local).
+  /// La pone la pantalla al abrir (repo+token del índice).
+  /// null = sin remoto (como antes: error si falta el archivo).
+  static Future<Uint8List?> Function(
+      String molde, int absoluto, int largo)? remoto;
+
   /// Mapea filas crudas a FichaArchivo (descifra en batch solo las
   /// legacy con `*_c`; las nuevas ya vienen en bruto y no tocan
   /// el hilo de descifrado).
@@ -849,7 +855,13 @@ class CreateMoldeSql {
       throw ArgumentError('test_sql: rango [$desde, $hasta) '
           'fuera de "$archivo" (0..${f.tamano})');
     }
-    final server = await MediaServer.abrir(rutaMld: infoOk.ruta);
+    // Server local si hay .mld; si no, nulo (lo trae `remoto`).
+    MoldeAbierto? server;
+    try {
+      server = await MediaServer.abrir(rutaMld: infoOk.ruta);
+    } catch (_) {
+      server = null;
+    }
     final claveOk = claveArchivo ??
         await claveDe(
           claveSql: claveSql,
@@ -872,15 +884,54 @@ class CreateMoldeSql {
       for (var i = primero; i <= ultimo; i++)
         if (!crudos.containsKey(i)) i
     ];
-    // 2) lo que falta: UNA lectura del server + UN guardado en lote.
+    // 2) lo que falta: UNA lectura del server (o remoto HF por
+    // rangos si no hay .mld local) + UN guardado en lote.
+    // A la caché solo se le pide una vez; al molde solo lo que
+    // la caché no tenía (local o remoto, igual).
     if (faltan.isNotEmpty) {
-      final leidos = await server.leerVarios([
-        for (final i in faltan)
-          [
-            Duro.offsetDe(f.inicio, i, f.trozo),
-            Duro.largoDe(i, f.tamano, f.trozo)
-          ]
-      ]);
+      final leidos = <Uint8List>[];
+      if (server != null) {
+        leidos.addAll(await server.leerVarios([
+          for (final i in faltan)
+            [
+              Duro.offsetDe(f.inicio, i, f.trozo),
+              Duro.largoDe(i, f.tamano, f.trozo)
+            ]
+        ]));
+      } else {
+        final rem = remoto;
+        if (rem == null) {
+          throw StateError('test_sql: no existe el bloque '
+              '"${infoOk.ruta}" ni hay remoto para "$molde"');
+        }
+        // UNA llamada por tramo contiguo (500MB no son 300 GETs:
+        // se calcula el span y se parte en casa).
+        var i = 0;
+        while (i < faltan.length) {
+          final ini = faltan[i];
+          var fin = ini;
+          var iniOff = Duro.offsetDe(f.inicio, ini, f.trozo);
+          var span = Duro.largoDe(ini, f.tamano, f.trozo);
+          while (i + 1 < faltan.length &&
+              faltan[i + 1] == fin + 1) {
+            fin++;
+            i++;
+            span += Duro.largoDe(fin, f.tamano, f.trozo);
+          }
+          final b = await rem(molde, iniOff, span);
+          if (b == null || b.length != span) {
+            throw StateError('test_sql: remoto incompleto '
+                '(trozos $ini..$fin de "$archivo")');
+          }
+          var o = 0;
+          for (var k = ini; k <= fin; k++) {
+            final len = Duro.largoDe(k, f.tamano, f.trozo);
+            leidos.add(Uint8List.sublistView(b, o, o + len));
+            o += len;
+          }
+          i++;
+        }
+      }
       final lote = <int, Uint8List>{};
       for (var j = 0; j < faltan.length; j++) {
         crudos[faltan[j]] = leidos[j];
