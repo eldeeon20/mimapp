@@ -144,18 +144,46 @@ class PuenteHf {
     await Indice.marcarVersion(
         pass: passIndice, nombre: nombre, version: version);
     // Respaldo del índice (cifrado con tu clave: repos+tokens).
+    // En la copia que sube, este molde apunta al repo:
+    // sql → `$nombre.sql`, mld → `hf://repo/nombre.mld`.
+    // El índice local no se toca.
     try {
       final carpeta = await MediaBase.carpetaMoldes();
       final idx = File('${carpeta.path}/${Indice.archivo}');
       if (await idx.exists()) {
-        log?.call('· subiendo ${Indice.archivo} (respaldo)…');
-        await _hf.uploadFile(
-          repoId: repo,
-          localFilePath: idx.path,
-          pathInRepo: Indice.archivo,
-          commitMessage: commit,
-          repoType: repoType,
-        );
+        log?.call('· subiendo ${Indice.archivo} (apuntando a HF)…');
+        final tmpI =
+            await Directory.systemTemp.createTemp('hf_idx_up');
+        try {
+          final copiaI = File('${tmpI.path}/${Indice.archivo}');
+          await idx.copy(copiaI.path);
+          final cajaI = CajaSql();
+          try {
+            await cajaI.abrir('indice',
+                carpeta: tmpI.path, clave: passIndice);
+            cajaI.db.execute(
+              'UPDATE indice SET sql = ?, mld = ? WHERE nombre = ?;',
+              [
+                '$nombre.sql',
+                'hf://$repo/$nombre.mld',
+                nombre
+              ],
+            );
+          } finally {
+            cajaI.cerrar();
+          }
+          await _hf.uploadFile(
+            repoId: repo,
+            localFilePath: copiaI.path,
+            pathInRepo: Indice.archivo,
+            commitMessage: commit,
+            repoType: repoType,
+          );
+        } finally {
+          try {
+            await tmpI.delete(recursive: true);
+          } catch (_) {}
+        }
       }
     } catch (e) {
       log?.call('⚠ índice no subido: $e');
