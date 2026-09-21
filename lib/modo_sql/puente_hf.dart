@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:pr_app/services/hf.dart';
 
 import 'indice/indice.dart';
+import 'db/caja_sql.dart';
 import 'media_server/media_server.dart';
 import 'tool/create_molde_sql.dart';
 
@@ -13,8 +14,8 @@ import 'tool/create_molde_sql.dart';
 /// Convención de paths dentro del repo:
 ///
 ///   `<nombre>.mld`   el molde (blob grande, NUNCA se baja entero)
-///   `<nombre>.sql`   su SQL (se baja entera al elegir el molde)
-///   `indice.db`      el índice cifrado (se sube como respaldo)
+///   `<nombre>.sql`   su SQL con ruta `hf://repo/<nombre>.mld`
+///                     (se baja entera; apunta al molde de HF)
 ///
 /// El `.mld` remoto solo se lee por RANGOS (`rangoMld`), con el
 /// token del molde para repos privados. La SQL sí se descarga
@@ -63,10 +64,14 @@ class PuenteHf {
     }
   }
 
-  /// Sube el molde (.mld + su SQL + indice.db) y marca la versión.
+  /// Sube el molde (.mld + su SQL) y marca la versión.
+  /// El SQL que sube apunta al molde de HF (`hf://repo/nombre.mld`,
+  /// editado en una COPIA: tu SQL local sigue al .mld local).
+  /// Solo el SQL del molde (el índice no viaja).
   /// Retorna la versión subida (ms actual).
   Future<int> subirMolde({
     required String passIndice,
+    required String claveSql,
     required String nombre,
     String repoType = 'dataset',
     void Function(String s)? log,
@@ -99,26 +104,41 @@ class PuenteHf {
     }
     final dbRuta = '${ent['db_ruta'] ?? ''}';
     if (dbRuta.isNotEmpty && await File(dbRuta).exists()) {
-      log?.call('· subiendo $nombre.sql…');
-      await _hf.uploadFile(
-        repoId: repo,
-        localFilePath: dbRuta,
-        pathInRepo: '$nombre.sql',
-        commitMessage: commit,
-        repoType: repoType,
-      );
-    }
-    final carpeta = await MediaBase.carpetaMoldes();
-    final idx = File('${carpeta.path}/${Indice.archivo}');
-    if (await idx.exists()) {
-      log?.call('· subiendo indice.db…');
-      await _hf.uploadFile(
-        repoId: repo,
-        localFilePath: idx.path,
-        pathInRepo: Indice.archivo,
-        commitMessage: commit,
-        repoType: repoType,
-      );
+      log?.call('· subiendo $nombre.sql (apuntando a HF)…');
+      // Copia con ruta HF: el que baja este SQL ve el molde de HF,
+      // no tu disco. El local queda intacto.
+      final tmp = await Directory.systemTemp.createTemp('hf_sql_up');
+      try {
+        final dbBase = dbRuta.split('/').last;
+        final copia = File('${tmp.path}/$dbBase');
+        await File(dbRuta).copy(copia.path);
+        final sinDb = dbBase.endsWith('.db')
+            ? dbBase.substring(0, dbBase.length - 3)
+            : dbBase;
+        final caja = CajaSql();
+        try {
+          await caja.abrir(sinDb,
+              carpeta: tmp.path, clave: claveSql);
+          caja.db.execute(
+            'UPDATE "${MediaBase.tablaMoldes}" SET ruta = ? '
+            'WHERE nombre = ?;',
+            ['hf://$repo/$nombre.mld', nombre],
+          );
+        } finally {
+          caja.cerrar();
+        }
+        await _hf.uploadFile(
+          repoId: repo,
+          localFilePath: copia.path,
+          pathInRepo: '$nombre.sql',
+          commitMessage: commit,
+          repoType: repoType,
+        );
+      } finally {
+        try {
+          await tmp.delete(recursive: true);
+        } catch (_) {}
+      }
     }
     await Indice.marcarVersion(
         pass: passIndice, nombre: nombre, version: version);

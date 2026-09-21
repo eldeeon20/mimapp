@@ -679,13 +679,25 @@ class _TestSqlScreenState extends State<TestSqlScreen>
       } catch (_) {
         m = null;
       }
-      // Remoto del molde (repo+token del índice): pedirRango lo usa
-      // solo para los trozos que la caché no tiene.
+      // Remoto del molde (repo+token del índice, o repo que trae la
+      // propia SQL si apunta a HF `hf://repo/nombre.mld`): pedirRango
+      // lo usa solo para los trozos que la caché no tiene.
       try {
+        var repo = '';
+        var token = '';
+        final ruta = info.ruta;
+        if (ruta.startsWith('hf://')) {
+          final resto = ruta.substring(5);
+          final i = resto.lastIndexOf('/');
+          if (i > 0) {
+            repo = resto.substring(0, i);
+            _add('· SQL apunta a HF ($repo: sin .mld local)');
+          }
+        }
         final ent = await Indice.entrada(
             pass: await _passIndice(), nombre: nombre);
-        final repo = '${ent?['hf_repo'] ?? ''}';
-        final token = '${ent?['hf_token'] ?? ''}';
+        if (repo.isEmpty) repo = '${ent?['hf_repo'] ?? ''}';
+        token = '${ent?['hf_token'] ?? ''}';
         if (repo.isNotEmpty && token.isNotEmpty) {
           CreateMoldeSql.remoto =
               (molde, absoluto, largo) => PuenteHf.rangoMld(
@@ -1910,6 +1922,7 @@ class _TestSqlScreenState extends State<TestSqlScreen>
     try {
       await _puenteHf.subirMolde(
         passIndice: await _passIndice(),
+        claveSql: _clave,
         nombre: m,
         log: _add,
       );
