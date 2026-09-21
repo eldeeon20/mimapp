@@ -102,12 +102,18 @@ class CreateMoldeSql {
       'total': 'INTEGER',
       'sal': 'TEXT',
       'cifrado': 'TEXT',
+      // Gemelo en HF (ruta `hf://repo/molde.mld`): la ruta local
+      // queda, esto dice dónde está subido. Vacío = no subido.
+      'hf': 'TEXT',
     });
     if (!caja.campos(MediaBase.tablaMoldes).contains('sal')) {
       caja.agregarCampo(MediaBase.tablaMoldes, 'sal', 'TEXT');
     }
     if (!caja.campos(MediaBase.tablaMoldes).contains('cifrado')) {
       caja.agregarCampo(MediaBase.tablaMoldes, 'cifrado', 'TEXT');
+    }
+    if (!caja.campos(MediaBase.tablaMoldes).contains('hf')) {
+      caja.agregarCampo(MediaBase.tablaMoldes, 'hf', 'TEXT');
     }
     caja.crearTabla(MediaBase.tablaArchivos, {
       'molde': 'TEXT',

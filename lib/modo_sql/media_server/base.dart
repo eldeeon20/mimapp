@@ -153,6 +153,9 @@ class MoldeInfo {
   final String cifrado;
   final String semilla;
 
+  /// Gemelo en HF (`hf://repo/molde.mld`). Vacío = no subido.
+  final String hf;
+
   MoldeInfo({
     required this.nombre,
     required this.ruta,
@@ -161,6 +164,7 @@ class MoldeInfo {
     this.sal = '',
     this.cifrado = '',
     this.semilla = '',
+    this.hf = '',
   });
 
   factory MoldeInfo.deMapa(Map<String, Object?> m) => MoldeInfo(
@@ -171,5 +175,6 @@ class MoldeInfo {
         sal: '${m['sal'] ?? ''}',
         cifrado: '${m['cifrado'] ?? ''}',
         semilla: '${m['semilla'] ?? ''}',
+        hf: '${m['hf'] ?? ''}',
       );
 }

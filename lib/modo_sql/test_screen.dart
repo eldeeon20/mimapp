@@ -689,19 +689,21 @@ class _TestSqlScreenState extends State<TestSqlScreen>
       } catch (_) {
         m = null;
       }
-      // Remoto del molde (repo+token del índice, o repo que trae la
-      // propia SQL si apunta a HF `hf://repo/nombre.mld`): pedirRango
+      // Remoto del molde (repo+token del índice, o gemelo HF que
+      // trae la propia SQL en `ruta` o columna `hf`): pedirRango
       // lo usa solo para los trozos que la caché no tiene.
+      // Hay archivo local? manda ese; si no, el gemelo HF.
       try {
         var repo = '';
         var token = '';
-        final ruta = info.ruta;
-        if (ruta.startsWith('hf://')) {
-          final resto = ruta.substring(5);
+        for (final cand in [info.ruta, info.hf]) {
+          if (!cand.startsWith('hf://')) continue;
+          final resto = cand.substring(5);
           final i = resto.lastIndexOf('/');
           if (i > 0) {
             repo = resto.substring(0, i);
             _add('· SQL apunta a HF ($repo: sin .mld local)');
+            break;
           }
         }
         final ent = await Indice.entrada(

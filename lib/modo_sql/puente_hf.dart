@@ -106,8 +106,25 @@ class PuenteHf {
     final dbRuta = '${ent['db_ruta'] ?? ''}';
     if (dbRuta.isNotEmpty && await File(dbRuta).exists()) {
       log?.call('· subiendo $nombre.sql (apuntando a HF)…');
+      // LOCAL también se actualiza: anota su gemelo en HF (la ruta
+      // local queda; `hf` dice dónde está subido).
+      try {
+        final cajaL = CajaSql();
+        try {
+          await cajaL.abrirRuta(dbRuta, clave: claveSql);
+          cajaL.db.execute(
+            'UPDATE "${MediaBase.tablaMoldes}" SET hf = ? '
+            'WHERE nombre = ?;',
+            ['hf://$repo/$nombre.mld', nombre],
+          );
+        } finally {
+          cajaL.cerrar();
+        }
+      } catch (e) {
+        log?.call('⚠ sql local no anotado: $e');
+      }
       // Copia con ruta HF: el que baja este SQL ve el molde de HF,
-      // no tu disco. El local queda intacto.
+      // no tu disco. El local ya apunta via `hf` pero conserva ruta.
       final tmp = await Directory.systemTemp.createTemp('hf_sql_up');
       try {
         final dbBase = dbRuta.split('/').last;
@@ -121,9 +138,9 @@ class PuenteHf {
           await caja.abrir(sinDb,
               carpeta: tmp.path, clave: claveSql);
           caja.db.execute(
-            'UPDATE "${MediaBase.tablaMoldes}" SET ruta = ? '
+            'UPDATE "${MediaBase.tablaMoldes}" SET ruta = ?, hf = ? '
             'WHERE nombre = ?;',
-            ['hf://$repo/$nombre.mld', nombre],
+            ['hf://$repo/$nombre.mld', 'hf://$repo/$nombre.mld', nombre],
           );
         } finally {
           caja.cerrar();
