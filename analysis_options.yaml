@@ -15,6 +15,10 @@ analyzer:
     # no están en el cache del app); analizarlo genera falsos errores.
     - rust_builder/**
     - build/**
+    # IPFS DESACTIVADO (sin mover ni borrar): no se analiza ni compila
+    # (test_routes tampoco lo importa). Reactivar = borrar estas líneas.
+    - lib/services/ipfs_service.dart
+    - lib/screens/ipfs_test_screen.dart
 
 linter:
   # The lint rules applied to this project can be customized in the
