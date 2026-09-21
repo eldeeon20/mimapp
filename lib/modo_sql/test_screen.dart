@@ -2038,7 +2038,7 @@ class _TestSqlScreenState extends State<TestSqlScreen>
           FilledButton.tonalIcon(
             onPressed: _hfOcupado ? null : _hfSubir,
             icon: const Icon(Icons.cloud_upload_rounded, size: 18),
-            label: const Text('Subir molde+SQL+índice'),
+            label: const Text('Subir molde+SQL'),
           ),
           FilledButton.tonalIcon(
             onPressed: _hfOcupado ? null : _hfBajarSql,
