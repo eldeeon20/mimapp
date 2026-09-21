@@ -9,7 +9,8 @@ import '../screens/downloads_test_screen.dart';
 import '../screens/filosoia_screen.dart';
 import '../screens/gpu_test_screen.dart';
 import '../screens/hf_test_screen.dart';
-import '../screens/ipfs_test_screen.dart';
+// IPFS DESACTIVADO (código en desactivado_ipfs/, sin borrar).
+// import '../screens/ipfs_test_screen.dart';
 import '../screens/iroh_chat_screen.dart';
 import '../screens/iroh_test_screen.dart';
 import '../screens/kem_test_screen.dart';
@@ -77,10 +78,11 @@ const Map<String, TestRoute> kTestRoutes = {
     titulo: 'Voto anónimo BLSAG',
     pagina: _rv,
   ),
-  'ip': (
-    titulo: 'IPFS',
-    pagina: _ip,
-  ),
+  // IPFS DESACTIVADO (código en desactivado_ipfs/, sin borrar).
+  // 'ip': (
+  //   titulo: 'IPFS',
+  //   pagina: _ip,
+  // ),
   'ua': (
     titulo: 'Unarc · RAR/7z/ZIP',
     pagina: _ua,
@@ -150,7 +152,8 @@ Widget _bt(BuildContext _) => const TorrentScreen();
 Widget _ag(BuildContext _) => const FilosoiaScreen();
 Widget _ring(BuildContext _) => const RingSignaturesTestScreen();
 Widget _rv(BuildContext _) => const RingVoteTestScreen();
-Widget _ip(BuildContext _) => const IpfsTestScreen();
+// IPFS DESACTIVADO (código en desactivado_ipfs/, sin borrar).
+// Widget _ip(BuildContext _) => const IpfsTestScreen();
 Widget _ua(BuildContext _) => const UnarcTestScreen();
 Widget _koni(BuildContext _) => const KoniTestScreen();
 Widget _webk(BuildContext _) => const WebkTestScreen();

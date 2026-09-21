@@ -54,7 +54,10 @@ dependencies:
   media_kit_libs_video: ^1.0.7
   file_picker: ^8.1.2
   flutter_inappwebview: ^6.1.5
-  dart_ipfs: ^1.9.0
+  # dart_ipfs: ^1.11.7 (versión anterior, DESACTIVADO sin borrar:
+  # choca con flutter_avif por protobuf 6 vs 3. Código preservado en
+  # desactivado_ipfs/. Para reactivar: descomentar + restaurar esos files).
+  # dart_ipfs: ^1.11.7
   camera: ^0.11.0
   url_launcher: ^6.3.1
   permission_handler: ^11.3.1
