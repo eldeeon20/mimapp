@@ -126,6 +126,18 @@ jobs:
       - name: Fetch Dart packages
         run: flutter pub get
 
+      # flutter_avif_android trae Java 11 + Kotlin 17 y AGP 8 lo rechaza:
+      # se le sube el Java a 17 en el pub-cache (el plugin no tiene release nuevo).
+      - name: Parche JVM plugin avif
+        run: |
+          F="$PUB_CACHE/hosted/pub.dev/flutter_avif_android-3.1.0/android/build.gradle"
+          if [ -f "$F" ]; then
+            sed -i 's/JavaVersion.VERSION_11/JavaVersion.VERSION_17/g' "$F"
+            grep -n "VERSION_17" "$F" | head -3
+          else
+            echo "aviso: no se halló $F"
+          fi
+
       - name: Install cargo-expand (needed by codegen)
         run: |
           if ! command -v cargo-expand > /dev/null 2>&1; then
