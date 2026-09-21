@@ -591,6 +591,8 @@ class _TestSqlScreenState extends State<TestSqlScreen>
   final Map<String, String> _passPorMolde = {};
 
   /// Entradas crudas del índice (para el panel admin).
+  /// + en HF por molde (repo+versión: lo que ya está subido).
+  final Map<String, ({String repo, int version})> _hfInfo = {};
   final Map<String, Map<String, Object?>> _entradas = {};
 
   /// Carpetas desde el ÍNDICE cifrado (sin abrir las SQL de moldes).
@@ -618,6 +620,7 @@ class _TestSqlScreenState extends State<TestSqlScreen>
       _moldes = [];
       _passPorMolde.clear();
       _entradas.clear();
+      _hfInfo.clear();
       for (final m in crudo) {
         final nombre = '${m['nombre'] ?? ''}';
         if (nombre.isEmpty || !vistos.add(nombre)) continue;
@@ -629,6 +632,13 @@ class _TestSqlScreenState extends State<TestSqlScreen>
           sal: '${m['sal'] ?? ''}',
           cifrado: '${m['cifrado'] ?? ''}',
         ));
+        // En local el índice ya sabe qué hay en HF (repo+versión):
+        // se muestra en la lista (☁ repo v123).
+        final repo = '${m['hf_repo'] ?? ''}';
+        final ver = (m['version'] as int?) ?? 0;
+        if (repo.isNotEmpty && ver > 0) {
+          _hfInfo[nombre] = (repo: repo, version: ver);
+        }
         final pm = '${m['pass'] ?? ''}';
         if (pm.isNotEmpty) _passPorMolde[nombre] = pm;
         _entradas[nombre] = m;
@@ -1707,6 +1717,7 @@ class _TestSqlScreenState extends State<TestSqlScreen>
       onRecargar: _refrescarMoldes,
       onAbrir: _abrirMolde,
       onBorrar: _borrarMolde,
+      hfInfo: _hfInfo,
       // Grid/lista no borran: eso es de la pestaña Moldes.
       conBorrar: false,
     );
@@ -2019,6 +2030,7 @@ class _TestSqlScreenState extends State<TestSqlScreen>
           onRecargar: _refrescarMoldes,
           onAbrir: _abrirMolde,
           onBorrar: _borrarMolde,
+          hfInfo: _hfInfo,
         ),
         const Divider(height: 20),
         const Text('HuggingFace (repo + token del molde abierto)',

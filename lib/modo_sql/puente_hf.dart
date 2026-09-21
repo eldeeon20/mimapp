@@ -164,7 +164,7 @@ class PuenteHf {
             cajaI.db.execute(
               'UPDATE indice SET sql = ?, mld = ? WHERE nombre = ?;',
               [
-                '$nombre.sql',
+                'hf://$repo/$nombre.sql',
                 'hf://$repo/$nombre.mld',
                 nombre
               ],

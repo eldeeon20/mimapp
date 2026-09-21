@@ -15,6 +15,9 @@ class ListaMoldes extends StatelessWidget {
   /// Sin borrar (grid/lista): borrar es gestión de la pestaña Moldes.
   final bool conBorrar;
 
+  /// En HF por molde (repo+versión): lo que ya está subido.
+  final Map<String, ({String repo, int version})> hfInfo;
+
   const ListaMoldes({
     super.key,
     required this.moldes,
@@ -24,6 +27,7 @@ class ListaMoldes extends StatelessWidget {
     required this.onAbrir,
     required this.onBorrar,
     this.conBorrar = true,
+    this.hfInfo = const {},
   });
 
   @override
@@ -55,9 +59,21 @@ class ListaMoldes extends StatelessWidget {
               leading: const Icon(Icons.folder_rounded,
                   size: 28, color: Colors.amber),
               selected: abierta == m.nombre,
-              title: Text(m.nombre,
-                  style: const TextStyle(fontSize: 13)),
-              subtitle: Text(fmtBytes(m.total),
+              title: Row(children: [
+                Expanded(
+                  child: Text(m.nombre,
+                      style: const TextStyle(fontSize: 13)),
+                ),
+                if (hfInfo.containsKey(m.nombre))
+                  const Icon(Icons.cloud_done_rounded,
+                      size: 16, color: Colors.lightBlueAccent),
+              ]),
+              subtitle: Text(
+                  fmtBytes(m.total) +
+                      (hfInfo[m.nombre] == null
+                          ? ''
+                          : ' · ☁ ${hfInfo[m.nombre]!.repo} '
+                              'v${hfInfo[m.nombre]!.version}'),
                   style: const TextStyle(fontSize: 10)),
               onTap: () => onAbrir(m.nombre),
               trailing: conBorrar
