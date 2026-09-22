@@ -586,6 +586,33 @@ class CreateMoldeSql {
     }
   }
 
+  /// Cuántos archivos del molde traen previa guardada (entradas
+  /// `.prev/<arch>#<i>`). El log v1/v2 sale de acá porque filasDe()
+  /// excluye `.prev/` a propósito (y escanear `filas` daba siempre v1).
+  static Future<int> previasCuantas({
+    required String claveSql,
+    required String molde,
+  }) async {
+    final caja = await _cajaMolde(claveSql, molde);
+    try {
+      final crudas = caja.listarDonde(
+        MediaBase.tablaArchivos,
+        'molde = ? AND nombre LIKE \'.prev/%\'',
+        [molde],
+      );
+      final bases = <String>{};
+      for (final c in crudas) {
+        final n = '${c['nombre'] ?? ''}';
+        if (!PreviewMolde.esPrevia(n)) continue;
+        final h = n.lastIndexOf('#');
+        bases.add(h < 0 ? n : n.substring(0, h));
+      }
+      return bases.length;
+    } finally {
+      caja.cerrar();
+    }
+  }
+
   /// Previas guardadas de un archivo (del .mld, descifradas con la
   /// clave del ORIGINAL, no de la entrada previa). Vacío = sin
   /// previas (moldes viejos: previa al vuelo).

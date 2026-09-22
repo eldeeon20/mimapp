@@ -766,17 +766,17 @@ class _TestSqlScreenState extends State<TestSqlScreen>
           '${m == null ? 'sin .mld local (HF por rangos)' : 'server solo ve ${fmtBytes(m.total)} crudos'}, '
           'caché local 512KB lista');
       // v1 o v2 en el log: v2 = trae previas guardadas (.prev/).
-      final duenosPrev = <String>{};
-      for (final f in filas) {
-        final n = f.nombre;
-        if (!PreviewMolde.esPrevia(n)) continue;
-        final h = n.lastIndexOf('#');
-        duenosPrev.add(h < 0 ? n : n.substring(0, h));
-      }
-      _add(duenosPrev.isEmpty
+      // OJO: `filas` las excluye (filasDe filtra NOT LIKE .prev/%),
+      // así que se cuentan aparte (antes daba siempre v1).
+      var conPrevias = 0;
+      try {
+        conPrevias = await CreateMoldeSql.previasCuantas(
+            claveSql: _clave, molde: nombre);
+      } catch (_) {}
+      _add(conPrevias == 0
           ? '· molde v1 (sin previas guardadas: el grid no toca '
               'originales, muestra icono hasta que pidas)'
-          : '· molde v2 (${duenosPrev.length} archivo(s) con previa '
+          : '· molde v2 ($conPrevias archivo(s) con previa '
               'guardada: el grid sale de RAM/disco, jamás del original)');
       // Diagnóstico: nombres repetidos (ej. video 4 veces).
       final vistos = <String>{};
