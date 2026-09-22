@@ -207,22 +207,73 @@ class _ColabTasksScreenState extends State<ColabTasksScreen>
     return v;
   }
 
+  /// Resumen para el picker CDN: "3/5 campos · primera línea…".
+  String _resumenArg(ColabTask m) {
+    final ls =
+        m.lastArg.split('\n').where((l) => l.trim().isNotEmpty).toList();
+    if (ls.isEmpty) return 'vacía';
+    final primero = ls.first.trim();
+    final corto =
+        primero.length > 40 ? '${primero.substring(0, 40)}…' : primero;
+    return '${ls.length}/${m.campos.length} campos · $corto';
+  }
+
   /// Preset CDN → cifrar → HF (5 args: URL, maestro, lote, token, repo).
-  /// Reusa la ÚLTIMA tarea CDN si existe (con su data): antes cada
-  /// toque creaba OTRA vacía y al cerrar guardaba vacíos encima.
-  /// Solo crea si no hay ninguna.
+  /// Con guardadas pregunta CUÁL abrir (o crear nueva). Nada es
+  /// automático: abrir no guarda, solo Guardar/Mandar escriben.
   Future<void> _agregarPrefabCdnHf() async {
-    ColabTask? vieja;
-    for (var i = _tasks.length - 1; i >= 0; i--) {
-      if (_tasks[i].id.startsWith('prefab-cdn-hf')) {
-        vieja = _tasks[i];
-        break;
-      }
-    }
-    if (vieja != null) {
+    final mias = [
+      for (var i = _tasks.length - 1; i >= 0; i--)
+        if (_tasks[i].id.startsWith('prefab-cdn-hf')) _tasks[i]
+    ];
+    if (mias.isNotEmpty) {
+      // dynamic: ColabTask = abrirla, 'nueva' = crear, null = cancelar.
+      final elegido = await showDialog<dynamic>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('CDN → HF: ¿cuál?'),
+          content: SizedBox(
+            width: 400,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final m in mias)
+                  ListTile(
+                    dense: true,
+                    title: Text(m.nombre),
+                    subtitle: Text(
+                      _resumenArg(m),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style:
+                          const TextStyle(fontSize: 11, color: Colors.grey),
+                    ),
+                    onTap: () => Navigator.pop(ctx, m),
+                  ),
+                const Divider(),
+                ListTile(
+                  dense: true,
+                  leading: const Icon(Icons.add),
+                  title: const Text('Nueva (vacía)'),
+                  onTap: () => Navigator.pop(ctx, 'nueva'),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancelar')),
+          ],
+        ),
+      );
       if (!mounted) return;
-      await _enviar(vieja);
-      return;
+      if (elegido is ColabTask) {
+        await _enviar(elegido);
+        return;
+      }
+      // Cancelar (null) = no hacer nada. Solo 'nueva' sigue a crear.
+      if (elegido != 'nueva') return;
     }
     final t = ColabPrefabs.cdnCifrarHf();
     t.id = 'prefab-cdn-hf-${taskUid()}';
@@ -388,7 +439,9 @@ class _ColabTasksScreenState extends State<ColabTasksScreen>
             text: i < ultimas.length ? ultimas[i] : ''),
     ];
     bool showCode = false;
-    final sent = await showDialog<bool>(
+    // 'mandar' | 'guardar' | null: NADA es automático (cancelar
+    // descarta sin tocar lo guardado; Guardar/Mandar son explícitos).
+    final sent = await showDialog<String>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setD) => AlertDialog(
@@ -487,57 +540,68 @@ class _ColabTasksScreenState extends State<ColabTasksScreen>
           ),
           actions: [
             TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
+                onPressed: () => Navigator.pop(ctx),
                 child: const Text('Cancelar')),
+            OutlinedButton.icon(
+                onPressed: () => Navigator.pop(ctx, 'guardar'),
+                icon: const Icon(Icons.save, size: 16),
+                label: const Text('Guardar')),
             FilledButton.icon(
-                onPressed: () => Navigator.pop(ctx, true),
+                onPressed: () => Navigator.pop(ctx, 'mandar'),
                 icon: const Icon(Icons.send, size: 16),
                 label: const Text('Mandar')),
           ],
         ),
       ),
     );
-    // Lo editado se guarda siempre (aunque cancele): la próxima
-    // viene pre-rellenada con esto. Solo se MANDA con confirmar.
-    // El "✓ guardado" sale DESPUÉS de escribir (await): antes mentía.
-    // Y JAMÁS se pisa data con cajas vacías: si todo está vacío y
-    // había un último envío, se mantiene (antes lo borraba).
-    final campoVals = campoCtrls.map((c) => c.text.trim()).toList();
-    if (t.campos.isNotEmpty) {
-      final todosVacios = campoVals.every((v) => v.isEmpty);
-      if (!todosVacios || t.lastArg.trim().isEmpty) {
-        t.lastArg = campoVals.join('\n');
-        await _persist();
-        // Prueba visible en el celu: si esto sale, quedó en config.pr.
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-                content: Text(
-                    '✓ "${t.nombre}" guardado (${campoVals.where((v) => v.isNotEmpty).length}/${campoVals.length} campos)')),
-          );
-        }
-      } else if (mounted) {
-        // Cajas vacías + había data: no se pisa, se mantiene el envío.
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content:
-                  Text('↩ "${t.nombre}": se mantiene el último envío')),
-        );
-      }
-    }
-    if (sent != true || !mounted) {
-      for (final c in campoCtrls) {
-        c.dispose();
-      }
-      return;
-    }
-    // Slots rellenados pero sin runtime: se guarda, no se manda.
-    if (!_connected) {
+    // NADA es automático: Cancelar descarta sin tocar lastArg ni
+    // disco. Guardar/Mandar aplican lo escrito (con await: el cartel
+    // sale DESPUÉS de escribir). Vacíos JAMÁS pisan data previa.
+    void descartar() {
       for (final c in campoCtrls) {
         c.dispose();
       }
       argCtrl.dispose();
       codeCtrl.dispose();
+    }
+
+    final campoVals = campoCtrls.map((c) => c.text.trim()).toList();
+    if (sent != 'mandar' && sent != 'guardar') {
+      descartar();
+      return;
+    }
+    if (codeCtrl.text != t.code) t.code = codeCtrl.text;
+    final nuevoArg =
+        t.campos.isNotEmpty ? campoVals.join('\n') : argCtrl.text;
+    final todoVacio = t.campos.isNotEmpty
+        ? campoVals.every((v) => v.isEmpty)
+        : nuevoArg.trim().isEmpty;
+    if (!todoVacio || t.lastArg.trim().isEmpty) {
+      t.lastArg = nuevoArg;
+      await _persist();
+      // Prueba visible en el celu: si esto sale, quedó en config.pr.
+      if (mounted) {
+        final n = t.campos.isNotEmpty
+            ? ' (${campoVals.where((v) => v.isNotEmpty).length}/${campoVals.length} campos)'
+            : '';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('✓ "${t.nombre}" guardado$n')),
+        );
+      }
+    } else if (mounted) {
+      // Vacíos + había data: no se pisa, se mantiene el envío.
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content: Text('↩ "${t.nombre}": se mantiene el último envío')),
+      );
+    }
+    if (sent == 'guardar' || !mounted) {
+      descartar();
+      return;
+    }
+    // sent == 'mandar': slots listos pero sin runtime → no se manda.
+    if (!_connected) {
+      descartar();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -547,9 +611,7 @@ class _ColabTasksScreenState extends State<ColabTasksScreen>
       return;
     }
     // Une las cajas (o el campo único) y confirma antes de mandar.
-    final argFinal = t.campos.isNotEmpty
-        ? campoVals.join('\n')
-        : argCtrl.text;
+    // (lastArg ya trae lo guardado explícito de arriba.)
     for (final c in campoCtrls) {
       c.dispose();
     }
@@ -583,12 +645,16 @@ class _ColabTasksScreenState extends State<ColabTasksScreen>
           ],
         ),
       );
-      if (ok2 != true || !mounted) return;
+      if (ok2 != true || !mounted) {
+        descartar();
+        return;
+      }
     }
-    t.lastArg = argFinal;
-    if (codeCtrl.text != t.code) t.code = codeCtrl.text;
-    await _persist();
-    _addPocket(t, t.lastArg);
+    // lastArg ya quedó guardado arriba (Guardar/Mandar explícitos);
+    // acá solo se manda. Sin doble persist.
+    final aMandar = t.lastArg;
+    descartar();
+    _addPocket(t, aMandar);
   }
 
   void _duplicateTask(ColabTask t) {
