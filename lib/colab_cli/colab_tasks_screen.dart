@@ -208,9 +208,22 @@ class _ColabTasksScreenState extends State<ColabTasksScreen>
   }
 
   /// Preset CDN → cifrar → HF (5 args: URL, maestro, lote, token, repo).
-  /// Cada toque = OTRA tarea (ids únicos) y se abre directo para
-  /// rellenar. Antes: si ya había una no hacía nada en silencio.
+  /// Reusa la ÚLTIMA tarea CDN si existe (con su data): antes cada
+  /// toque creaba OTRA vacía y al cerrar guardaba vacíos encima.
+  /// Solo crea si no hay ninguna.
   Future<void> _agregarPrefabCdnHf() async {
+    ColabTask? vieja;
+    for (var i = _tasks.length - 1; i >= 0; i--) {
+      if (_tasks[i].id.startsWith('prefab-cdn-hf')) {
+        vieja = _tasks[i];
+        break;
+      }
+    }
+    if (vieja != null) {
+      if (!mounted) return;
+      await _enviar(vieja);
+      return;
+    }
     final t = ColabPrefabs.cdnCifrarHf();
     t.id = 'prefab-cdn-hf-${taskUid()}';
     t.nombre = 'CDN → HF ${_tasks.where((x) => x.id.startsWith('prefab-cdn-hf')).length + 1}';
@@ -349,19 +362,19 @@ class _ColabTasksScreenState extends State<ColabTasksScreen>
 
   /// Enviar: crea un pocket de la tarea. Con argumento pide el valor
   /// (con lápiz opcional para tocar el Python de la plantilla).
+  /// Los SLOTS se abren SIEMPRE (rellenar/guardar no necesita
+  /// conexión); solo MANDAR exige runtime conectado.
   Future<void> _enviar(ColabTask t) async {
-    if (!_connected) {
-      // Ruidoso: antes volvía en silencio y parecía que el botón
-      // no hacía nada (ni abría ni guardaba).
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('Sin conexión al runtime: no se puede enviar')),
-        );
-      }
-      return;
-    }
     if (!t.hasArg) {
+      if (!_connected) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+                content: Text('Sin conexión al runtime: no se puede enviar')),
+          );
+        }
+        return;
+      }
       _addPocket(t, '');
       return;
     }
@@ -487,22 +500,49 @@ class _ColabTasksScreenState extends State<ColabTasksScreen>
     // Lo editado se guarda siempre (aunque cancele): la próxima
     // viene pre-rellenada con esto. Solo se MANDA con confirmar.
     // El "✓ guardado" sale DESPUÉS de escribir (await): antes mentía.
+    // Y JAMÁS se pisa data con cajas vacías: si todo está vacío y
+    // había un último envío, se mantiene (antes lo borraba).
     final campoVals = campoCtrls.map((c) => c.text.trim()).toList();
     if (t.campos.isNotEmpty) {
-      t.lastArg = campoVals.join('\n');
-      await _persist();
-      // Prueba visible en el celu: si esto sale, quedó en config.pr.
-      if (mounted) {
+      final todosVacios = campoVals.every((v) => v.isEmpty);
+      if (!todosVacios || t.lastArg.trim().isEmpty) {
+        t.lastArg = campoVals.join('\n');
+        await _persist();
+        // Prueba visible en el celu: si esto sale, quedó en config.pr.
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+                content: Text(
+                    '✓ "${t.nombre}" guardado (${campoVals.where((v) => v.isNotEmpty).length}/${campoVals.length} campos)')),
+          );
+        }
+      } else if (mounted) {
+        // Cajas vacías + había data: no se pisa, se mantiene el envío.
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-              content: Text(
-                  '✓ "${t.nombre}" guardado (${campoVals.where((v) => v.isNotEmpty).length}/${campoVals.length} campos)')),
+              content:
+                  Text('↩ "${t.nombre}": se mantiene el último envío')),
         );
       }
     }
     if (sent != true || !mounted) {
       for (final c in campoCtrls) {
         c.dispose();
+      }
+      return;
+    }
+    // Slots rellenados pero sin runtime: se guarda, no se manda.
+    if (!_connected) {
+      for (final c in campoCtrls) {
+        c.dispose();
+      }
+      argCtrl.dispose();
+      codeCtrl.dispose();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('Sin conexión: valores guardados, no mandados')),
+        );
       }
       return;
     }
