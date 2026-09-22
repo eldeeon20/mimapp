@@ -63,6 +63,7 @@ class _ColabTasksScreenState extends State<ColabTasksScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _runtime.close();
     super.dispose();
   }
 
@@ -982,11 +983,5 @@ class _ColabTasksScreenState extends State<ColabTasksScreen>
         );
       },
     );
-  }
-
-  @override
-  void dispose() {
-    _runtime.close();
-    super.dispose();
   }
 }
