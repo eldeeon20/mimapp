@@ -33,7 +33,8 @@ class ColabTasksScreen extends StatefulWidget {
   State<ColabTasksScreen> createState() => _ColabTasksScreenState();
 }
 
-class _ColabTasksScreenState extends State<ColabTasksScreen> {
+class _ColabTasksScreenState extends State<ColabTasksScreen>
+    with WidgetsBindingObserver {
   late final ColabRuntime _runtime;
   List<ColabTask> _tasks = [];
   List<ColabPocket> _pockets = [];
@@ -45,6 +46,7 @@ class _ColabTasksScreenState extends State<ColabTasksScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _runtime =
         ColabRuntime(serverUrl: widget.serverUrl, proxyToken: widget.proxyToken);
     _runtime.onInputRequest = _askInput;
@@ -56,6 +58,25 @@ class _ColabTasksScreenState extends State<ColabTasksScreen> {
       if (p.status == 'running') p.status = 'pendiente';
     }
     _connect();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// La app se va a fondo / se cierra: guardar YA (best effort). Sin
+  /// esto, cerrar justo después de "guardado" perdía todo porque el
+  /// save() async no había terminado de escribir el config.pr.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      Settings.instance.tasks = _tasks.map((t) => t.toMap()).toList();
+      Settings.instance.pockets = _pockets.map((p) => p.toMap()).toList();
+      Settings.instance.save();
+    }
   }
 
   Future<void> _connect() async {
@@ -82,10 +103,13 @@ class _ColabTasksScreenState extends State<ColabTasksScreen> {
     }
   }
 
-  void _persist() {
+  /// Guarda en config.pr. SE ESPERA (await): antes era fuego y olvido
+  /// y el "✓ guardado" salía ANTES de escribir el archivo; cerrar la
+  /// app en ese hueco lo perdía todo (PBKDF2 200k tarda segundos).
+  Future<void> _persist() async {
     Settings.instance.tasks = _tasks.map((t) => t.toMap()).toList();
     Settings.instance.pockets = _pockets.map((p) => p.toMap()).toList();
-    Settings.instance.save();
+    await Settings.instance.save();
   }
 
   ColabTask? _taskById(String id) {
@@ -131,7 +155,7 @@ class _ColabTasksScreenState extends State<ColabTasksScreen> {
       }
     }
     next.updatedAt = DateTime.now().millisecondsSinceEpoch;
-    _persist();
+    await _persist();
     if (!mounted) return;
     setState(() => _running = false);
     _maybeRunNext(); // termina una, manda la otra (el error no frena)
@@ -191,7 +215,7 @@ class _ColabTasksScreenState extends State<ColabTasksScreen> {
     t.id = 'prefab-cdn-hf-${taskUid()}';
     t.nombre = 'CDN → HF ${_tasks.where((x) => x.id.startsWith('prefab-cdn-hf')).length + 1}';
     setState(() => _tasks.add(t));
-    _persist();
+    await _persist();
     if (!mounted) return;
     await _enviar(t);
   }
@@ -256,7 +280,7 @@ class _ColabTasksScreenState extends State<ColabTasksScreen> {
         hasArg: hasArg,
       ));
     });
-    _persist();
+    await _persist();
   }
 
   Future<void> _editTaskDialog(ColabTask t) async {
@@ -320,7 +344,7 @@ class _ColabTasksScreenState extends State<ColabTasksScreen> {
         ),
       ),
     );
-    _persist();
+    await _persist();
   }
 
   /// Enviar: crea un pocket de la tarea. Con argumento pide el valor
@@ -462,10 +486,11 @@ class _ColabTasksScreenState extends State<ColabTasksScreen> {
     );
     // Lo editado se guarda siempre (aunque cancele): la próxima
     // viene pre-rellenada con esto. Solo se MANDA con confirmar.
+    // El "✓ guardado" sale DESPUÉS de escribir (await): antes mentía.
     final campoVals = campoCtrls.map((c) => c.text.trim()).toList();
     if (t.campos.isNotEmpty) {
       t.lastArg = campoVals.join('\n');
-      _persist();
+      await _persist();
       // Prueba visible en el celu: si esto sale, quedó en config.pr.
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -522,7 +547,7 @@ class _ColabTasksScreenState extends State<ColabTasksScreen> {
     }
     t.lastArg = argFinal;
     if (codeCtrl.text != t.code) t.code = codeCtrl.text;
-    _persist();
+    await _persist();
     _addPocket(t, t.lastArg);
   }
 
