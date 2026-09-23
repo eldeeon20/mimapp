@@ -16,7 +16,7 @@
 #[cfg(target_os = "android")]
 #[no_mangle]
 pub extern "C" fn Java_com_example_pr_1app_MainActivity_initRustTls(
-    mut env: jni::JNIEnv<'_>,
+    mut env: jni::Env<'_>,
     _thiz: jni::objects::JObject<'_>,
     context: jni::objects::JObject<'_>,
 ) {

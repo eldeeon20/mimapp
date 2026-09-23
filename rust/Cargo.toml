@@ -42,12 +42,13 @@ tokio-rustls = "0.26"
 nostringer = "0.1.8"
 libcrux-kem = "0.0.7"
 hf-hub = { version = "=1.0.0-rc.1", features = ["blocking"] }
-# hf-hub 1.x → reqwest 0.13 verifica con rustls-platform-verifier, que en
-# Android exige init JNI (MainActivity.initRustTls al arrancar; ver
-# src/api/tls_android.rs). Misma 0.6 que pide reqwest: un solo global.
-rustls-platform-verifier = "0.6"
+# hf-hub 1.x → reqwest 0.13.5 usa rustls-platform-verifier 0.7 (rango
+# <0.8): se usa el fork con fallback WebPKI si JNI no inicializó
+# (si no, panic "Expect rustls-platform-verifier to be initialized").
+# Directo + patch: una sola copia 0.7 en todo el árbol.
+rustls-platform-verifier = { git = "https://github.com/eduardo-bertey/rustls-platform-verifier" }
 [target.'cfg(target_os = "android")'.dependencies]
-jni = { version = "0.21", default-features = false }
+jni = { version = "0.22", default-features = false }
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls", "blocking", "socks"] }
 # --- GPU compute (WebGPU/WGSL nativo, backend Vulkan en Android) ---
 wgpu = "25"
@@ -74,3 +75,7 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(frb_expand)'] }
 # libpthread (va dentro de libc) y el link falla. Vendor parchado.
 [patch.crates-io]
 unrar_sys = { path = "vendor/unrar_sys" }
+# Fork 0.7.0 con fallback WebPKI en Android sin JNI (cubre el req
+# >=0.6,<0.8 de reqwest 0.13; el init JNI de tls_android.rs sigue
+# intentándose primero para usar el store del sistema).
+rustls-platform-verifier = { git = "https://github.com/eduardo-bertey/rustls-platform-verifier" }
