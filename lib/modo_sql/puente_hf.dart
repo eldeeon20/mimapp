@@ -93,7 +93,6 @@ class PuenteHf {
     }
     await asegurarRepo(repoId: repo, token: token, repoType: repoType);
     final version = DateTime.now().millisecondsSinceEpoch;
-    final commit = 'molde $nombre v$version';
     var hashMld = '';
     var hashSql = '';
 
@@ -105,7 +104,8 @@ class PuenteHf {
         repoId: repo,
         localFilePath: mldRuta,
         pathInRepo: '$hashMld.mld',
-        commitMessage: commit,
+        // El comment ES el hash (se comprueba que es ese).
+        commitMessage: 'sha256:$hashMld',
         repoType: repoType,
       );
     }
@@ -159,7 +159,8 @@ class PuenteHf {
           repoId: repo,
           localFilePath: copia.path,
           pathInRepo: '$hashSql.sql',
-          commitMessage: commit,
+          // El comment ES el hash (se comprueba que es ese).
+          commitMessage: 'sha256:$hashSql',
           repoType: repoType,
         );
       } finally {
@@ -212,7 +213,7 @@ class PuenteHf {
             repoId: repo,
             localFilePath: copiaI.path,
             pathInRepo: Indice.archivo,
-            commitMessage: commit,
+            commitMessage: 'indice $nombre v$version',
             repoType: repoType,
           );
         } finally {
