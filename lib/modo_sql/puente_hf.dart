@@ -325,4 +325,72 @@ class PuenteHf {
     return _hf.listRepoFiles(
         repoId: repoId, recursive: true, repoType: repoType);
   }
+
+  /// Sube varios moldes (cada uno a SU repo del índice). Por hash: si
+  /// `<sha>.mld` y `<sha>.sql` ya están arriba, se salta (ya está).
+  /// Retorna (subidos, saltados).
+  Future<({int subidos, int saltados})> subirSeleccionados({
+    required String passIndice,
+    required String claveSql,
+    required List<String> nombres,
+    String repoType = 'dataset',
+    void Function(String s)? log,
+  }) async {
+    var subidos = 0;
+    var saltados = 0;
+    final repoCache = <String, Set<String>>{};
+    for (final nombre in nombres) {
+      try {
+        final ent = await Indice.entrada(
+            pass: passIndice, nombre: nombre);
+        if (ent == null) {
+          log?.call('✗ "$nombre": no está en el índice');
+          continue;
+        }
+        final repo = '${ent['hf_repo'] ?? ''}';
+        final token = '${ent['hf_token'] ?? ''}';
+        if (repo.isEmpty || token.isEmpty) {
+          log?.call('✗ "$nombre": sin repo/token');
+          continue;
+        }
+        final mldRuta = '${ent['mld_ruta'] ?? ''}';
+        var hashMld = '';
+        if (mldRuta.isNotEmpty && await File(mldRuta).exists()) {
+          hashMld = await HuggingFace.sha256Archivo(mldRuta);
+        }
+        final hashSql = '${ent['hash_sql'] ?? ''}';
+        final hashMldIx = '${ent['hash_mld'] ?? ''}';
+        final arriba =
+            repoCache.putIfAbsent('$repoType/$repo', () => {});
+        if (arriba.isEmpty) {
+          try {
+            arriba.addAll(await archivos(
+                repoId: repo, token: token, repoType: repoType));
+          } catch (e) {
+            log?.call('⚠ no se listó $repo: $e');
+          }
+        }
+        // Mismo contenido ya arriba (verificado por nombre=hash).
+        if (hashMld.isNotEmpty &&
+            hashMld == hashMldIx &&
+            arriba.contains('$hashMld.mld') &&
+            (hashSql.isEmpty || arriba.contains('$hashSql.sql'))) {
+          log?.call('· "$nombre": ya está arriba ($hashMld), se salta');
+          saltados++;
+          continue;
+        }
+        await subirMolde(
+          passIndice: passIndice,
+          claveSql: claveSql,
+          nombre: nombre,
+          repoType: repoType,
+          log: log,
+        );
+        subidos++;
+      } catch (e) {
+        log?.call('✗ "$nombre": $e');
+      }
+    }
+    return (subidos: subidos, saltados: saltados);
+  }
 }

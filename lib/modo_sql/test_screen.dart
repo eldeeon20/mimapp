@@ -394,6 +394,7 @@ class _TestSqlScreenState extends State<TestSqlScreen>
     _carpetaIndiceCtrl.dispose();
     _claveCtrl.dispose();
     _tagsCtrl.dispose();
+    _filtroMoldesCtrl.dispose();
     _tagFiltroCtrl.dispose();
     _desdeCtrl.dispose();
     _hastaCtrl.dispose();
@@ -612,6 +613,12 @@ class _TestSqlScreenState extends State<TestSqlScreen>
   final Map<String, ({String repo, int version})> _hfInfo = {};
   final Map<String, Map<String, Object?>> _entradas = {};
   final Map<String, String> _carpetaPorMolde = {};
+
+  /// Selección múltiple para subir a HF (tap largo en un molde).
+  final Set<String> _selSubir = {};
+
+  /// Filtro por nombre/carpeta en Moldes.
+  final _filtroMoldesCtrl = TextEditingController();
 
   /// Carpetas desde el ÍNDICE cifrado (sin abrir las SQL de moldes).
   /// Con [auto] y un solo molde, lo abre solo.
@@ -1379,6 +1386,24 @@ class _TestSqlScreenState extends State<TestSqlScreen>
     if (mounted && _clave != pass) {
       setState(() => _claveCtrl.text = pass);
     }
+    // Sin SQL local pero con HF: se baja SOLA (por hash, verificada).
+    // Antes se intentaba abrir en local y fallaba sin bajarla (la
+    // ignoraba aunque el índice sabía que estaba subida).
+    try {
+      final dbPropia = await CreateMoldeSql.rutaDbPropia(nombre);
+      if (!await File(dbPropia).exists()) {
+        final pi = await _passIndice();
+        final ent = await Indice.entrada(pass: pi, nombre: nombre);
+        if (ent != null && '${ent['hf_repo'] ?? ''}'.isNotEmpty) {
+          _add('· "$nombre" solo en HF: bajando su SQL…');
+          await _puenteHf.bajarSql(passIndice: pi, nombre: nombre);
+          _add('✓ SQL de "$nombre" bajada (hash verificado)');
+          await _refrescarMoldes();
+        }
+      }
+    } catch (e) {
+      _add('✗ bajar SQL: $e');
+    }
     try {
       final migro = await CreateMoldeSql.migrarSiHaceFalta(
         claveSql: pass,
@@ -1825,6 +1850,8 @@ class _TestSqlScreenState extends State<TestSqlScreen>
       hfInfo: _hfInfo,
       // Grid/lista no borran: eso es de la pestaña Moldes.
       conBorrar: false,
+      // Pero SÍ muestran el árbol del índice (mover solo en Moldes).
+      carpetas: _carpetaPorMolde,
     );
   }
 
@@ -2006,6 +2033,28 @@ class _TestSqlScreenState extends State<TestSqlScreen>
     );
   }
 
+  /// Sube los seleccionados (cada uno a SU repo; por hash salta
+  /// lo que ya está arriba). Log por molde + resumen.
+  Future<void> _subirSeleccionados() async {
+    if (_hfOcupado || _selSubir.isEmpty) return;
+    setState(() => _hfOcupado = true);
+    try {
+      final r = await _puenteHf.subirSeleccionados(
+        passIndice: await _passIndice(),
+        claveSql: _clave,
+        nombres: _selSubir.toList(),
+        log: _add,
+      );
+      _add('✓ subida selección: ${r.subidos} subido(s), '
+          '${r.saltados} ya estaban');
+      if (mounted) setState(() => _selSubir.clear());
+      await _refrescarMoldes();
+    } catch (e) {
+      _add('✗ subir selección: $e');
+    } finally {
+      if (mounted) setState(() => _hfOcupado = false);
+    }
+  }
   /// HF: guarda repo (dir/user) + token del molde ABIERTO.
   Future<void> _hfGuardar() async {
     final m = _infoAbierta?.nombre;
@@ -2106,6 +2155,20 @@ class _TestSqlScreenState extends State<TestSqlScreen>
 
   /// Moldes: clave + recordar + historial + bitácora.
   Widget _tabMoldes() {
+    // Buscador por nombre/carpeta (filtra la lista, no toca nada).
+    final f = _filtroMoldesCtrl.text.trim().toLowerCase();
+    final vistos = f.isEmpty
+        ? _moldes
+        : [
+            for (final m in _moldes)
+              if (m.nombre.toLowerCase().contains(f) ||
+                  (_carpetaPorMolde[m.nombre] ?? '')
+                      .toLowerCase()
+                      .contains(f))
+                m
+          ];
+    // La selección muerta (molde filtrado/borrado) se limpia sola.
+    _selSubir.removeWhere((n) => !_moldes.any((m) => m.nombre == n));
     return ListView(
       padding: const EdgeInsets.all(12),
       children: [
@@ -2129,8 +2192,34 @@ class _TestSqlScreenState extends State<TestSqlScreen>
           label: const Text('Indexar carpeta…'),
         ),
         const SizedBox(height: 6),
+        campoTexto(_filtroMoldesCtrl, 'buscar molde o carpeta…',
+            onChanged: (_) {
+          if (mounted) setState(() {});
+        }),
+        // Selección para subir (tap largo en un molde): por hash
+        // salta lo que ya está arriba.
+        if (_selSubir.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          Row(children: [
+            Expanded(
+              child: Text('${_selSubir.length} elegido(s)',
+                  style: const TextStyle(
+                      fontSize: 12, fontWeight: FontWeight.bold)),
+            ),
+            TextButton(
+              onPressed: () => setState(() => _selSubir.clear()),
+              child: const Text('Limpiar'),
+            ),
+            FilledButton.icon(
+              onPressed: _hfOcupado ? null : _subirSeleccionados,
+              icon: const Icon(Icons.cloud_upload_rounded, size: 18),
+              label: const Text('Subir'),
+            ),
+          ]),
+        ],
+        const SizedBox(height: 6),
         ListaMoldes(
-          moldes: _moldes,
+          moldes: vistos,
           abierta: _infoAbierta?.nombre,
           cargando: _cargando,
           onRecargar: _refrescarMoldes,
@@ -2139,6 +2228,10 @@ class _TestSqlScreenState extends State<TestSqlScreen>
           hfInfo: _hfInfo,
           carpetas: _carpetaPorMolde,
           onMover: _moverMoldeCarpeta,
+          seleccion: _selSubir,
+          onToggleSel: (n) => setState(() {
+            if (!_selSubir.remove(n)) _selSubir.add(n);
+          }),
         ),
         const Divider(height: 20),
         const Text('HuggingFace (repo + token del molde abierto)',

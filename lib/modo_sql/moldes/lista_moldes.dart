@@ -3,10 +3,10 @@ import 'package:flutter/material.dart';
 import '../comun/campos.dart';
 import '../media_server/media_server.dart';
 
-/// Moldes como CARPETAS (sin historial): tap = abrir.
-/// Agrupa por carpeta DEL ÍNDICE (anidadas 'a/b', solo índice: ni SQL
-/// ni .mld se tocan). Tocar un molde lo abre (solo ese, no todos).
-class ListaMoldes extends StatelessWidget {
+/// Moldes como DIRECTORIOS navegables (no lista plana): se entra a
+/// las carpetas y adentro están sus moldes. Las carpetas son SOLO del
+/// índice (ni SQL ni .mld se tocan). Tap en molde = abrir solo ese.
+class ListaMoldes extends StatefulWidget {
   final List<MoldeInfo> moldes;
   final String? abierta;
   final bool cargando;
@@ -26,6 +26,11 @@ class ListaMoldes extends StatelessWidget {
   /// Mover a otra carpeta (null = sin botón: grid/lista).
   final void Function(String nombre)? onMover;
 
+  /// Selección múltiple para subir (vacío = sin modo selección).
+  /// null = sin selección (grid/lista).
+  final Set<String>? seleccion;
+  final void Function(String nombre)? onToggleSel;
+
   const ListaMoldes({
     super.key,
     required this.moldes,
@@ -38,111 +43,180 @@ class ListaMoldes extends StatelessWidget {
     this.hfInfo = const {},
     this.carpetas = const {},
     this.onMover,
+    this.seleccion,
+    this.onToggleSel,
   });
 
+  @override
+  State<ListaMoldes> createState() => _ListaMoldesState();
+}
+
+class _ListaMoldesState extends State<ListaMoldes> {
+  /// Carpeta vista ('' = raíz). Navegación interna del árbol.
+  String _vista = '';
+
   String _carpetaDe(String nombre) =>
-      (carpetas[nombre] ?? '').replaceAll('\\', '/');
+      (widget.carpetas[nombre] ?? '').replaceAll('\\', '/');
 
   @override
   Widget build(BuildContext context) {
-    // Grupos por carpeta (raíz primero, resto alfabético).
-    final grupos = <String, List<MoldeInfo>>{};
-    for (final m in moldes) {
-      grupos.putIfAbsent(_carpetaDe(m.nombre), () => []).add(m);
-    }
-    final orden = grupos.keys.toList()
-      ..sort((a, b) {
-        if (a.isEmpty) return -1;
-        if (b.isEmpty) return 1;
-        return a.compareTo(b);
+    // Si la vista actual ya no existe (movieron todo afuera), a raíz.
+    final hay = widget.moldes
+        .any((m) => _carpetaDe(m.nombre) == _vista || _carpetaDe(m.nombre).startsWith('$_vista/'));
+    final vista = (widget.moldes.isEmpty || hay || _subcarpetas(_vista).isNotEmpty) ? _vista : '';
+    if (vista != _vista) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() => _vista = vista);
       });
+    }
+    final subs = _subcarpetas(vista);
+    final mios = [
+      for (final m in widget.moldes)
+        if (_carpetaDe(m.nombre) == vista) m
+    ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(children: [
-          const Text('Moldes (carpetas)',
-              style: TextStyle(fontWeight: FontWeight.bold)),
-          const Spacer(),
+          if (vista.isNotEmpty)
+            IconButton(
+              icon: const Icon(Icons.arrow_back_rounded, size: 18),
+              tooltip: 'Subir',
+              onPressed: () => setState(() => _vista = _padre(vista)),
+            ),
+          Expanded(
+            child: Text(vista.isEmpty ? 'Moldes (carpetas)' : vista,
+                style: const TextStyle(fontWeight: FontWeight.bold)),
+          ),
           IconButton(
             icon: const Icon(Icons.refresh_rounded, size: 18),
             tooltip: 'Recargar',
-            onPressed: cargando ? null : onRecargar,
+            onPressed: widget.cargando ? null : widget.onRecargar,
           ),
         ]),
-        if (moldes.isEmpty)
+        if (widget.moldes.isEmpty)
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 8),
             child: Text('No hay moldes (tocá + para crear o indexá)',
                 style: TextStyle(fontSize: 12, color: Colors.grey)),
           ),
-        for (final g in orden) ...[
-          if (g.isNotEmpty)
-            Padding(
-              padding: EdgeInsets.only(
-                  left: 4.0 + 12.0 * (g.split('/').length - 1),
-                  top: 8,
-                  bottom: 2),
-              child: Row(children: [
-                const Icon(Icons.folder_open_rounded,
-                    size: 16, color: Colors.amber),
-                const SizedBox(width: 4),
-                Expanded(
-                  child: Text(g,
-                      style: const TextStyle(
-                          fontSize: 12, fontWeight: FontWeight.bold)),
-                ),
-                Text('${grupos[g]!.length}',
-                    style:
-                        const TextStyle(fontSize: 10, color: Colors.grey)),
-              ]),
+        for (final s in subs)
+          Card(
+            margin:
+                const EdgeInsets.symmetric(vertical: 4, horizontal: 0),
+            child: ListTile(
+              dense: true,
+              leading: const Icon(Icons.folder_rounded,
+                  size: 28, color: Colors.amber),
+              title: Text(s,
+                  style: const TextStyle(
+                      fontSize: 13, fontWeight: FontWeight.bold)),
+              subtitle: Text('${_cuantos(s)} molde(s)',
+                  style: const TextStyle(fontSize: 10)),
+              trailing: const Icon(Icons.chevron_right_rounded, size: 20),
+              onTap: () => setState(() => _vista =
+                  vista.isEmpty ? s : '$vista/$s'),
             ),
-          for (final m in grupos[g]!) _tile(context, m, g.isNotEmpty),
-        ],
+          ),
+        for (final m in mios) _tile(context, m),
       ],
     );
   }
 
-  Widget _tile(BuildContext context, MoldeInfo m, bool anidado) {
+  /// Hijos directos (un nivel) de [vista].
+  List<String> _subcarpetas(String vista) {
+    final fuera = <String>{};
+    for (final m in widget.moldes) {
+      var c = _carpetaDe(m.nombre);
+      if (vista.isEmpty) {
+        final i = c.indexOf('/');
+        fuera.add(i < 0 ? (c.isEmpty ? '' : c) : c.substring(0, i));
+      } else {
+        if (!c.startsWith('$vista/')) continue;
+        final resto = c.substring(vista.length + 1);
+        final i = resto.indexOf('/');
+        fuera.add(i < 0 ? resto : resto.substring(0, i));
+      }
+    }
+    fuera.remove('');
+    final l = fuera.toList()..sort();
+    return l;
+  }
+
+  String _padre(String vista) {
+    final i = vista.lastIndexOf('/');
+    return i < 0 ? '' : vista.substring(0, i);
+  }
+
+  int _cuantos(String sub) {
+    final base = _vista.isEmpty ? sub : '$_vista/$sub';
+    var n = 0;
+    for (final m in widget.moldes) {
+      final c = _carpetaDe(m.nombre);
+      if (c == base || c.startsWith('$base/')) n++;
+    }
+    return n;
+  }
+
+  Widget _tile(BuildContext context, MoldeInfo m) {
+    final sel = seleccion?.contains(m.nombre) ?? false;
     return Card(
-      margin: EdgeInsets.symmetric(
-          vertical: 4, horizontal: anidado ? 12 : 0),
+      margin: const EdgeInsets.symmetric(vertical: 4),
       child: ListTile(
         dense: true,
-        leading: const Icon(Icons.folder_rounded,
-            size: 28, color: Colors.amber),
-        selected: abierta == m.nombre,
+        leading: seleccion == null
+            ? const Icon(Icons.folder_rounded,
+                size: 28, color: Colors.amber)
+            : Icon(
+                sel
+                    ? Icons.check_box_rounded
+                    : Icons.check_box_outline_blank_rounded,
+                size: 28,
+                color: sel ? Colors.lightBlueAccent : Colors.grey),
+        selected: widget.abierta == m.nombre || sel,
         title: Row(children: [
           Expanded(
             child:
                 Text(m.nombre, style: const TextStyle(fontSize: 13)),
           ),
-          if (hfInfo.containsKey(m.nombre))
+          if (widget.hfInfo.containsKey(m.nombre))
             const Icon(Icons.cloud_done_rounded,
                 size: 16, color: Colors.lightBlueAccent),
         ]),
         subtitle: Text(
             fmtBytes(m.total) +
-                (hfInfo[m.nombre] == null
+                (widget.hfInfo[m.nombre] == null
                     ? ''
-                    : ' · ☁ ${hfInfo[m.nombre]!.repo} '
-                        'v${hfInfo[m.nombre]!.version}'),
+                    : ' · ☁ ${widget.hfInfo[m.nombre]!.repo} '
+                        'v${widget.hfInfo[m.nombre]!.version}'),
             style: const TextStyle(fontSize: 10)),
         // Tap = abrir SOLO este molde (no todos los del SQL).
-        onTap: () => onAbrir(m.nombre),
+        // En selección: tap marca/desmarca. Long-press inicia selección.
+        onTap: () {
+          if (seleccion != null &&
+              seleccion!.isNotEmpty &&
+              onToggleSel != null) {
+            onToggleSel!(m.nombre);
+          } else {
+            widget.onAbrir(m.nombre);
+          }
+        },
+        onLongPress:
+            onToggleSel == null ? null : () => onToggleSel!(m.nombre),
         trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-          if (onMover != null)
+          if (widget.onMover != null)
             IconButton(
               icon: const Icon(Icons.folder_shared,
                   size: 18, color: Colors.lightBlueAccent),
               tooltip: 'Mover de carpeta (solo índice)',
-              onPressed: () => onMover!(m.nombre),
+              onPressed: () => widget.onMover!(m.nombre),
             ),
-          if (conBorrar)
+          if (widget.conBorrar)
             IconButton(
               icon: const Icon(Icons.delete_outline_rounded,
                   size: 18, color: Colors.redAccent),
               tooltip: 'Borrar molde',
-              onPressed: () => onBorrar(m.nombre),
+              onPressed: () => widget.onBorrar(m.nombre),
             ),
         ]),
       ),

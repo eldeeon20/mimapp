@@ -11,10 +11,11 @@ String fmtBytes(int bytes) {
 }
 
 Widget campoTexto(TextEditingController c, String hint,
-    {bool oculto = false}) {
+    {bool oculto = false, void Function(String)? onChanged}) {
   return TextField(
     controller: c,
     obscureText: oculto,
+    onChanged: onChanged,
     style: const TextStyle(fontSize: 12),
     decoration: InputDecoration(
         hintText: hint, isDense: true, border: const OutlineInputBorder()),
