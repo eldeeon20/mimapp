@@ -26,6 +26,11 @@ class ListaMoldes extends StatefulWidget {
   /// Mover a otra carpeta (null = sin botón: grid/lista).
   final void Function(String nombre)? onMover;
 
+  /// Repo+token HF del molde (null = sin botón: grid/lista).
+  /// Sin esto no se puede bajar lo subido (círculo: sin abrir no
+  /// había dónde poner el token).
+  final void Function(String nombre)? onHf;
+
   /// Selección múltiple para subir (vacío = sin modo selección).
   /// null = sin selección (grid/lista).
   final Set<String>? seleccion;
@@ -43,6 +48,7 @@ class ListaMoldes extends StatefulWidget {
     this.hfInfo = const {},
     this.carpetas = const {},
     this.onMover,
+    this.onHf,
     this.seleccion,
     this.onToggleSel,
   });
@@ -205,6 +211,13 @@ class _ListaMoldesState extends State<ListaMoldes> {
             ? null
             : () => widget.onToggleSel!(m.nombre),
         trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+          if (widget.onHf != null)
+            IconButton(
+              icon: const Icon(Icons.cloud_rounded,
+                  size: 18, color: Colors.lightBlueAccent),
+              tooltip: 'Repo+token HF (sin abrir)',
+              onPressed: () => widget.onHf!(m.nombre),
+            ),
           if (widget.onMover != null)
             IconButton(
               icon: const Icon(Icons.folder_shared,

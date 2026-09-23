@@ -240,17 +240,34 @@ class PuenteHf {
     required String nombre,
     String repoType = 'dataset',
   }) async {
-    final destino = await CreateMoldeSql.rutaDbPropia(nombre);
+    // Tolera alias, "alias.sql" o "<hash>.sql": el índice vive por alias.
+    var alias = nombre.trim();
+    if (alias.toLowerCase().endsWith('.sql')) {
+      alias = alias.substring(0, alias.length - 4);
+    }
+    if (alias.toLowerCase().endsWith('.mld')) {
+      alias = alias.substring(0, alias.length - 4);
+    }
+    if (alias.contains('/')) {
+      alias = alias.split('/').last;
+    }
+    var ent0 = await Indice.entrada(pass: passIndice, nombre: alias);
+    ent0 ??= await _entradaPorRemoto(passIndice, alias);
+    if (ent0 == null) {
+      throw StateError('puente_hf: "$nombre" no está en el índice '
+          '(probá con el alias, ej. v2222)');
+    }
+    final nombreIx = '${ent0['nombre'] ?? alias}';
+    final destino = await CreateMoldeSql.rutaDbPropia(nombreIx);
     // ¿La local TRAE el molde? (un .db vacío/rancio no vale: se baja).
-    final ent0 = await Indice.entrada(pass: passIndice, nombre: nombre);
-    final passMolde = '${ent0?['pass'] ?? ''}';
+    final passMolde = '${ent0['pass'] ?? ''}';
     var trae = false;
     if (await File(destino).exists() && passMolde.isNotEmpty) {
       try {
         final caja = CajaSql();
         await caja.abrirRuta(destino, clave: passMolde);
         try {
-          trae = caja.uno(MediaBase.tablaMoldes, 'nombre = ?', [nombre]) !=
+          trae = caja.uno(MediaBase.tablaMoldes, 'nombre = ?', [nombreIx]) !=
               null;
         } finally {
           caja.cerrar();
@@ -260,24 +277,20 @@ class PuenteHf {
     if (trae) {
       await Indice.actualizarRutas(
         pass: passIndice,
-        nombre: nombre,
+        nombre: nombreIx,
         dbRuta: destino,
         mldRuta: '',
       );
       return destino;
     }
-    final ent =
-        await Indice.entrada(pass: passIndice, nombre: nombre);
-    if (ent == null) {
-      throw StateError('puente_hf: "$nombre" no está en el índice');
-    }
+    final ent = ent0;
     final repo = '${ent['hf_repo'] ?? ''}';
     final token = '${ent['hf_token'] ?? ''}';
     if (repo.isEmpty || token.isEmpty) {
-      throw StateError('puente_hf: "$nombre" sin repo/token');
+      throw StateError('puente_hf: "$nombreIx" sin repo/token');
     }
     final hashSql = '${ent['hash_sql'] ?? ''}';
-    final remoto = hashSql.isNotEmpty ? '$hashSql.sql' : '$nombre.sql';
+    final remoto = hashSql.isNotEmpty ? '$hashSql.sql' : '$nombreIx.sql';
     await init(token);
     final tmp = await Directory.systemTemp.createTemp('hf_sql');
     try {
@@ -302,11 +315,28 @@ class PuenteHf {
     }
     await Indice.actualizarRutas(
       pass: passIndice,
-      nombre: nombre,
+      nombre: nombreIx,
       dbRuta: destino,
       mldRuta: '',
     );
     return destino;
+  }
+
+  /// Busca entrada por nombre remoto (`<hash>.sql`/`<hash>.mld`).
+  /// null = no hay.
+  static Future<Map<String, Object?>?> _entradaPorRemoto(
+      String passIndice, String remoto) async {
+    final r = remoto.toLowerCase();
+    final lista = await Indice.listarRaw(passIndice);
+    for (final m in lista) {
+      final hm = '${m['hash_mld'] ?? ''}'.toLowerCase();
+      final hs = '${m['hash_sql'] ?? ''}'.toLowerCase();
+      if ((hm.isNotEmpty && (r == '$hm.mld' || r == hm)) ||
+          (hs.isNotEmpty && (r == '$hs.sql' || r == hs))) {
+        return m;
+      }
+    }
+    return null;
   }
 
   /// Un RANGO de bytes del .mld remoto (el molde se consulta,

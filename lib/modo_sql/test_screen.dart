@@ -671,14 +671,8 @@ class _TestSqlScreenState extends State<TestSqlScreen>
         // Carpeta del índice (anidadas solo-índice).
         _carpetaPorMolde[nombre] = '${m['carpeta'] ?? ''}';
       }
-      // SQL vieja compartida: suma los que el índice aún no tiene.
-      try {
-        final viejos =
-            await CreateMoldeSql.listarMoldes(claveSql: 'x');
-        for (final v in viejos) {
-          if (vistos.add(v.nombre)) _moldes.add(v);
-        }
-      } catch (_) {}
+      // Sin escaneo a la compartida legada (media_server.db): solo
+      // demoraba con clave ajena. Solo índice.
       if (mounted) setState(() {});
       _add('· ${_moldes.length} molde(s) en el índice');
       // Un solo molde = se abre solo (sin tap).
@@ -2056,6 +2050,72 @@ class _TestSqlScreenState extends State<TestSqlScreen>
       if (mounted) setState(() => _hfOcupado = false);
     }
   }
+  /// HF de un molde SIN abrirlo (repo+token para poder bajarlo).
+  /// Rompe el círculo: sin token no baja, sin abrir no había dónde
+  /// ponerlo.
+  Future<void> _hfDeMolde(String nombre) async {
+    final ent =
+        await Indice.entrada(pass: await _passIndice(), nombre: nombre);
+    if (ent == null || !mounted) return;
+    final repoCtrl =
+        TextEditingController(text: '${ent['hf_repo'] ?? ''}');
+    final tokCtrl =
+        TextEditingController(text: '${ent['hf_token'] ?? ''}');
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('HF de "$nombre"'),
+        content: SizedBox(
+          width: 360,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: repoCtrl,
+                decoration: const InputDecoration(
+                    labelText: 'repo dir/user',
+                    border: OutlineInputBorder()),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: tokCtrl,
+                obscureText: true,
+                decoration: const InputDecoration(
+                    labelText: 'token (write para subir)',
+                    border: OutlineInputBorder()),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Guardar')),
+        ],
+      ),
+    );
+    final repo = repoCtrl.text.trim();
+    final tok = tokCtrl.text.trim();
+    repoCtrl.dispose();
+    tokCtrl.dispose();
+    if (ok != true || !mounted) return;
+    try {
+      await Indice.guardarHf(
+        pass: await _passIndice(),
+        nombre: nombre,
+        hfRepo: repo,
+        hfToken: tok,
+      );
+      _add('✓ HF de "$nombre" guardado (sin abrir)');
+      await _refrescarMoldes();
+    } catch (e) {
+      _add('✗ HF guardar: $e');
+    }
+  }
+
   /// HF: guarda repo (dir/user) + token del molde ABIERTO.
   Future<void> _hfGuardar() async {
     final m = _infoAbierta?.nombre;
@@ -2131,23 +2191,52 @@ class _TestSqlScreenState extends State<TestSqlScreen>
   /// moldes trae y dónde está cada .mld; el índice los registra.
   Future<void> _hfEscanearSql() async {
     final ruta = _hfSqlCtrl.text.trim();
-    if (ruta.isEmpty) {
-      _add('· poné la ruta de la .db a escanear');
+    // Sin ruta: se escanean temp + carpeta de moldes (*.db sueltas,
+    // ej. recién bajadas). Con ruta: solo esa.
+    final rutas = <String>[];
+    if (ruta.isNotEmpty) {
+      rutas.add(ruta);
+    } else {
+      try {
+        final tmp = Directory.systemTemp;
+        await for (final e in tmp.list()) {
+          if (e is File && e.path.endsWith('.db')) rutas.add(e.path);
+        }
+      } catch (_) {}
+      try {
+        final carp = await MediaBase.carpetaMoldes();
+        await for (final e in carp.list()) {
+          if (e is File && e.path.endsWith('.db')) rutas.add(e.path);
+        }
+      } catch (_) {}
+      // La propia del índice no se escanea (no es de moldes).
+      rutas.removeWhere((r) => r.endsWith('/${Indice.archivo}'));
+    }
+    if (rutas.isEmpty) {
+      _add('· poné la ruta de la .db a escanear (o baja una primero)');
       return;
     }
     try {
-      final nombres = await Indice.escanearSql(
-        pass: await _passIndice(),
-        sqlPath: ruta,
-        claveSql: _clave,
-      );
-      if (nombres.isEmpty) {
-        _add('· sin moldes en "$ruta"');
-      } else {
-        _add('✓ ${nombres.length} molde(s) desde "$ruta": '
-            '${nombres.join(', ')}');
-        await _refrescarMoldes();
+      var total = 0;
+      for (final r in rutas) {
+        try {
+          final nombres = await Indice.escanearSql(
+            pass: await _passIndice(),
+            sqlPath: r,
+            claveSql: _clave,
+          );
+          if (nombres.isEmpty) {
+            _add('· sin moldes en "$r"');
+          } else {
+            total += nombres.length;
+            _add('✓ ${nombres.length} molde(s) desde "$r": '
+                '${nombres.join(', ')}');
+          }
+        } catch (e) {
+          _add('✗ escanear "$r": $e');
+        }
       }
+      if (total > 0) await _refrescarMoldes();
       if (mounted) setState(() {});
     } catch (e) {
       _add('✗ escanear SQL: $e');
@@ -2229,6 +2318,7 @@ class _TestSqlScreenState extends State<TestSqlScreen>
           hfInfo: _hfInfo,
           carpetas: _carpetaPorMolde,
           onMover: _moverMoldeCarpeta,
+          onHf: _hfDeMolde,
           seleccion: _selSubir,
           onToggleSel: (n) => setState(() {
             if (!_selSubir.remove(n)) _selSubir.add(n);
