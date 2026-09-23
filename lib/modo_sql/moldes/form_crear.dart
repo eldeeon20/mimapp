@@ -8,6 +8,10 @@ class FormCrear extends StatelessWidget {
   final TextEditingController carpeta;
   final TextEditingController clave;
   final TextEditingController tags;
+
+  /// Carpeta DESTINO en el índice (opcional, '' = raíz). El molde
+  /// nace ya anidado ahí (solo índice, no toca archivos).
+  final TextEditingController carpetaIndice;
   final bool creando;
   final String estado;
   final VoidCallback onElegir;
@@ -19,6 +23,7 @@ class FormCrear extends StatelessWidget {
     required this.carpeta,
     required this.clave,
     required this.tags,
+    required this.carpetaIndice,
     required this.creando,
     required this.estado,
     required this.onElegir,
@@ -46,6 +51,9 @@ class FormCrear extends StatelessWidget {
             oculto: true),
         const SizedBox(height: 6),
         campoTexto(tags, 'tags separados por coma (8 máx, 16 letras)'),
+        const SizedBox(height: 6),
+        campoTexto(carpetaIndice,
+            'carpeta en ÍNDICE (opcional, ej. a/b; vacío = raíz)'),
         const SizedBox(height: 6),
         FilledButton.icon(
           onPressed: creando ? null : onCrear,

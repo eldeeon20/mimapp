@@ -51,8 +51,39 @@ class Settings {
 
   bool _loaded = false;
 
+  /// El load en curso (bootstrap lo dispara al arrancar). Los save()
+  /// lo ESPERAN: guardar antes de cargar pisaba el archivo bueno con
+  /// la memoria en defaults (vacía) → al reabrir, todo borrado.
+  Future<void>? _cargando;
+
+  /// Cola de guardados: los save() se EJECUTAN DE A UNO. Antes, dos
+  /// _persist() juntos (varios van sin await) escribían el mismo
+  /// config.pr.tmp a la vez y corrompían principal + .bak → al
+  /// reabrir, ilegible → todo vacío aunque decía "guardado".
+  static Future<void> _cola = Future.value();
+
+  Future<void> save() {
+    final t = _cola.then((_) async {
+      try {
+        await _cargando;
+      } catch (_) {}
+      await _guardarAhora();
+    });
+    _cola = t.catchError((_) {});
+    return t;
+  }
+
   Future<void> load() async {
     if (_loaded) return;
+    _cargando ??= _cargar();
+    try {
+      await _cargando;
+    } finally {
+      _loaded = true;
+    }
+  }
+
+  Future<void> _cargar() async {
     try {
       final dir = await getApplicationSupportDirectory();
       final file = File('${dir.path}/config.pr');
@@ -83,8 +114,6 @@ class Settings {
     } catch (e) {
       // Archivo corrupto/ilegible: se quedan los defaults.
       print('Settings.load error: $e');
-    } finally {
-      _loaded = true;
     }
   }
 
@@ -149,7 +178,7 @@ class Settings {
     }
   }
 
-  Future<void> save() async {
+  Future<void> _guardarAhora() async {
     try {
       final map = {
         'mediaShowUri': mediaShowUri,

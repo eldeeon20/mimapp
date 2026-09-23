@@ -62,20 +62,24 @@ class Indice {
     db.execute('CREATE TABLE IF NOT EXISTS indice('
         'nombre TEXT PRIMARY KEY, sql TEXT, pass TEXT, mld TEXT, '
         'n INTEGER, total INTEGER, fecha INTEGER, sal TEXT, '
-        'hf_repo TEXT, hf_token TEXT, version INTEGER);');
-    // Migración: índices viejos sin columnas HF.
+        'hf_repo TEXT, hf_token TEXT, version INTEGER, '
+        'hash_mld TEXT, hash_sql TEXT, carpeta TEXT);');
+    // Migración: índices viejos sin columnas nuevas.
     final cols = {
       for (final r in db.select('PRAGMA table_info(indice);'))
         '${r['name']}': true
     };
-    if (!cols.containsKey('hf_repo')) {
-      db.execute('ALTER TABLE indice ADD COLUMN hf_repo TEXT;');
-    }
-    if (!cols.containsKey('hf_token')) {
-      db.execute('ALTER TABLE indice ADD COLUMN hf_token TEXT;');
-    }
-    if (!cols.containsKey('version')) {
-      db.execute('ALTER TABLE indice ADD COLUMN version INTEGER;');
+    for (final c in [
+      'hf_repo',
+      'hf_token',
+      'version',
+      'hash_mld',
+      'hash_sql',
+      'carpeta'
+    ]) {
+      if (!cols.containsKey(c)) {
+        db.execute('ALTER TABLE indice ADD COLUMN $c ${c == 'version' ? 'INTEGER' : 'TEXT'};');
+      }
     }
   }
 
@@ -196,8 +200,9 @@ class Indice {
       for (final m in leidas) {
         caja.db.execute(
           'INSERT OR REPLACE INTO indice(nombre, sql, pass, mld, n, '
-          'total, fecha, sal, hf_repo, hf_token, version) '
-          'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);',
+          'total, fecha, sal, hf_repo, hf_token, version, hash_mld, '
+          'hash_sql, carpeta) '
+          'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);',
           [
             m['nombre'],
             m['sql'],
@@ -210,6 +215,9 @@ class Indice {
             m['hf_repo'],
             m['hf_token'],
             m['version'],
+            '',
+            '',
+            '',
           ],
         );
       }
@@ -256,9 +264,14 @@ class Indice {
             'cifrado': 'sql-chacha20',
             // HF: dónde vive remoto (repo_id = dir/user), con qué
             // token entrar y qué versión se subió por última vez.
+            // hash_*: con QUÉ nombre (hash256) vive cada archivo en HF.
+            // carpeta: anidado SOLO del índice ('' = raíz).
             'hf_repo': '${r['hf_repo'] ?? ''}',
             'hf_token': '${r['hf_token'] ?? ''}',
             'version': (r['version'] as int?) ?? 0,
+            'hash_mld': '${r['hash_mld'] ?? ''}',
+            'hash_sql': '${r['hash_sql'] ?? ''}',
+            'carpeta': '${r['carpeta'] ?? ''}',
           }
       ];
     } finally {
@@ -306,6 +319,10 @@ class Indice {
     String hfRepo = '',
     String hfToken = '',
     int version = 0,
+    // null = conserva lo que había (igual que HF con vacío).
+    String? hashMld,
+    String? hashSql,
+    String? carpeta,
   }) async {
     final caja = await _caja(pass);
     try {
@@ -313,21 +330,31 @@ class Indice {
       var repo = hfRepo;
       var tok = hfToken;
       var ver = version;
+      String? hm = hashMld;
+      String? hs = hashSql;
+      String? cp = carpeta;
       try {
         final prev = caja.db.select(
-            'SELECT hf_repo, hf_token, version FROM indice WHERE nombre = ?;',
+            'SELECT hf_repo, hf_token, version, hash_mld, hash_sql, '
+            'carpeta FROM indice WHERE nombre = ?;',
             [nombre]);
-        if (prev.isNotEmpty && hfRepo.isEmpty && hfToken.isEmpty) {
-          repo = '${prev.first['hf_repo'] ?? ''}';
-          tok = '${prev.first['hf_token'] ?? ''}';
-          ver = (prev.first['version'] as int?) ?? 0;
+        if (prev.isNotEmpty) {
+          final p = prev.first;
+          if (hfRepo.isEmpty && hfToken.isEmpty) {
+            repo = '${p['hf_repo'] ?? ''}';
+            tok = '${p['hf_token'] ?? ''}';
+            ver = (p['version'] as int?) ?? 0;
+          }
+          hm ??= '${p['hash_mld'] ?? ''}';
+          hs ??= '${p['hash_sql'] ?? ''}';
+          cp ??= '${p['carpeta'] ?? ''}';
         }
       } catch (_) {}
       caja.db.execute(
         'INSERT OR REPLACE INTO indice'
         '(nombre, sql, pass, mld, n, total, fecha, sal, '
-        'hf_repo, hf_token, version) '
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);',
+        'hf_repo, hf_token, version, hash_mld, hash_sql, carpeta) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);',
         [
           nombre,
           dbRuta,
@@ -340,6 +367,9 @@ class Indice {
           repo,
           tok,
           ver,
+          hm ?? '',
+          hs ?? '',
+          cp ?? '',
         ],
       );
     } finally {
@@ -371,6 +401,70 @@ class Indice {
       hfRepo: hfRepo,
       hfToken: hfToken,
       version: (ent['version'] as int?) ?? 0,
+      hashMld: '${ent['hash_mld'] ?? ''}',
+      hashSql: '${ent['hash_sql'] ?? ''}',
+      carpeta: '${ent['carpeta'] ?? ''}',
+    );
+  }
+
+  /// Guarda los hash256 con que viven .mld/.sql en HF. No toca lo demás.
+  static Future<void> guardarHash({
+    required String pass,
+    required String nombre,
+    required String hashMld,
+    required String hashSql,
+  }) async {
+    final ent = await entrada(pass: pass, nombre: nombre);
+    if (ent == null) {
+      throw StateError('índice: "$nombre" no existe');
+    }
+    await registrar(
+      pass: pass,
+      nombre: nombre,
+      dbRuta: '${ent['db_ruta'] ?? ''}',
+      mldRuta: '${ent['mld_ruta'] ?? ''}',
+      n: (ent['n'] as int?) ?? 0,
+      total: (ent['total'] as int?) ?? 0,
+      sal: '${ent['sal'] ?? ''}',
+      passMolde: '${ent['pass'] ?? ''}',
+      hfRepo: '${ent['hf_repo'] ?? ''}',
+      hfToken: '${ent['hf_token'] ?? ''}',
+      version: (ent['version'] as int?) ?? 0,
+      hashMld: hashMld,
+      hashSql: hashSql,
+    );
+  }
+
+  /// Mueve un molde a otra carpeta DEL ÍNDICE (anidar, solo índice:
+  /// ni SQL ni .mld se tocan). '' = raíz.
+  static Future<void> mover({
+    required String pass,
+    required String nombre,
+    required String carpeta,
+  }) async {
+    final ent = await entrada(pass: pass, nombre: nombre);
+    if (ent == null) {
+      throw StateError('índice: "$nombre" no existe');
+    }
+    final cp = carpeta.trim().replaceAll('\\', '/');
+    if (cp.contains('..')) {
+      throw ArgumentError('índice: carpeta inválida "$carpeta"');
+    }
+    await registrar(
+      pass: pass,
+      nombre: nombre,
+      dbRuta: '${ent['db_ruta'] ?? ''}',
+      mldRuta: '${ent['mld_ruta'] ?? ''}',
+      n: (ent['n'] as int?) ?? 0,
+      total: (ent['total'] as int?) ?? 0,
+      sal: '${ent['sal'] ?? ''}',
+      passMolde: '${ent['pass'] ?? ''}',
+      hfRepo: '${ent['hf_repo'] ?? ''}',
+      hfToken: '${ent['hf_token'] ?? ''}',
+      version: (ent['version'] as int?) ?? 0,
+      hashMld: '${ent['hash_mld'] ?? ''}',
+      hashSql: '${ent['hash_sql'] ?? ''}',
+      carpeta: cp,
     );
   }
 

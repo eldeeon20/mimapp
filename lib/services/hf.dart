@@ -18,6 +18,12 @@ class HuggingFace {
     _client = await rust.hfClientNew(token: token);
   }
 
+  /// SHA-256 hex de un archivo local (streaming en Rust).
+  /// Los uploads a HF se nombran SOLO con el hash (se comprueba).
+  static Future<String> sha256Archivo(String ruta) {
+    return rust.sha256Archivo(ruta: ruta);
+  }
+
   /// Busca modelos de un autor → ids "autor/modelo".
   Future<List<String>> searchModels(
       {required String author, int limit = 10}) async {

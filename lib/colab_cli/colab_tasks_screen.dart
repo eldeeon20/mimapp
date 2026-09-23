@@ -3,9 +3,9 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../services/settings.dart';
 import 'colab_prefabs.dart';
 import 'colab_runtime.dart';
+import 'colab_tareas_sql.dart';
 import 'colab_task_models.dart';
 
 void _copyTxt(BuildContext context, String text) {
@@ -50,14 +50,33 @@ class _ColabTasksScreenState extends State<ColabTasksScreen>
     _runtime =
         ColabRuntime(serverUrl: widget.serverUrl, proxyToken: widget.proxyToken);
     _runtime.onInputRequest = _askInput;
-    final s = Settings.instance;
-    _tasks = s.tasks.map(ColabTask.fromMap).toList();
-    // Pockets que quedaron 'running' de una sesión anterior vuelven a la cola.
-    _pockets = s.pockets.map(ColabPocket.fromMap).toList();
-    for (final p in _pockets) {
-      if (p.status == 'running') p.status = 'pendiente';
-    }
     _connect();
+    // Tareas desde su SQL con pass (pide al abrir). Nada del config.pr.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _abrirStore());
+  }
+
+  /// Abre la SQL de tareas (pide pass si falta) y vuelca a pantalla.
+  /// SOLO SQL: del config.pr no se lee nada.
+  Future<void> _abrirStore() async {
+    final r = await ColabTareasSql.cargar(context);
+    if (!mounted) return;
+    if (r == null) {
+      setState(() {
+        _tasks = [];
+        _pockets = [];
+      });
+      return;
+    }
+    final tasks = r.tasks;
+    final pockets = r.pockets;
+    setState(() {
+      _tasks = tasks;
+      // Pockets que quedaron 'running' de una sesión anterior vuelven a la cola.
+      _pockets = pockets;
+      for (final p in _pockets) {
+        if (p.status == 'running') p.status = 'pendiente';
+      }
+    });
   }
 
   @override
@@ -67,16 +86,15 @@ class _ColabTasksScreenState extends State<ColabTasksScreen>
     super.dispose();
   }
 
-  /// La app se va a fondo / se cierra: guardar YA (best effort). Sin
-  /// esto, cerrar justo después de "guardado" perdía todo porque el
-  /// save() async no había terminado de escribir el config.pr.
+  /// La app se va a fondo / se cierra: guardar YA en la SQL (sin
+  /// pedir pass en fondo: si no hay pass en memoria, se omite; en
+  /// memoria no se pierde nada y el próximo Guardar lo escribe).
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached) {
-      Settings.instance.tasks = _tasks.map((t) => t.toMap()).toList();
-      Settings.instance.pockets = _pockets.map((p) => p.toMap()).toList();
-      Settings.instance.save();
+      if (!mounted) return;
+      ColabTareasSql.guardar(context, _tasks, _pockets, silencioso: true);
     }
   }
 
@@ -104,13 +122,14 @@ class _ColabTasksScreenState extends State<ColabTasksScreen>
     }
   }
 
-  /// Guarda en config.pr. SE ESPERA (await): antes era fuego y olvido
-  /// y el "✓ guardado" salía ANTES de escribir el archivo; cerrar la
-  /// app en ese hueco lo perdía todo (PBKDF2 200k tarda segundos).
-  Future<void> _persist() async {
-    Settings.instance.tasks = _tasks.map((t) => t.toMap()).toList();
-    Settings.instance.pockets = _pockets.map((p) => p.toMap()).toList();
-    await Settings.instance.save();
+  /// Guarda en la SQL de tareas (pide pass si falta, con await: el
+  /// "✓ guardado" sale DESPUÉS de escribir).
+  /// [silencioso]: fondo (cola) → sin pass NO pide, retorna sin
+  /// escribir (en memoria sigue todo; el próximo Guardar lo baja).
+  Future<void> _persist({bool silencioso = false}) async {
+    if (!mounted) return;
+    await ColabTareasSql.guardar(context, _tasks, _pockets,
+        silencioso: silencioso);
   }
 
   ColabTask? _taskById(String id) {
@@ -156,7 +175,7 @@ class _ColabTasksScreenState extends State<ColabTasksScreen>
       }
     }
     next.updatedAt = DateTime.now().millisecondsSinceEpoch;
-    await _persist();
+    await _persist(silencioso: true);
     if (!mounted) return;
     setState(() => _running = false);
     _maybeRunNext(); // termina una, manda la otra (el error no frena)
@@ -208,7 +227,16 @@ class _ColabTasksScreenState extends State<ColabTasksScreen>
     return v;
   }
 
+  /// ¿Es slot CDN? Por FIRMA (5 campos), no por id: las copias y
+  /// las viejas pierden el prefijo y el picker las ignoraba.
+  bool _esSlotCdn(ColabTask t) =>
+      t.id.startsWith('prefab-cdn-hf') ||
+      (t.hasArg && t.campos.length == 5);
+
   /// Resumen para el picker CDN: "3/5 campos · primera línea…".
+  bool _esSlotCdn(ColabTask t) =>
+      t.id.startsWith('prefab-cdn-hf') ||
+      (t.hasArg && t.campos.length == 5);
   String _resumenArg(ColabTask m) {
     final ls =
         m.lastArg.split('\n').where((l) => l.trim().isNotEmpty).toList();
@@ -223,9 +251,23 @@ class _ColabTasksScreenState extends State<ColabTasksScreen>
   /// Con guardadas pregunta CUÁL abrir (o crear nueva). Nada es
   /// automático: abrir no guarda, solo Guardar/Mandar escriben.
   Future<void> _agregarPrefabCdnHf() async {
+    // Tocar CDN pide la pass (si falta) y trae lo guardado si la
+    // pantalla arrancó vacía (canceló al abrir).
+    await ColabTareasSql.asegurar(context);
+    if (!mounted) return;
+    if (_tasks.isEmpty) {
+      final r = await ColabTareasSql.cargar(context);
+      if (!mounted) return;
+      if (r != null && (r.tasks.isNotEmpty || r.pockets.isNotEmpty)) {
+        setState(() {
+          _tasks = r.tasks;
+          _pockets = r.pockets;
+        });
+      }
+    }
     final mias = [
       for (var i = _tasks.length - 1; i >= 0; i--)
-        if (_tasks[i].id.startsWith('prefab-cdn-hf')) _tasks[i]
+        if (_esSlotCdn(_tasks[i])) _tasks[i]
     ];
     if (mias.isNotEmpty) {
       // dynamic: ColabTask = abrirla, 'nueva' = crear, null = cancelar.
@@ -278,7 +320,7 @@ class _ColabTasksScreenState extends State<ColabTasksScreen>
     }
     final t = ColabPrefabs.cdnCifrarHf();
     t.id = 'prefab-cdn-hf-${taskUid()}';
-    t.nombre = 'CDN → HF ${_tasks.where((x) => x.id.startsWith('prefab-cdn-hf')).length + 1}';
+    t.nombre = 'CDN → HF ${_tasks.where(_esSlotCdn).length + 1}';
     setState(() => _tasks.add(t));
     await _persist();
     if (!mounted) return;
@@ -580,7 +622,7 @@ class _ColabTasksScreenState extends State<ColabTasksScreen>
     if (!todoVacio || t.lastArg.trim().isEmpty) {
       t.lastArg = nuevoArg;
       await _persist();
-      // Prueba visible en el celu: si esto sale, quedó en config.pr.
+      // Prueba visible en el celu: si esto sale, quedó en la SQL.
       if (mounted) {
         final n = t.campos.isNotEmpty
             ? ' (${campoVals.where((v) => v.isNotEmpty).length}/${campoVals.length} campos)'
@@ -613,46 +655,17 @@ class _ColabTasksScreenState extends State<ColabTasksScreen>
     }
     // Une las cajas (o el campo único) y confirma antes de mandar.
     // (lastArg ya trae lo guardado explícito de arriba.)
+    // Mandar pregunta UNA sola vez (el diálogo de slots ya es la
+    // confirmación): sin segundo "¿Mandar así?".
     for (final c in campoCtrls) {
       c.dispose();
     }
-    if (t.campos.isNotEmpty) {
-      final ok2 = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('¿Mandar así?'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              for (var i = 0; i < t.campos.length; i++)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
-                  child: Text(
-                    '${i + 1}. ${t.campos[i]}:\n'
-                    '${campoVals[i].isEmpty ? '—' : campoVals[i]}',
-                    style: const TextStyle(fontSize: 12),
-                  ),
-                ),
-            ],
-          ),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Atrás')),
-            FilledButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                child: const Text('Mandar')),
-          ],
-        ),
-      );
-      if (ok2 != true || !mounted) {
-        descartar();
-        return;
-      }
-    }
     // lastArg ya quedó guardado arriba (Guardar/Mandar explícitos);
     // acá solo se manda. Sin doble persist.
+    if (!mounted) {
+      descartar();
+      return;
+    }
     final aMandar = t.lastArg;
     descartar();
     _addPocket(t, aMandar);
@@ -811,6 +824,20 @@ class _ColabTasksScreenState extends State<ColabTasksScreen>
             Tab(child: Text('Pockets (cola)')),
           ]),
           actions: [
+            IconButton(
+              tooltip: 'Olvidar pass de tareas (candado)',
+              onPressed: () {
+                ColabTareasSql.olvidar();
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                        content: Text(
+                            'Pass olvidada: lo próximo la pide de nuevo')),
+                  );
+                }
+              },
+              icon: const Icon(Icons.lock_outline, size: 20),
+            ),
             if (_running)
               IconButton(
                 tooltip: 'Frenar pocket actual',
@@ -896,8 +923,11 @@ class _ColabTasksScreenState extends State<ColabTasksScreen>
       itemCount: _tasks.length,
       itemBuilder: (context, i) {
         final t = _tasks[i];
-        final preview =
-            t.code.trim().split('\n').take(2).join(' ⏎ ');
+        // Con campos (slots): el subtítulo muestra los VALORES
+        // guardados, no el código (el slot se ve en la lista).
+        final preview = t.campos.isNotEmpty
+            ? _resumenArg(t)
+            : t.code.trim().split('\n').take(2).join(' ⏎ ');
         return Card(
           color: const Color(0xFF0B1220),
           margin: const EdgeInsets.only(bottom: 10),
@@ -923,7 +953,7 @@ class _ColabTasksScreenState extends State<ColabTasksScreen>
               ),
               IconButton(
                 tooltip: 'Enviar',
-                onPressed: _connected ? () => _enviar(t) : null,
+                onPressed: () => _enviar(t),
                 icon:
                     const Icon(Icons.send, size: 18, color: Colors.blueAccent),
               ),

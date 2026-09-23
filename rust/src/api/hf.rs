@@ -320,6 +320,29 @@ impl HfClient {
     }
 }
 
+/// SHA-256 hex de un archivo (streaming de a 1MB, no lo carga entero).
+/// Para nombrar uploads por hash: así se comprueba que es ese.
+#[flutter_rust_bridge::frb]
+pub fn sha256_archivo(ruta: String) -> Result<String, String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+    let f = std::fs::File::open(&ruta)
+        .map_err(|e| format!("sha256: no abre {ruta}: {e:?}"))?;
+    let mut h = Sha256::new();
+    let mut buf = [0u8; 1024 * 1024];
+    let mut r = std::io::BufReader::new(f);
+    loop {
+        let n = r
+            .read(&mut buf)
+            .map_err(|e| format!("sha256: lee {ruta}: {e:?}"))?;
+        if n == 0 {
+            break;
+        }
+        h.update(&buf[..n]);
+    }
+    Ok(format!("{:x}", h.finalize()))
+}
+
 /// Baja un RANGO de bytes de un archivo grande (HTTP Range directo).
 /// No requiere cliente inicializado ni login (token opcional).
 #[flutter_rust_bridge::frb]

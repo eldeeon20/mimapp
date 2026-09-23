@@ -53,6 +53,8 @@ class _TestSqlScreenState extends State<TestSqlScreen>
   // Crear molde (clave ÚNICA: abre tu SQL y deriva el molde).
   final _nombreCtrl = TextEditingController();
   final _carpetaCtrl = TextEditingController();
+  // Carpeta DESTINO en el índice (el molde nace anidado ahí).
+  final _carpetaIndiceCtrl = TextEditingController();
   final _claveCtrl = TextEditingController();
   final _tagsCtrl = TextEditingController();
   bool _creando = false;
@@ -389,6 +391,7 @@ class _TestSqlScreenState extends State<TestSqlScreen>
     _captura.cerrar();
     _nombreCtrl.dispose();
     _carpetaCtrl.dispose();
+    _carpetaIndiceCtrl.dispose();
     _claveCtrl.dispose();
     _tagsCtrl.dispose();
     _tagFiltroCtrl.dispose();
@@ -453,6 +456,20 @@ class _TestSqlScreenState extends State<TestSqlScreen>
       );
       _add('✓ molde "$nombre.mld" con $n archivos '
           '(uno solo, primero en 0)');
+      // Carpeta destino en índice (nace anidado; solo índice).
+      final cpIni = _carpetaIndiceCtrl.text.trim();
+      if (cpIni.isNotEmpty) {
+        try {
+          await Indice.mover(
+            pass: await _passIndice(),
+            nombre: nombre,
+            carpeta: cpIni,
+          );
+          _add('✓ "$nombre" → $cpIni (solo índice)');
+        } catch (e) {
+          _add('⚠ no se anidó: $e');
+        }
+      }
       await _refrescarMoldes();
       if (!mounted) return;
       setState(() {
@@ -594,6 +611,7 @@ class _TestSqlScreenState extends State<TestSqlScreen>
   /// + en HF por molde (repo+versión: lo que ya está subido).
   final Map<String, ({String repo, int version})> _hfInfo = {};
   final Map<String, Map<String, Object?>> _entradas = {};
+  final Map<String, String> _carpetaPorMolde = {};
 
   /// Carpetas desde el ÍNDICE cifrado (sin abrir las SQL de moldes).
   /// Con [auto] y un solo molde, lo abre solo.
@@ -621,6 +639,7 @@ class _TestSqlScreenState extends State<TestSqlScreen>
       _passPorMolde.clear();
       _entradas.clear();
       _hfInfo.clear();
+      _carpetaPorMolde.clear();
       for (final m in crudo) {
         final nombre = '${m['nombre'] ?? ''}';
         if (nombre.isEmpty || !vistos.add(nombre)) continue;
@@ -642,6 +661,8 @@ class _TestSqlScreenState extends State<TestSqlScreen>
         final pm = '${m['pass'] ?? ''}';
         if (pm.isNotEmpty) _passPorMolde[nombre] = pm;
         _entradas[nombre] = m;
+        // Carpeta del índice (anidadas solo-índice).
+        _carpetaPorMolde[nombre] = '${m['carpeta'] ?? ''}';
       }
       // SQL vieja compartida: suma los que el índice aún no tiene.
       try {
@@ -696,13 +717,17 @@ class _TestSqlScreenState extends State<TestSqlScreen>
       try {
         var repo = '';
         var token = '';
+        var archivo = '';
         for (final cand in [info.ruta, info.hf]) {
           if (!cand.startsWith('hf://')) continue;
           final resto = cand.substring(5);
           final i = resto.lastIndexOf('/');
           if (i > 0) {
             repo = resto.substring(0, i);
-            _add('· SQL apunta a HF ($repo: sin .mld local)');
+            // El nombre remoto sale de la propia URL (hash nuevo,
+            // nombre legado): no depende del índice.
+            archivo = resto.substring(i + 1);
+            _add('· SQL apunta a HF ($repo/$archivo: sin .mld local)');
             break;
           }
         }
@@ -710,6 +735,10 @@ class _TestSqlScreenState extends State<TestSqlScreen>
             pass: await _passIndice(), nombre: nombre);
         if (repo.isEmpty) repo = '${ent?['hf_repo'] ?? ''}';
         token = '${ent?['hf_token'] ?? ''}';
+        if (archivo.isEmpty) {
+          final hm = '${ent?['hash_mld'] ?? ''}';
+          if (hm.isNotEmpty) archivo = '$hm.mld';
+        }
         if (repo.isNotEmpty && token.isNotEmpty) {
           CreateMoldeSql.remoto =
               (molde, absoluto, largo) => PuenteHf.rangoMld(
@@ -719,6 +748,7 @@ class _TestSqlScreenState extends State<TestSqlScreen>
                     // HTTP Range inclusivo: [absoluto, absoluto+largo).
                     end: absoluto + largo - 1,
                     token: token,
+                    archivo: archivo,
                   );
           _add('· remoto HF listo ($repo: solo lo no cacheado)');
         } else {
@@ -1402,6 +1432,79 @@ class _TestSqlScreenState extends State<TestSqlScreen>
     }
   }
 
+  /// Mover molde a otra carpeta DEL ÍNDICE (anidar, solo índice: ni
+  /// SQL ni .mld se tocan). '' = raíz. Tap en carpeta-molde = abrir.
+  Future<void> _moverMolde(String nombre) async {
+    final actual = _carpetaPorMolde[nombre] ?? '';
+    final exist = <String>{};
+    for (final c in _carpetaPorMolde.values) {
+      final v = c.trim();
+      if (v.isNotEmpty) exist.add(v);
+    }
+    final ctrl = TextEditingController(text: actual);
+    final elegida = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Mover "$nombre" (solo índice)'),
+        content: SizedBox(
+          width: 360,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Carpeta actual:',
+                  style: TextStyle(fontSize: 11, color: Colors.grey)),
+              Text(actual.isEmpty ? '(raíz)' : actual,
+                  style: const TextStyle(fontSize: 13)),
+              const SizedBox(height: 8),
+              TextField(
+                controller: ctrl,
+                decoration: const InputDecoration(
+                    labelText: 'Nueva carpeta (vacío = raíz, ej. a/b)',
+                    border: OutlineInputBorder()),
+                onSubmitted: (_) => Navigator.pop(ctx, ctrl.text.trim()),
+              ),
+              if (exist.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                const Text('Existentes:',
+                    style: TextStyle(fontSize: 11, color: Colors.grey)),
+                for (final e in exist.toList()..sort())
+                  ListTile(
+                    dense: true,
+                    leading: const Icon(Icons.folder_open_rounded, size: 18),
+                    title: Text(e, style: const TextStyle(fontSize: 12)),
+                    onTap: () => Navigator.pop(ctx, e),
+                  ),
+              ],
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancelar')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+              child: const Text('Mover')),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (elegida == null || !mounted) return;
+    try {
+      await Indice.mover(
+        pass: await _passIndice(),
+        nombre: nombre,
+        carpeta: elegida,
+      );
+      _add('✓ "$nombre" → ${elegida.isEmpty ? "(raíz)" : elegida} '
+          '(solo índice)');
+      await _refrescarMoldes();
+    } catch (e) {
+      _add('✗ mover: $e');
+    }
+  }
+
   /// Ruta dentro del molde (explorador). Se limpia al abrir.
   List<String> _rutaExp = const [];
 
@@ -1895,6 +1998,7 @@ class _TestSqlScreenState extends State<TestSqlScreen>
       carpeta: _carpetaCtrl,
       clave: _claveCtrl,
       tags: _tagsCtrl,
+      carpetaIndice: _carpetaIndiceCtrl,
       creando: _creando,
       estado: _crearEstado,
       onElegir: _elegirCarpeta,
@@ -2033,6 +2137,8 @@ class _TestSqlScreenState extends State<TestSqlScreen>
           onAbrir: _abrirMolde,
           onBorrar: _borrarMolde,
           hfInfo: _hfInfo,
+          carpetas: _carpetaPorMolde,
+          onMover: _moverMolde,
         ),
         const Divider(height: 20),
         const Text('HuggingFace (repo + token del molde abierto)',

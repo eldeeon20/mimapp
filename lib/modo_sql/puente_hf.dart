@@ -66,7 +66,10 @@ class PuenteHf {
 
   /// Sube el molde (.mld + su SQL + respaldo del índice) y marca
   /// la versión.
-  /// El SQL que sube apunta al molde de HF (`hf://repo/nombre.mld`,
+  /// En HF viven SOLO con su hash256 (`<sha>.mld`, `<sha>.sql`): el
+  /// alias queda en el índice junto al hash (así se comprueba que es
+  /// ese). Local no cambia de nombre.
+  /// El SQL que sube apunta al molde de HF (`hf://repo/<sha>.mld`,
   /// editado en una COPIA: tu SQL local sigue al .mld local).
   /// El índice viaja como respaldo cifrado (lleva repos+tokens).
   /// Retorna la versión subida (ms actual).
@@ -91,14 +94,17 @@ class PuenteHf {
     await asegurarRepo(repoId: repo, token: token, repoType: repoType);
     final version = DateTime.now().millisecondsSinceEpoch;
     final commit = 'molde $nombre v$version';
+    var hashMld = '';
+    var hashSql = '';
 
     final mldRuta = '${ent['mld_ruta'] ?? ''}';
     if (mldRuta.isNotEmpty && await File(mldRuta).exists()) {
-      log?.call('· subiendo $nombre.mld…');
+      hashMld = await HuggingFace.sha256Archivo(mldRuta);
+      log?.call('· subiendo $nombre.mld como $hashMld.mld…');
       await _hf.uploadFile(
         repoId: repo,
         localFilePath: mldRuta,
-        pathInRepo: '$nombre.mld',
+        pathInRepo: '$hashMld.mld',
         commitMessage: commit,
         repoType: repoType,
       );
@@ -106,6 +112,8 @@ class PuenteHf {
     final dbRuta = '${ent['db_ruta'] ?? ''}';
     if (dbRuta.isNotEmpty && await File(dbRuta).exists()) {
       log?.call('· subiendo $nombre.sql (apuntando a HF)…');
+      final hfMldLocal =
+          hashMld.isNotEmpty ? 'hf://$repo/$hashMld.mld' : '';
       // LOCAL también se actualiza: anota su gemelo en HF (la ruta
       // local queda; `hf` dice dónde está subido).
       try {
@@ -115,7 +123,7 @@ class PuenteHf {
           cajaL.db.execute(
             'UPDATE "${MediaBase.tablaMoldes}" SET hf = ? '
             'WHERE nombre = ?;',
-            ['hf://$repo/$nombre.mld', nombre],
+            [hfMldLocal, nombre],
           );
         } finally {
           cajaL.cerrar();
@@ -124,7 +132,7 @@ class PuenteHf {
         log?.call('⚠ sql local no anotado: $e');
       }
       // Copia con ruta HF: el que baja este SQL ve el molde de HF,
-      // no tu disco. El local ya apunta via `hf` pero conserva ruta.
+      // no tu disco. Nombre remoto = hash256 de la copia ya apuntada.
       final tmp = await Directory.systemTemp.createTemp('hf_sql_up');
       try {
         final dbBase = dbRuta.split('/').last;
@@ -140,15 +148,17 @@ class PuenteHf {
           caja.db.execute(
             'UPDATE "${MediaBase.tablaMoldes}" SET ruta = ?, hf = ? '
             'WHERE nombre = ?;',
-            ['hf://$repo/$nombre.mld', 'hf://$repo/$nombre.mld', nombre],
+            [hfMldLocal, hfMldLocal, nombre],
           );
         } finally {
           caja.cerrar();
         }
+        hashSql = await HuggingFace.sha256Archivo(copia.path);
+        log?.call('· subiendo $nombre.sql como $hashSql.sql…');
         await _hf.uploadFile(
           repoId: repo,
           localFilePath: copia.path,
-          pathInRepo: '$nombre.sql',
+          pathInRepo: '$hashSql.sql',
           commitMessage: commit,
           repoType: repoType,
         );
@@ -157,6 +167,15 @@ class PuenteHf {
           await tmp.delete(recursive: true);
         } catch (_) {}
       }
+    }
+    if (hashMld.isNotEmpty || hashSql.isNotEmpty) {
+      await Indice.guardarHash(
+        pass: passIndice,
+        nombre: nombre,
+        hashMld: hashMld,
+        hashSql: hashSql,
+      );
+      log?.call('· alias "$nombre" → mld $hashMld sql $hashSql');
     }
     await Indice.marcarVersion(
         pass: passIndice, nombre: nombre, version: version);
@@ -212,6 +231,8 @@ class PuenteHf {
   /// Baja la SQL entera del molde si no está local, directo a su
   /// ruta propia (`m_<nombre>.db`, la que `_cajaMolde` sabe abrir),
   /// y deja apuntado el índice (el índice sabe dónde está cada SQL).
+  /// En HF vive por hash (`<sha>.sql`): se verifica al bajar (si no
+  /// coincide, no es ese → error). Sin hash (legado) usa el nombre.
   /// Retorna su path. El .mld NO se baja: se consulta por rangos.
   Future<String> bajarSql({
     required String passIndice,
@@ -238,15 +259,24 @@ class PuenteHf {
     if (repo.isEmpty || token.isEmpty) {
       throw StateError('puente_hf: "$nombre" sin repo/token');
     }
+    final hashSql = '${ent['hash_sql'] ?? ''}';
+    final remoto = hashSql.isNotEmpty ? '$hashSql.sql' : '$nombre.sql';
     await init(token);
     final tmp = await Directory.systemTemp.createTemp('hf_sql');
     try {
       final bajado = await _hf.downloadFile(
         repoId: repo,
-        filename: '$nombre.sql',
+        filename: remoto,
         localDir: tmp.path,
         repoType: repoType,
       );
+      if (hashSql.isNotEmpty) {
+        final got = await HuggingFace.sha256Archivo(bajado);
+        if (got != hashSql) {
+          throw StateError(
+              'puente_hf: "$remoto" no autentica (hash $got ≠ $hashSql)');
+        }
+      }
       await File(bajado).copy(destino);
     } finally {
       try {
@@ -264,6 +294,8 @@ class PuenteHf {
 
   /// Un RANGO de bytes del .mld remoto (el molde se consulta,
   /// no se descarga). Token del molde para repos privados.
+  /// [archivo]: nombre remoto exacto (`<sha>.mld` por hash; vacío =
+  /// legado `$nombre.mld`). El que llama resuelve el hash en el índice.
   static Future<Uint8List> rangoMld({
     required String repo,
     required String nombre,
@@ -271,10 +303,11 @@ class PuenteHf {
     required int end,
     String token = '',
     String repoType = 'dataset',
+    String archivo = '',
   }) {
     return HuggingFace.downloadFileRange(
       repoId: repo,
-      filename: '$nombre.mld',
+      filename: archivo.isNotEmpty ? archivo : '$nombre.mld',
       start: start,
       end: end,
       token: token,
