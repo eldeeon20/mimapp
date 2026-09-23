@@ -15,11 +15,6 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : AudioServiceActivity() {
     private val CANAL = "pr_app/nativo"
 
-    // Puente JNI a Rust (tls_android.rs): inicializa el verificador TLS
-    // de plataforma para los uploads HF. La lib ya la carga FRB; el
-    // loadLibrary es por si este método corre antes.
-    private external fun initRustTls(ctx: Context)
-
     /// Último estado empujado por `:ping` (ver ACCION_ESTADO).
     private val estadoCache = mutableMapOf<String, Any>()
     private var estadoReceiverOn = false
@@ -61,13 +56,6 @@ class MainActivity : AudioServiceActivity() {
     }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Verificador TLS de Rust (hf-hub/reqwest 0.13): init JNI una
-        // sola vez. Sin esto el primer upload a HF paniquea
-        // ("Expect rustls-platform-verifier to be initialized").
-        try {
-            System.loadLibrary("rust_lib_pr_app")
-            initRustTls(this)
-        } catch (_: Throwable) {}
         // Dibujar también en la zona del notch/punch-hole (evita franja negra)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             window.attributes.layoutInDisplayCutoutMode =

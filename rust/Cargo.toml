@@ -42,13 +42,8 @@ tokio-rustls = "0.26"
 nostringer = "0.1.8"
 libcrux-kem = "0.0.7"
 hf-hub = { version = "=1.0.0-rc.1", features = ["blocking"] }
-# hf-hub 1.x → reqwest 0.13.5 usa rustls-platform-verifier 0.7 (rango
-# <0.8): se usa el fork con fallback WebPKI si JNI no inicializó
-# (si no, panic "Expect rustls-platform-verifier to be initialized").
-# Directo + patch: una sola copia 0.7 en todo el árbol.
-rustls-platform-verifier = { git = "https://github.com/eduardo-bertey/rustls-platform-verifier" }
-[target.'cfg(target_os = "android")'.dependencies]
-jni = { version = "0.22", default-features = false }
+# reqwest 0.13 usa rustls-platform-verifier (<0.8): el [patch] de abajo
+# lo cambia por el fork con fallback WebPKI (sin init JNI, como Gtool).
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls", "blocking", "socks"] }
 # --- GPU compute (WebGPU/WGSL nativo, backend Vulkan en Android) ---
 wgpu = "25"
