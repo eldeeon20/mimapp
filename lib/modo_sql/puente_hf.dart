@@ -241,7 +241,23 @@ class PuenteHf {
     String repoType = 'dataset',
   }) async {
     final destino = await CreateMoldeSql.rutaDbPropia(nombre);
-    if (await File(destino).exists()) {
+    // ¿La local TRAE el molde? (un .db vacío/rancio no vale: se baja).
+    final ent0 = await Indice.entrada(pass: passIndice, nombre: nombre);
+    final passMolde = '${ent0?['pass'] ?? ''}';
+    var trae = false;
+    if (await File(destino).exists() && passMolde.isNotEmpty) {
+      try {
+        final caja = CajaSql();
+        await caja.abrirRuta(destino, clave: passMolde);
+        try {
+          trae = caja.uno(MediaBase.tablaMoldes, 'nombre = ?', [nombre]) !=
+              null;
+        } finally {
+          caja.cerrar();
+        }
+      } catch (_) {}
+    }
+    if (trae) {
       await Indice.actualizarRutas(
         pass: passIndice,
         nombre: nombre,

@@ -1387,12 +1387,13 @@ class _TestSqlScreenState extends State<TestSqlScreen>
       setState(() => _claveCtrl.text = pass);
     }
     // Sin SQL local pero con HF: se baja SOLA (por hash, verificada).
-    // Antes se intentaba abrir en local y fallaba sin bajarla (la
-    // ignoraba aunque el índice sabía que estaba subida).
+    // Por CONTENIDO (¿trae el molde?), no por archivo: aperturas
+    // viejas dejan .db locales vacíos que hay que ignorar.
     try {
-      final dbPropia = await CreateMoldeSql.rutaDbPropia(nombre);
-      if (!await File(dbPropia).exists()) {
-        final pi = await _passIndice();
+      final pi = await _passIndice();
+      final info = await CreateMoldeSql.moldeInfo(
+          claveSql: pass, molde: nombre);
+      if (info == null) {
         final ent = await Indice.entrada(pass: pi, nombre: nombre);
         if (ent != null && '${ent['hf_repo'] ?? ''}'.isNotEmpty) {
           _add('· "$nombre" solo en HF: bajando su SQL…');
