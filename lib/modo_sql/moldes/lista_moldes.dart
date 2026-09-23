@@ -159,12 +159,12 @@ class _ListaMoldesState extends State<ListaMoldes> {
   }
 
   Widget _tile(BuildContext context, MoldeInfo m) {
-    final sel = seleccion?.contains(m.nombre) ?? false;
+    final sel = widget.seleccion?.contains(m.nombre) ?? false;
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 4),
       child: ListTile(
         dense: true,
-        leading: seleccion == null
+        leading: widget.seleccion == null
             ? const Icon(Icons.folder_rounded,
                 size: 28, color: Colors.amber)
             : Icon(
@@ -193,16 +193,17 @@ class _ListaMoldesState extends State<ListaMoldes> {
         // Tap = abrir SOLO este molde (no todos los del SQL).
         // En selección: tap marca/desmarca. Long-press inicia selección.
         onTap: () {
-          if (seleccion != null &&
-              seleccion!.isNotEmpty &&
-              onToggleSel != null) {
-            onToggleSel!(m.nombre);
+          if (widget.seleccion != null &&
+              widget.seleccion!.isNotEmpty &&
+              widget.onToggleSel != null) {
+            widget.onToggleSel!(m.nombre);
           } else {
             widget.onAbrir(m.nombre);
           }
         },
-        onLongPress:
-            onToggleSel == null ? null : () => onToggleSel!(m.nombre),
+        onLongPress: widget.onToggleSel == null
+            ? null
+            : () => widget.onToggleSel!(m.nombre),
         trailing: Row(mainAxisSize: MainAxisSize.min, children: [
           if (widget.onMover != null)
             IconButton(
