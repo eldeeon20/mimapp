@@ -131,27 +131,27 @@ abstract final class ColabTareasSql {
       for (final r in caja.listar('tareas', por: 'id')) {
         List<String> campos = const [];
         try {
-          final d = jsonDecode('${r['campos'] ?? '[]}');
+          final d = jsonDecode("${r['campos'] ?? '[]'}");
           if (d is List) campos = [for (final c in d) '$c'];
         } catch (_) {}
         tasks.add(ColabTask(
-          id: '${r['tid'] ?? ''}',
-          nombre: '${r['nombre'] ?? ''}',
-          code: '${r['code'] ?? ''}',
+          id: "${r['tid'] ?? ''}",
+          nombre: "${r['nombre'] ?? ''}",
+          code: "${r['code'] ?? ''}",
           hasArg: (r['hasArg'] as num? ?? 0) != 0,
-          lastArg: '${r['lastArg'] ?? ''}',
-          ayuda: '${r['ayuda'] ?? ''}',
+          lastArg: "${r['lastArg'] ?? ''}",
+          ayuda: "${r['ayuda'] ?? ''}",
           campos: campos,
         ));
       }
       final pockets = <ColabPocket>[];
       for (final r in caja.listar('pockets', por: 'id')) {
         pockets.add(ColabPocket(
-          id: '${r['pid'] ?? ''}',
-          taskId: '${r['taskId'] ?? ''}',
-          argumento: '${r['argumento'] ?? ''}',
-          status: '${r['status'] ?? 'pendiente'}',
-          output: '${r['output'] ?? ''}',
+          id: "${r['pid'] ?? ''}",
+          taskId: "${r['taskId'] ?? ''}",
+          argumento: "${r['argumento'] ?? ''}",
+          status: "${r['status'] ?? 'pendiente'}",
+          output: "${r['output'] ?? ''}",
           updatedAt: (r['updatedAt'] as num?)?.toInt(),
         ));
       }

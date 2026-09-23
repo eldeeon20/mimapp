@@ -132,7 +132,7 @@ class ListaMoldes extends StatelessWidget {
         trailing: Row(mainAxisSize: MainAxisSize.min, children: [
           if (onMover != null)
             IconButton(
-              icon: const Icon(Icons.drive_file_move_outline_rounded,
+              icon: const Icon(Icons.folder_shared,
                   size: 18, color: Colors.lightBlueAccent),
               tooltip: 'Mover de carpeta (solo índice)',
               onPressed: () => onMover!(m.nombre),

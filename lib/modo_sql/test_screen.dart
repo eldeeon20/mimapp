@@ -1433,8 +1433,8 @@ class _TestSqlScreenState extends State<TestSqlScreen>
   }
 
   /// Mover molde a otra carpeta DEL ÍNDICE (anidar, solo índice: ni
-  /// SQL ni .mld se tocan). '' = raíz. Tap en carpeta-molde = abrir.
-  Future<void> _moverMolde(String nombre) async {
+  /// SQL ni .mld se tocan). '' = raíz. (El mover FÍSICO es _moverMolde.)
+  Future<void> _moverMoldeCarpeta(String nombre) async {
     final actual = _carpetaPorMolde[nombre] ?? '';
     final exist = <String>{};
     for (final c in _carpetaPorMolde.values) {
@@ -2138,7 +2138,7 @@ class _TestSqlScreenState extends State<TestSqlScreen>
           onBorrar: _borrarMolde,
           hfInfo: _hfInfo,
           carpetas: _carpetaPorMolde,
-          onMover: _moverMolde,
+          onMover: _moverMoldeCarpeta,
         ),
         const Divider(height: 20),
         const Text('HuggingFace (repo + token del molde abierto)',

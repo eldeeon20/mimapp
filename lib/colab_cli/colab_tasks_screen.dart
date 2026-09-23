@@ -234,9 +234,6 @@ class _ColabTasksScreenState extends State<ColabTasksScreen>
       (t.hasArg && t.campos.length == 5);
 
   /// Resumen para el picker CDN: "3/5 campos · primera línea…".
-  bool _esSlotCdn(ColabTask t) =>
-      t.id.startsWith('prefab-cdn-hf') ||
-      (t.hasArg && t.campos.length == 5);
   String _resumenArg(ColabTask m) {
     final ls =
         m.lastArg.split('\n').where((l) => l.trim().isNotEmpty).toList();
