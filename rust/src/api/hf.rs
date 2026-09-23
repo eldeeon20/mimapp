@@ -22,6 +22,22 @@ fn split_repo(repo_id: &str) -> (String, String) {
     }
 }
 
+/// Xet (uploads/descargas de hf-hub) necesita caché ESCRIBIBLE. En
+/// Android HOME no existe y termina intentando "/" → "Read-only file
+/// system (os error 30)". Dart pasa el dir de soporte de la app y acá
+/// se exporta como HF_XET_CACHE (+ HOME de respaldo, también ausente).
+fn asegurar_cache_xet(cache_dir: &str) {
+    let d = cache_dir.trim();
+    if d.is_empty() {
+        return;
+    }
+    let _ = std::fs::create_dir_all(d);
+    std::env::set_var("HF_XET_CACHE", d);
+    if std::env::var_os("HOME").is_none() {
+        std::env::set_var("HOME", d);
+    }
+}
+
 /// Constructor libre (el codegen expone las clases opacas como abstractas).
 /// Token de acceso HF vacío = anónimo, solo lectura pública.
 #[flutter_rust_bridge::frb]
@@ -49,7 +65,9 @@ impl HfClient {
         path_in_repo: String,
         commit_message: String,
         repo_type: String,
+        cache_dir: String,
     ) -> Result<(), String> {
+        asegurar_cache_xet(&cache_dir);
         let client = self.require()?;
         let (namespace, name) = split_repo(&repo_id);
         let bytes = std::fs::read(&local_file_path)
@@ -89,7 +107,9 @@ impl HfClient {
         filename: String,
         local_dir: String,
         repo_type: String,
+        cache_dir: String,
     ) -> Result<String, String> {
+        asegurar_cache_xet(&cache_dir);
         let client = self.require()?;
         let (namespace, name) = split_repo(&repo_id);
         let dir = PathBuf::from(local_dir);
