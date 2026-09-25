@@ -777,69 +777,9 @@ class CreateMoldeSql {
           null) {
         return false;
       }
-      final vieja = await abrirIndice(claveSql: claveSql);
-      try {
-        final m =
-            vieja.uno(MediaBase.tablaMoldes, 'nombre = ?', [molde]);
-        if (m == null) return false;
-        final filas = vieja.listarDonde(
-          MediaBase.tablaArchivos,
-          'molde = ?',
-          [molde],
-          por: 'inicio',
-        );
-        final sinId = (Map<String, Object?> r) {
-          final c = Map<String, Object?>.from(r);
-          c.remove('id');
-          return c;
-        };
-        final mm = sinId(m);
-        propia.agregar(MediaBase.tablaMoldes, mm);
-        // Al migrar también se cifra el índice viejo en plano.
-        final moldeKey = await Duro.claveMoldeHilo(
-          clave: claveSql,
-          molde: molde,
-          salHex: '${mm['sal'] ?? ''}',
-        );
-        final nuevas = <Map<String, Object?>>[];
-        for (final f in filas) {
-          final c = sinId(f);
-          if ('${c['nombre_c'] ?? ''}'.isNotEmpty) {
-            // Legacy cifrada: se descifra y queda en bruto
-            // (la SQL ya va cifrada entera, sin cifrado manual).
-            final real = await _filaReal(moldeKey, c);
-            c['nombre'] = real['nombre'];
-            c['formato'] = real['formato'];
-            for (var i = 1; i <= MediaBase.maxTags; i++) {
-              c['tag$i'] = real['tag$i'];
-            }
-            c['nombre_c'] = '';
-            c['tags_c'] = '';
-          }
-          nuevas.add(c);
-        }
-        propia.agregarLote(MediaBase.tablaArchivos, nuevas);
-        vieja.quitarDonde(
-            MediaBase.tablaArchivos, 'molde = ?', [molde]);
-        vieja.quitarDonde(
-            MediaBase.tablaMoldes, 'nombre = ?', [molde]);
-        if (passIndice.isNotEmpty) {
-          await Indice.registrar(
-            pass: passIndice,
-            nombre: molde,
-            dbRuta: await rutaDbPropia(molde),
-            mldRuta: '${mm['ruta'] ?? ''}',
-            n: filas.length,
-            total: (mm['total'] as int?) ?? 0,
-            sal: '${mm['sal'] ?? ''}',
-            passMolde: claveSql,
-          );
-        }
-        olvidarMolde(molde);
-        return true;
-      } finally {
-        vieja.cerrar();
-      }
+      // Legado desactivado: la compartida media_server.db solo
+      // demoraba (intentos con clave ajena) y ya no se usa.
+      return false;
     } finally {
       propia.cerrar();
     }

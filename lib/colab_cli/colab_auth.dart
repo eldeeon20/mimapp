@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'colab_config.dart';
+import 'colab_cuentas_sql.dart';
 
 /// Datos de sesión OAuth2 persistidos.
 class ColabTokens {
@@ -219,37 +220,52 @@ class ColabAuth {
     };
   }
 
-  /// Carga tokens desde disco (si existen).
+  /// Carga tokens desde la SQL de la cuenta (ya no hay JSON).
   Future<bool> loadTokens() async {
+    return cargarGuardados();
+  }
+
+  /// Carga los tokens guardados en la SQL (si no están en memoria).
+  Future<bool> cargarGuardados() async {
+    if (_tokens != null) return true;
+    final m = await CuentasColab.leer();
+    if (m == null) return false;
+    final access = '${m['access'] ?? ''}';
+    final refresh = '${m['refresh'] ?? ''}';
+    if (access.isEmpty || refresh.isEmpty) return false;
     try {
-      final file = File('${await _configDir}/colab_tokens.json');
-      if (!await file.exists()) return false;
-      final data = jsonDecode(await file.readAsString());
-      _tokens = ColabTokens.fromJson(data);
+      _tokens = ColabTokens(
+        accessToken: access,
+        refreshToken: refresh,
+        expiry: DateTime.parse('${m['expiry']}'),
+        scopes: List<String>.from(m['scopes'] ?? []),
+      );
       return true;
     } catch (_) {
       return false;
     }
   }
 
-  /// Guarda tokens en disco.
+  /// Guarda los tokens en la SQL de la cuenta (ya no hay JSON).
   Future<void> _saveTokens() async {
-    if (_tokens == null) return;
-    final dir = Directory(await _configDir);
-    if (!dir.existsSync()) dir.createSync(recursive: true);
-    final file = File('${dir.path}/colab_tokens.json');
-    await file.writeAsString(jsonEncode(_tokens!.toJson()));
+    await guardarAcceso();
   }
 
-  /// Borra tokens (logout).
+  /// Guarda el acceso actual en la SQL.
+  Future<void> guardarAcceso() async {
+    final t = _tokens;
+    if (t == null) return;
+    await CuentasColab.guardar(
+      access: t.accessToken,
+      refresh: t.refreshToken,
+      expiry: t.expiry.toIso8601String(),
+    );
+  }
+
+  /// Borra la sesión (tokens de la SQL). Las llaves quedan: volver a
+  /// entrar es tocar "Iniciar sesión" y nada más.
   Future<void> logout() async {
     _tokens = null;
-    final file = File('${await _configDir}/colab_tokens.json');
-    if (await file.exists()) await file.delete();
-  }
-
-  Future<String> get _configDir async {
-    final appDir = await getApplicationSupportDirectory();
-    return '${appDir.path}/colab';
+    await CuentasColab.olvidarTokens();
   }
 }

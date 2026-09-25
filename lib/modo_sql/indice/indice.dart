@@ -64,6 +64,9 @@ class Indice {
         'n INTEGER, total INTEGER, fecha INTEGER, sal TEXT, '
         'hf_repo TEXT, hf_token TEXT, version INTEGER, '
         'hash_mld TEXT, hash_sql TEXT, carpeta TEXT);');
+    // Repo+token PROPIOS del índice (aparte de los moldes). Una sola fila.
+    db.execute(
+        'CREATE TABLE IF NOT EXISTS indice_hf(repo TEXT, token TEXT);');
     // Migración: índices viejos sin columnas nuevas.
     final cols = {
       for (final r in db.select('PRAGMA table_info(indice);'))
@@ -405,6 +408,41 @@ class Indice {
       hashSql: '${ent['hash_sql'] ?? ''}',
       carpeta: '${ent['carpeta'] ?? ''}',
     );
+  }
+
+  /// Guarda el repo+token PROPIOS del índice (aparte de los moldes).
+  /// No toca ningún molde: es para subir el índice solo, sin mezclar.
+  static Future<void> guardarHfIndice({
+    required String pass,
+    required String hfRepo,
+    required String hfToken,
+  }) async {
+    final caja = await _caja(pass);
+    try {
+      _tabla(caja.db);
+      caja.db.execute('DELETE FROM indice_hf;');
+      caja.db.execute('INSERT INTO indice_hf(repo, token) VALUES (?, ?);',
+          [hfRepo, hfToken]);
+    } finally {
+      caja.cerrar();
+    }
+  }
+
+  /// Repo+token propios del índice ('' si no se guardaron).
+  static Future<({String repo, String token})> hfIndice(String pass) async {
+    final caja = await _caja(pass);
+    try {
+      _tabla(caja.db);
+      final r =
+          caja.db.select('SELECT repo, token FROM indice_hf LIMIT 1;');
+      if (r.isEmpty) return (repo: '', token: '');
+      return (
+        repo: '${r.first['repo'] ?? ''}',
+        token: '${r.first['token'] ?? ''}'
+      );
+    } finally {
+      caja.cerrar();
+    }
   }
 
   /// Guarda los hash256 con que viven .mld/.sql en HF. No toca lo demás.

@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'colab_auth.dart';
 import 'colab_cells_screen.dart';
 import 'colab_config.dart';
+import 'colab_cuentas_sql.dart';
 import 'colab_keep_alive.dart';
 import 'colab_sessions.dart';
 import 'colab_tasks_screen.dart';
@@ -22,6 +23,11 @@ Future<void> showColabDialog(BuildContext context) async {
   final sessions = ColabSessions(auth);
 
   await auth.loadTokens();
+  // Las llaves que se guardaron en "agregar llaves" vuelven solas a
+  // Settings (en memoria): no hay que pegarlas de nuevo.
+  await CuentasColab.restaurarLlaves();
+  // Los tokens de la SQL entran al auth si el JSON no los trajo.
+  await auth.cargarGuardados();
 
   if (!context.mounted) return;
 
@@ -214,12 +220,18 @@ class _ColabDialogBodyState extends State<_ColabDialogBody> {
   }
 
   /// Editor manual de llaves OAuth (Client ID + Client Secret propios).
-  /// Vacío = usar las embebidas. Se guardan cifradas en Settings.
+  /// Vacío = usar las embebidas. Se guardan cifradas en Settings Y en la
+  /// SQL de la cuenta (app.db con la pass global), para no pegarlas más.
   Future<void> _showKeysDialog() async {
-    final idCtrl =
-        TextEditingController(text: ColabConfig.customClientId);
-    final secCtrl =
-        TextEditingController(text: ColabConfig.customClientSecret);
+    final guardadas = await CuentasColab.leer();
+    final idCtrl = TextEditingController(
+        text: ColabConfig.customClientId.isNotEmpty
+            ? ColabConfig.customClientId
+            : '${guardadas?['client_id'] ?? ''}');
+    final secCtrl = TextEditingController(
+        text: ColabConfig.customClientSecret.isNotEmpty
+            ? ColabConfig.customClientSecret
+            : '${guardadas?['client_secret'] ?? ''}');
     final saved = await showDialog<bool>(
       context: context,
       builder: (dctx) => AlertDialog(
@@ -266,6 +278,7 @@ class _ColabDialogBodyState extends State<_ColabDialogBody> {
               Settings.instance.colabClientId = '';
               Settings.instance.colabClientSecret = '';
               await Settings.instance.save();
+              await CuentasColab.olvidar();
               if (dctx.mounted) Navigator.pop(dctx, true);
             },
             child: const Text('Restablecer'),
@@ -275,6 +288,11 @@ class _ColabDialogBodyState extends State<_ColabDialogBody> {
               Settings.instance.colabClientId = idCtrl.text.trim();
               Settings.instance.colabClientSecret = secCtrl.text.trim();
               await Settings.instance.save();
+              // A la SQL de la cuenta: la próxima vez ya están puestas.
+              await CuentasColab.guardar(
+                clientId: idCtrl.text.trim(),
+                clientSecret: secCtrl.text.trim(),
+              );
               if (dctx.mounted) Navigator.pop(dctx, true);
             },
             child: const Text('Guardar'),

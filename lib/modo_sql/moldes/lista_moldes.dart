@@ -36,6 +36,10 @@ class ListaMoldes extends StatefulWidget {
   final Set<String>? seleccion;
   final void Function(String nombre)? onToggleSel;
 
+  /// Marcar/desmarcar todo lo de una carpeta (null = sin checks en carpetas).
+  /// Le pasan los moldes de adentro (con todo lo anidado) y decide qué hacer.
+  final void Function(List<String> dentro)? onToggleCarpeta;
+
   const ListaMoldes({
     super.key,
     required this.moldes,
@@ -51,6 +55,7 @@ class ListaMoldes extends StatefulWidget {
     this.onHf,
     this.seleccion,
     this.onToggleSel,
+    this.onToggleCarpeta,
   });
 
   @override
@@ -107,23 +112,7 @@ class _ListaMoldesState extends State<ListaMoldes> {
                 style: TextStyle(fontSize: 12, color: Colors.grey)),
           ),
         for (final s in subs)
-          Card(
-            margin:
-                const EdgeInsets.symmetric(vertical: 4, horizontal: 0),
-            child: ListTile(
-              dense: true,
-              leading: const Icon(Icons.folder_rounded,
-                  size: 28, color: Colors.amber),
-              title: Text(s,
-                  style: const TextStyle(
-                      fontSize: 13, fontWeight: FontWeight.bold)),
-              subtitle: Text('${_cuantos(s)} molde(s)',
-                  style: const TextStyle(fontSize: 10)),
-              trailing: const Icon(Icons.chevron_right_rounded, size: 20),
-              onTap: () => setState(() => _vista =
-                  vista.isEmpty ? s : '$vista/$s'),
-            ),
-          ),
+          _tileCarpeta(vista, s),
         for (final m in mios) _tile(context, m),
       ],
     );
@@ -154,6 +143,17 @@ class _ListaMoldesState extends State<ListaMoldes> {
     return i < 0 ? '' : vista.substring(0, i);
   }
 
+  /// Nombres de los moldes dentro de una subcarpeta (con todo lo anidado).
+  List<String> _dentro(String sub) {
+    final base = _vista.isEmpty ? sub : '$_vista/$sub';
+    return [
+      for (final m in widget.moldes)
+        if (_carpetaDe(m.nombre) == base ||
+            _carpetaDe(m.nombre).startsWith('$base/'))
+          m.nombre
+    ];
+  }
+
   int _cuantos(String sub) {
     final base = _vista.isEmpty ? sub : '$_vista/$sub';
     var n = 0;
@@ -162,6 +162,61 @@ class _ListaMoldesState extends State<ListaMoldes> {
       if (c == base || c.startsWith('$base/')) n++;
     }
     return n;
+  }
+
+  /// Fila de carpeta: tap entra, y con checks activos el check marca o
+  /// desmarca todo lo de adentro (con lo anidado). Long-press también
+  /// marca/desmarca, igual que en los moldes.
+  Widget _tileCarpeta(String vista, String s) {
+    final conChecks =
+        widget.seleccion != null && widget.onToggleCarpeta != null;
+    final dentro = conChecks ? _dentro(s) : const <String>[];
+    final marcados =
+        conChecks ? dentro.where(widget.seleccion!.contains).length : 0;
+    final todos = dentro.isNotEmpty && marcados == dentro.length;
+    final algunos = marcados > 0 && !todos;
+
+    void alternar() {
+      if (dentro.isEmpty) return;
+      widget.onToggleCarpeta!(dentro);
+    }
+
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 0),
+      child: ListTile(
+        dense: true,
+        leading: conChecks
+            ? IconButton(
+                icon: Icon(
+                  todos
+                      ? Icons.check_box_rounded
+                      : (algunos
+                          ? Icons.indeterminate_check_box_rounded
+                          : Icons.check_box_outline_blank_rounded),
+                  size: 28,
+                  color: todos || algunos
+                      ? Colors.lightBlueAccent
+                      : Colors.grey,
+                ),
+                tooltip: todos ? 'Desmarcar todo' : 'Marcar todo',
+                onPressed: alternar,
+              )
+            : const Icon(Icons.folder_rounded,
+                size: 28, color: Colors.amber),
+        title: Text(s,
+            style:
+                const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+        subtitle: Text(
+            '${_cuantos(s)} molde(s)'
+            '${conChecks && marcados > 0 ? ' · $marcados check' : ''}',
+            style: const TextStyle(fontSize: 10)),
+        trailing: const Icon(Icons.chevron_right_rounded, size: 20),
+        selected: todos || algunos,
+        onTap: () => setState(() => _vista =
+            vista.isEmpty ? s : '$vista/$s'),
+        onLongPress: conChecks ? alternar : null,
+      ),
+    );
   }
 
   Widget _tile(BuildContext context, MoldeInfo m) {

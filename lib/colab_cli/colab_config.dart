@@ -8,8 +8,7 @@ import '../services/settings.dart';
 class ColabConfig {
   ColabConfig._();
 
-  static const _embeddedClientId =
-      '';
+  static const _embeddedClientId = '';
   static const _embeddedClientSecret = '';
 
   /// Llaves manuales del usuario (vacío = no hay).

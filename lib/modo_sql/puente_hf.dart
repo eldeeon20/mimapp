@@ -78,6 +78,7 @@ class PuenteHf {
     required String claveSql,
     required String nombre,
     String repoType = 'dataset',
+    bool conIndice = true,
     void Function(String s)? log,
   }) async {
     final ent =
@@ -183,7 +184,10 @@ class PuenteHf {
     // Respaldo del índice (cifrado con tu clave: repos+tokens).
     // En la copia que sube, este molde apunta al repo:
     // sql → `$nombre.sql`, mld → `hf://repo/nombre.mld`.
-    // El índice local no se toca.
+    // El índice local no se toca. Con conIndice=false no sube.
+    if (!conIndice) {
+      log?.call('· índice aparte: este molde sube SIN índice');
+    } else
     try {
       final carpeta = await MediaBase.carpetaMoldes();
       final idx = File('${carpeta.path}/${Indice.archivo}');
@@ -381,6 +385,7 @@ class PuenteHf {
     required String claveSql,
     required List<String> nombres,
     String repoType = 'dataset',
+    bool conIndice = true,
     void Function(String s)? log,
   }) async {
     var subidos = 0;
@@ -431,6 +436,7 @@ class PuenteHf {
           claveSql: claveSql,
           nombre: nombre,
           repoType: repoType,
+          conIndice: conIndice,
           log: log,
         );
         subidos++;
