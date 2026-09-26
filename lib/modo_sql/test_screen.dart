@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:pr_app/services/app_db.dart';
 
 import 'admin/panel_admin.dart';
 import 'preview/dialogo_video.dart';import 'app/claves_app.dart';
@@ -268,18 +269,16 @@ class _TestSqlScreenState extends State<TestSqlScreen>
   /// Caché de previas en disco (no re-abrir originales).
   PreviaCache? _previaCache;
 
-  /// Ajustes: topes de caché (viven en ajustes_modo.json).
+  /// Ajustes: topes de caché (viven en app.db, clave `ajustes_modo`).
   /// Previas 50MB..8GB, trozos por molde 1MB..memoria libre,
   /// global avisa si el total lo alcanza.
+  /// El viejo `ajustes_modo.json` no importa: se borra sin migrar.
   int _limiteTrozosKb = 512;
   int _limitePreviasMb = 256;
   int _limiteGlobalMb = 1024;
   int _memLibreMb = 2048;
 
-  Future<File> _ajustesFile() async {
-    final dir = await getApplicationSupportDirectory();
-    return File('${dir.path}/ajustes_modo.json');
-  }
+  static const _kAjustesModo = 'ajustes_modo';
 
   /// Memoria libre (MB) para topar sliders. /proc en Android.
   Future<int> _memLibre() async {
@@ -297,11 +296,13 @@ class _TestSqlScreenState extends State<TestSqlScreen>
 
   Future<void> _cargarAjustes() async {
     _memLibreMb = await _memLibre();
+    // El json viejo no importa: se borra, app.db manda con defaults.
+    await AppDb.tachar('ajustes_modo.json');
     try {
-      final f = await _ajustesFile();
-      if (await f.exists()) {
+      final raw = await AppDb.leer(_kAjustesModo);
+      if (raw != null) {
         final m =
-            jsonDecode(await f.readAsString()) as Map<String, dynamic>;
+            jsonDecode(utf8.decode(raw)) as Map<String, dynamic>;
         _limiteTrozosKb =
             ((m['trozosKb'] as num?)?.toInt() ?? 512).clamp(1024, 1 << 30);
         _limitePreviasMb =
@@ -322,14 +323,13 @@ class _TestSqlScreenState extends State<TestSqlScreen>
 
   Future<void> _guardarAjustes() async {
     try {
-      final f = await _ajustesFile();
-      await f.writeAsString(
-        jsonEncode({
+      await AppDb.guardar(
+        _kAjustesModo,
+        Uint8List.fromList(utf8.encode(jsonEncode({
           'trozosKb': _limiteTrozosKb,
           'previasMb': _limitePreviasMb,
           'globalMb': _limiteGlobalMb,
-        }),
-        flush: true,
+        }))),
       );
     } catch (_) {}
   }
@@ -379,6 +379,10 @@ class _TestSqlScreenState extends State<TestSqlScreen>
   final _hfSqlCtrl = TextEditingController();
   final _puenteHf = PuenteHf();
   bool _hfOcupado = false;
+
+  /// HF: si va con tilde, subir molde(s) sube el índice junto
+  /// (respaldo en el repo del molde). Sin tilde, no sube.
+  bool _hfConIndice = true;
 
   @override
   void dispose() {
@@ -2038,6 +2042,7 @@ class _TestSqlScreenState extends State<TestSqlScreen>
         passIndice: await _passIndice(),
         claveSql: _clave,
         nombres: _selSubir.toList(),
+        conIndice: _hfConIndice,
         log: _add,
       );
       _add('✓ subida selección: ${r.subidos} subido(s), '
@@ -2204,7 +2209,8 @@ class _TestSqlScreenState extends State<TestSqlScreen>
     );
   }
 
-  /// HF: sube .mld + SQL + indice.db del molde abierto.
+  /// HF: sube .mld + SQL del molde abierto (+ índice solo si el
+  /// check "Subir índice junto" está puesto).
   Future<void> _hfSubir() async {
     if (_hfOcupado) return;
     final m = _infoAbierta?.nombre;
@@ -2218,6 +2224,7 @@ class _TestSqlScreenState extends State<TestSqlScreen>
         passIndice: await _passIndice(),
         claveSql: _clave,
         nombre: m,
+        conIndice: _hfConIndice,
         log: _add,
       );
       if (mounted) setState(() {});
@@ -2249,6 +2256,122 @@ class _TestSqlScreenState extends State<TestSqlScreen>
       }
     } catch (e) {
       _add('✗ HF bajar SQL: $e');
+    } finally {
+      if (mounted) setState(() => _hfOcupado = false);
+    }
+  }
+
+  /// Índice: guarda SU repo+token propios (aparte de los moldes)
+  /// con lo que dicen los campos repo/token. Ese es "el repo que
+  /// digo yo" para subir/bajar el índice solo.
+  Future<void> _hfGuardarIndice() async {
+    final repo = _hfRepoCtrl.text.trim();
+    final tok = _hfTokenCtrl.text.trim();
+    if (repo.isEmpty || tok.isEmpty) {
+      _add('· poné repo y token primero');
+      return;
+    }
+    try {
+      await Indice.guardarHfIndice(
+        pass: await _passIndice(),
+        hfRepo: repo,
+        hfToken: tok,
+      );
+      _add('✓ HF del ÍNDICE guardado ($repo)');
+    } catch (e) {
+      _add('✗ HF índice guardar: $e');
+    }
+  }
+
+  /// (a) Sube SOLO el índice al repo guardado con "Guardar HF índice".
+  Future<void> _hfSubirIndice() async {
+    if (_hfOcupado) return;
+    setState(() => _hfOcupado = true);
+    try {
+      final pass = await _passIndice();
+      final propio = await Indice.hfIndice(pass);
+      await _puenteHf.subirIndice(
+        passIndice: pass,
+        repo: propio.repo,
+        token: propio.token,
+        log: _add,
+      );
+      if (mounted) setState(() {});
+    } catch (e) {
+      _add('✗ HF subir índice: $e');
+    } finally {
+      if (mounted) setState(() => _hfOcupado = false);
+    }
+  }
+
+  /// (b) Baja SOLO el índice del repo que digas (diálogo, prellena
+  /// con el guardado; token vacío = público). Reemplaza el local con
+  /// respaldo; el bajado abre con SU clave, no con la tuya.
+  Future<void> _hfBajarIndice() async {
+    if (_hfOcupado) return;
+    var propio = (repo: '', token: '');
+    try {
+      propio = await Indice.hfIndice(await _passIndice());
+    } catch (_) {}
+    final repoCtrl = TextEditingController(text: propio.repo);
+    final tokCtrl = TextEditingController(text: propio.token);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Bajar índice'),
+        content: SizedBox(
+          width: 360,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: repoCtrl,
+                decoration: const InputDecoration(
+                    labelText: 'repo dir/user del ÍNDICE',
+                    border: OutlineInputBorder()),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: tokCtrl,
+                obscureText: true,
+                decoration: const InputDecoration(
+                    labelText: 'token (vacío = público)',
+                    border: OutlineInputBorder()),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                  'Reemplaza tu índice local (se respalda como .bak). '
+                  'El bajado abre con SU clave, no con la tuya.',
+                  style: TextStyle(fontSize: 12)),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Bajar')),
+        ],
+      ),
+    );
+    final repo = repoCtrl.text.trim();
+    final tok = tokCtrl.text.trim();
+    repoCtrl.dispose();
+    tokCtrl.dispose();
+    if (ok != true || !mounted) return;
+    setState(() => _hfOcupado = true);
+    try {
+      await _puenteHf.bajarIndice(repo: repo, token: tok, log: _add);
+      try {
+        await _refrescarMoldes();
+      } catch (e) {
+        _add('· el índice nuevo pide SU clave: $e');
+      }
+      if (mounted) setState(() {});
+    } catch (e) {
+      _add('✗ HF bajar índice: $e');
     } finally {
       if (mounted) setState(() => _hfOcupado = false);
     }
@@ -2407,6 +2530,15 @@ class _TestSqlScreenState extends State<TestSqlScreen>
         campoTexto(_hfTokenCtrl, 'token HF (write para subir)',
             oculto: true),
         const SizedBox(height: 6),
+        CheckboxListTile(
+          dense: true,
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Subir índice junto al molde',
+              style: TextStyle(fontSize: 12)),
+          value: _hfConIndice,
+          onChanged: (v) =>
+              setState(() => _hfConIndice = v ?? true),
+        ),
         Wrap(spacing: 8, children: [
           FilledButton.tonalIcon(
             onPressed: _hfOcupado ? null : _hfGuardar,
@@ -2422,6 +2554,21 @@ class _TestSqlScreenState extends State<TestSqlScreen>
             onPressed: _hfOcupado ? null : _hfBajarSql,
             icon: const Icon(Icons.cloud_download_rounded, size: 18),
             label: const Text('Bajar SQL'),
+          ),
+          FilledButton.tonalIcon(
+            onPressed: _hfOcupado ? null : _hfGuardarIndice,
+            icon: const Icon(Icons.save_rounded, size: 18),
+            label: const Text('Guardar HF índice'),
+          ),
+          FilledButton.tonalIcon(
+            onPressed: _hfOcupado ? null : _hfSubirIndice,
+            icon: const Icon(Icons.cloud_upload_rounded, size: 18),
+            label: const Text('Subir índice'),
+          ),
+          FilledButton.tonalIcon(
+            onPressed: _hfOcupado ? null : _hfBajarIndice,
+            icon: const Icon(Icons.cloud_download_rounded, size: 18),
+            label: const Text('Bajar índice'),
           ),
         ]),
         const SizedBox(height: 6),

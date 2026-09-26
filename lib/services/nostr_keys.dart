@@ -38,7 +38,7 @@ class NostrKeys {
   Future<String> pubkeyHexFromSecret(Uint8List secret) =>
       rust.nostrPubkeyHexFromSecret(secret: secret);
 
-  // ---------------- Identidades guardadas (cifrado en config.pr) --------
+  // ---------------- Identidades guardadas (cifrado en app.db) --------
 
   /// Genera identidad nueva con nombre; retorna {npub, nsec}.
   Future<Map<String, String>> createIdentity(String nombre, {String? seed}) async {

@@ -17,7 +17,7 @@ class GrupoCache {
 }
 
 /// Almacén: check de memoria (Kotlin) + tamaños por grupo + limpieza
-/// en dos modos: Datos (db/pr) y Descargados (modelos, descargas,
+/// en dos modos: Datos (db) y Descargados (modelos, descargas,
 /// torrents). Todo best-effort, sin romper si algo falta.
 class Almacen {
   Almacen._();
@@ -79,7 +79,9 @@ class Almacen {
     return i < 0 ? ruta : ruta.substring(i + 1);
   }
 
-  /// Modo 1 · Datos: db/*.db + *.pr SALVO config.pr (ajustes, jamás).
+  /// Modo 1 · Datos: db/*.db de appSupport (los .pr ya no existen:
+  /// todo vive en app.db; las agendas son archivos del usuario en
+  /// Download y no se tocan).
   static Future<GrupoCache> grupoDatos() async {
     final baseDir = await soporte();
     final archivos = <String>[];
@@ -92,13 +94,6 @@ class Almacen {
           }
         }
       }
-      await for (final e in Directory(baseDir).list()) {
-        if (e is File &&
-            e.path.endsWith('.pr') &&
-            !e.path.endsWith('/config.pr')) {
-          archivos.add(e.path);
-        }
-      }
     } catch (_) {}
     var total = 0;
     for (final f in archivos) {
@@ -107,7 +102,7 @@ class Almacen {
       } catch (_) {}
     }
     archivos.sort();
-    return GrupoCache('Datos (db/pr)', archivos, total);
+    return GrupoCache('Datos (db)', archivos, total);
   }
 
   /// Modo 2 · Descargados: modelos (needle), descargas HTTP, descargas

@@ -1,17 +1,17 @@
 import 'dart:convert';
-import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:path_provider/path_provider.dart';
-
+import '../services/app_db.dart';
 import '../toolsec/toolsec.dart';
 
 /// Biblioteca del reproductor: historial + favoritos + listas + grupos.
 ///
-/// Persistencia cifrada en ARCHIVO PROPIO (`appSupport/media_library.pr`),
+/// Persistencia cifrada en `app.db` (clave `media_library`),
 /// esquema fuerte V2 (AES-256-GCM + PBKDF2) vía ToolSec.processBytesStrong.
 /// Las claves nuevas (playlists/groups) son opcionales al leer: un archivo
 /// viejo carga igual (listas y grupos vacíos).
+///
+/// El viejo `media_library.pr` no importa: se borra sin migrar.
 ///
 /// - Historial: últimas reproducciones (más reciente primero).
 /// - Favoritos: marcados con la estrella.
@@ -22,7 +22,10 @@ class MediaLibraryStore {
 
   MediaLibraryStore._();
 
-  static const int maxHistory = 200;
+  static const int maxHistory = 20000;
+  static const _kv = 'media_library';
+
+  /// Nombre del archivo viejo (solo migración, después se borra).
   static const _fileName = 'media_library.pr';
 
   final List<Map<String, String>> _history = [];
@@ -51,18 +54,14 @@ class MediaLibraryStore {
   bool isFavorite(String path) =>
       _favorites.any((e) => e['uri'] == path);
 
-  Future<File> _file() async {
-    final dir = await getApplicationSupportDirectory();
-    return File('${dir.path}/$_fileName');
-  }
-
   Future<void> load() async {
     if (_loaded) return;
     _loaded = true;
+    // El .pr no importa: se borra, app.db manda.
+    await AppDb.tachar(_fileName);
     try {
-      final file = await _file();
-      if (!await file.exists()) return;
-      final enc = await file.readAsBytes();
+      final enc = await AppDb.leer(_kv);
+      if (enc == null) return;
       final plain = await ToolSec('media_library').processBytesAuto(enc);
       if (plain == null) return;
       final map = jsonDecode(utf8.decode(plain)) as Map<String, dynamic>;
@@ -103,8 +102,7 @@ class MediaLibraryStore {
       }));
       final enc = await ToolSec('media_library')
           .processBytesStrong(Uint8List.fromList(plain));
-      final file = await _file();
-      await file.writeAsBytes(enc);
+      await AppDb.guardar(_kv, enc);
     } catch (e) {
       print('MediaLibraryStore.persist error: $e');
     }

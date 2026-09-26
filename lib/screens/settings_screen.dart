@@ -7,7 +7,7 @@ import 'tor_test_screen.dart';
 /// Menú de Configuración.
 ///
 /// Única entrada funcional: "Mostrar URI en media" (persistida cifrada en
-/// `config.pr`). El resto son placeholders sin lógica (la estructura queda
+/// `app.db`). El resto son placeholders sin lógica (la estructura queda
 /// lista para enlazar después).
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -81,7 +81,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             leading: const Icon(Icons.lock),
             title: const Text('Clave de cifrado'),
             subtitle: Text(
-                'Los datos se guardan en config.pr cifrados con: ${s.masterKey}'),
+                'Los datos se guardan en app.db cifrados con: ${s.masterKey}'),
             enabled: false,
           ),
         ],

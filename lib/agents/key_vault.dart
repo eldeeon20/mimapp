@@ -1,20 +1,26 @@
 import 'dart:convert';
-import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
-import 'package:path_provider/path_provider.dart';
 
+import '../services/app_db.dart';
 import '../services/crypto_vault.dart';
 import '../services/settings.dart';
 import 'provider_registry.dart';
 
 /// Caja fuerte de API keys estilo FilosoIA: N keys por proveedor,
-/// cifradas con CryptoVault (PRBX AES-GCM) en appSupport/filosoia_keys.pr.
+/// cifradas con CryptoVault (PRBX AES-GCM) en `app.db` (clave
+/// `filosoia_keys`).
 /// Rotación round-robin; ante 401/403 se marca la key mala y rota.
+///
+/// El viejo `filosoia_keys.pr` no importa: se borra sin migrar.
 class KeyVault extends ChangeNotifier {
   KeyVault._();
   static final KeyVault instance = KeyVault._();
 
+  static const _kv = 'filosoia_keys';
+
+  /// Nombre del archivo viejo (solo migración, después se borra).
   static const _fileName = 'filosoia_keys.pr';
 
   /// providerId -> lista de keys (en memoria apenas; en disco cifradas).
@@ -26,20 +32,16 @@ class KeyVault extends ChangeNotifier {
 
   bool get loaded => _loaded;
 
-  Future<File> _file() async {
-    final dir = await getApplicationSupportDirectory();
-    return File('${dir.path}/$_fileName');
-  }
-
   Future<void> load() async {
     if (_loaded) return;
     _loaded = true;
+    // El .pr no importa: se borra, app.db manda.
+    await AppDb.tachar(_fileName);
     try {
-      final f = await _file();
-      if (!f.existsSync()) return;
-      final raw = await f.readAsBytes();
+      final raw = await AppDb.leer(_kv);
+      if (raw == null) return;
       final plain = await CryptoVault.decrypt(
-          Uint8List.fromList(raw), Settings.instance.masterKey);
+          raw, Settings.instance.masterKey);
       if (plain == null) return;
       final map = jsonDecode(utf8.decode(plain)) as Map<String, dynamic>;
       for (final e in (map['keys'] ?? {}).entries) {
@@ -53,14 +55,13 @@ class KeyVault extends ChangeNotifier {
 
   Future<void> save() async {
     try {
-      final f = await _file();
       final json = utf8.encode(jsonEncode({
         'keys': _keys,
         'urls': _baseUrlOverrides,
       }));
       final enc = await CryptoVault.encrypt(
           Uint8List.fromList(json), Settings.instance.masterKey);
-      await f.writeAsBytes(enc, flush: true);
+      await AppDb.guardar(_kv, enc);
     } catch (_) {}
     notifyListeners();
   }

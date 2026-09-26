@@ -1,11 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
-import 'package:path_provider/path_provider.dart';
 
+import '../services/app_db.dart';
 import '../services/crypto_vault.dart';
 import '../services/settings.dart';
 import 'key_vault.dart';
@@ -111,11 +111,16 @@ class Agent {
 /// corren un loop de tool-calling SIN detenerse (auto-continúa) y piden
 /// permiso inline cuando una herramienta no está autorizada.
 /// Singleton a nivel app → los agentes siguen vivos aunque cambies de
-/// pantalla. Persistencia cifrada en appSupport/filosoia_agents.pr.
+/// pantalla. Persistencia cifrada en `app.db` (clave `filosoia_agents`).
+///
+/// El viejo `filosoia_agents.pr` no importa: se borra sin migrar.
 class AgentManager extends ChangeNotifier {
   AgentManager._();
   static final AgentManager instance = AgentManager._();
 
+  static const _kv = 'filosoia_agents';
+
+  /// Nombre del archivo viejo (solo migración, después se borra).
   static const _fileName = 'filosoia_agents.pr';
   static const _maxIterations = 15;
 
@@ -133,20 +138,17 @@ class AgentManager extends ChangeNotifier {
 
   // ------------------------------------------------------- persistencia
 
-  Future<File> _file() async {
-    final dir = await getApplicationSupportDirectory();
-    return File('${dir.path}/$_fileName');
-  }
-
   Future<void> ensureLoaded() async {
     if (_loaded) return;
     _loaded = true;
+    // El .pr no importa: se borra, app.db manda.
+    await AppDb.tachar(_fileName);
     try {
       await KeyVault.instance.load();
-      final f = await _file();
-      if (!f.existsSync()) return;
+      final raw = await AppDb.leer(_kv);
+      if (raw == null) return;
       final plain = await CryptoVault.decrypt(
-          await f.readAsBytes(), Settings.instance.masterKey);
+          raw, Settings.instance.masterKey);
       if (plain == null) return;
       final list = jsonDecode(utf8.decode(plain))['agents'] as List? ?? [];
       agents.clear();
@@ -161,13 +163,12 @@ class AgentManager extends ChangeNotifier {
 
   Future<void> _persist() async {
     try {
-      final f = await _file();
       final json = utf8.encode(jsonEncode({
         'agents': agents.map((a) => a.toJson()).toList(),
       }));
       final enc = await CryptoVault.encrypt(
           Uint8List.fromList(json), Settings.instance.masterKey);
-      await f.writeAsBytes(enc, flush: true);
+      await AppDb.guardar(_kv, enc);
     } catch (_) {}
   }
 

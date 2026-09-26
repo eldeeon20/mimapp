@@ -446,4 +446,78 @@ class PuenteHf {
     }
     return (subidos: subidos, saltados: saltados);
   }
+
+  /// Sube SOLO el índice (`indice.db`, cifrado con tu clave) al repo
+  /// que digas (repo+token propios del índice, guardados con
+  /// `Indice.guardarHfIndice`). No toca ningún molde.
+  Future<void> subirIndice({
+    required String passIndice,
+    required String repo,
+    required String token,
+    String repoType = 'dataset',
+    void Function(String s)? log,
+  }) async {
+    if (repo.isEmpty || token.isEmpty) {
+      throw StateError('puente_hf: el índice no tiene repo/token '
+          '(guardalos primero con "Guardar HF índice")');
+    }
+    // La pass tiene que abrir el índice: si no, no hay qué subir.
+    await Indice.hfIndice(passIndice);
+    final carpeta = await MediaBase.carpetaMoldes();
+    final idx = File('${carpeta.path}/${Indice.archivo}');
+    if (!await idx.exists()) {
+      throw StateError('puente_hf: no hay ${Indice.archivo} local');
+    }
+    await asegurarRepo(repoId: repo, token: token, repoType: repoType);
+    log?.call('· subiendo ${Indice.archivo} a $repo…');
+    await _hf.uploadFile(
+      repoId: repo,
+      localFilePath: idx.path,
+      pathInRepo: Indice.archivo,
+      commitMessage:
+          'indice solo v${DateTime.now().millisecondsSinceEpoch}',
+      repoType: repoType,
+    );
+    log?.call('✓ índice en $repo');
+  }
+
+  /// Baja SOLO el índice (`indice.db`) del repo que digas y lo pone
+  /// como local. El anterior se respalda (`indice.db.bak_<ms>`).
+  /// OJO: el bajado abre con SU clave, no con la tuya.
+  /// Retorna el path final. Token vacío = repo público.
+  Future<String> bajarIndice({
+    required String repo,
+    required String token,
+    String repoType = 'dataset',
+    void Function(String s)? log,
+  }) async {
+    if (repo.isEmpty) {
+      throw StateError('puente_hf: decí el repo del índice');
+    }
+    await init(token);
+    final tmp = await Directory.systemTemp.createTemp('hf_idx');
+    try {
+      final bajado = await _hf.downloadFile(
+        repoId: repo,
+        filename: Indice.archivo,
+        localDir: tmp.path,
+        repoType: repoType,
+      );
+      final carpeta = await MediaBase.carpetaMoldes();
+      final destino = File('${carpeta.path}/${Indice.archivo}');
+      if (await destino.exists()) {
+        final bak = File('${carpeta.path}/${Indice.archivo}'
+            '.bak_${DateTime.now().millisecondsSinceEpoch}');
+        await destino.copy(bak.path);
+        log?.call('· local respaldado en ${bak.path.split('/').last}');
+      }
+      await File(bajado).copy(destino.path);
+      log?.call('✓ índice bajado de $repo (abre con SU clave)');
+      return destino.path;
+    } finally {
+      try {
+        await tmp.delete(recursive: true);
+      } catch (_) {}
+    }
+  }
 }

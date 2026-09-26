@@ -5,7 +5,8 @@ import '../src/rust/api/pkarr.dart' as rust;
 /// PKARR v8 adaptado al nuevo modelo de identidad:
 /// - La secret key se genera y guarda CIFRADA lado Rust (AES-GCM con clave
 ///   derivada del PIN por PBKDF2) en <dir>/pkarr_key.bin. Reemplaza el
-///   guardado viejo en hex plano dentro de config.pr.
+///   guardado viejo en hex plano dentro de config.pr (ya no existe:
+///   todo en app.db).
 /// - Lo publicado SIEMPRE es TXT público firmado (nunca cifrado).
 /// - Modo de publicación default "both": DHT Kademlia Mainline + relays.
 class Pkarr {

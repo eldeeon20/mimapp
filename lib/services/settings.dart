@@ -1,17 +1,15 @@
 import 'dart:convert';
-import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:path_provider/path_provider.dart';
-
 import '../toolsec/toolsec.dart';
+import 'app_db.dart';
 import 'crypto_vault.dart';
 
-/// Estado persistente del usuario, guardado cifrado en `config.pr`.
+/// Estado persistente del usuario, guardado cifrado en `app.db`
+/// (tabla `kv`, clave `ajustes`, envelope AES-256-GCM con la
+/// `masterKey`).
 ///
-/// Formato V2: envelope AES-256-GCM (CryptoVault, clave derivada de
-/// `masterKey` vía PBKDF2 con salt aleatorio). Los config.pr viejos (XOR)
-/// se detectan al cargar y se re-guardan migrados automáticamente.
+/// El viejo `config.pr` no importa: se borra sin migrar.
 class Settings {
   static final Settings instance = Settings._();
   Settings._();
@@ -36,7 +34,7 @@ class Settings {
   List<Map<String, dynamic>> pockets = [];
 
   /// Claves guardadas de Pkarr y Nostr (secretos en hex, cifrados junto
-  /// con el resto de config.pr).
+  /// con el resto en app.db).
   List<Map<String, dynamic>> pkarrKeys = [];
   List<Map<String, dynamic>> nostrKeys = [];
 
@@ -57,9 +55,8 @@ class Settings {
   Future<void>? _cargando;
 
   /// Cola de guardados: los save() se EJECUTAN DE A UNO. Antes, dos
-  /// _persist() juntos (varios van sin await) escribían el mismo
-  /// config.pr.tmp a la vez y corrompían principal + .bak → al
-  /// reabrir, ilegible → todo vacío aunque decía "guardado".
+  /// _persist() juntos pisaban el mismo archivo a mitad de escritura
+  /// → al reabrir, ilegible → todo vacío aunque decía "guardado".
   static Future<void> _cola = Future.value();
 
   Future<void> save() {
@@ -85,39 +82,21 @@ class Settings {
 
   Future<void> _cargar() async {
     try {
-      final dir = await getApplicationSupportDirectory();
-      final file = File('${dir.path}/config.pr');
-      Uint8List? enc;
-      if (await file.exists()) {
-        enc = await file.readAsBytes();
-      } else {
-        // Sin principal: probar el respaldo (corte a mitad de escritura).
-        final bak = File('${dir.path}/config.pr.bak');
-        if (await bak.exists()) {
-          print('Settings.load: uso respaldo .bak');
-          enc = await bak.readAsBytes();
-        }
-      }
-      if (enc != null) {
-        final ok = await _cargarBytes(enc);
-        if (!ok) {
-          // Principal corrupto: probar el respaldo antes de defaultear.
-          try {
-            final bak = File('${dir.path}/config.pr.bak');
-            if (await bak.exists()) {
-              print('Settings.load: principal corrupto, uso .bak');
-              await _cargarBytes(await bak.readAsBytes());
-            }
-          } catch (_) {}
-        }
-      }
+      // Solo app.db: los .pr no importan, no se migran.
+      final kv = await AppDb.leer('ajustes');
+      if (kv != null) await _cargarBytes(kv);
     } catch (e) {
-      // Archivo corrupto/ilegible: se quedan los defaults.
+      // Ilegible: se quedan los defaults.
       print('Settings.load error: $e');
     }
+    // Tachar viejos (aunque falle todo lo demás).
+    await AppDb.tachar('config.pr');
+    await AppDb.tachar('config.pr.bak');
+    await AppDb.tachar('config.pr.tmp');
   }
 
-  /// Descifra y vuelca un config.pr en memoria. true = ok.
+  /// Descifra y vuelca los bytes guardados en memoria. true = ok.
+  /// Acepta envelope V2 (CryptoVault), legado XOR y ToolSec fuerte.
   Future<bool> _cargarBytes(Uint8List enc) async {
     try {
       Uint8List? plain;
@@ -194,23 +173,9 @@ class Settings {
         'torrentRoot': torrentRoot,
       };
       final plain = utf8.encode(jsonEncode(map));
-      final enc =
-          await ToolSec(masterKey).processBytesStrong(Uint8List.fromList(plain));
-      final dir = await getApplicationSupportDirectory();
-      final file = File('${dir.path}/config.pr');
-      final tmp = File('${dir.path}/config.pr.tmp');
-      final bak = File('${dir.path}/config.pr.bak');
-      // Atómico: tmp + rename (matar la app a mitad no corrompe).
-      await tmp.writeAsBytes(enc, flush: true);
-      try {
-        if (await file.exists()) {
-          // Respaldo del último bueno (load lo usa si el principal falla).
-          try {
-            await file.copy(bak.path);
-          } catch (_) {}
-        }
-      } catch (_) {}
-      await tmp.rename(file.path);
+      final enc = await CryptoVault.encrypt(
+          Uint8List.fromList(plain), masterKey);
+      await AppDb.guardar('ajustes', enc);
     } catch (e) {
       print('Settings.save error: $e');
     }

@@ -4,7 +4,7 @@ import '../services/almacen.dart';
 import '../services/settings.dart';
 
 /// Almacén y caché: check de memoria (Kotlin) + tamaños por grupo +
-/// limpieza en DOS modos: Datos (db/pr, sin config.pr) y Descargados
+/// limpieza en DOS modos: Datos (db, sin app.db) y Descargados
 /// (modelos, descargas, torrents). Todo con confirmación y conteo.
 class AlmacenScreen extends StatefulWidget {
   const AlmacenScreen({super.key});
@@ -88,7 +88,7 @@ class _AlmacenScreenState extends State<AlmacenScreen> {
                   const Padding(
                     padding: EdgeInsets.only(top: 8),
                     child: Text(
-                        'OJO: son tus db y agendas .pr (config.pr a salvo).',
+                        'OJO: son tus db locales (app.db con ajustes, a salvo).',
                         style: TextStyle(color: Colors.orange, fontSize: 12)),
                   ),
               ]),
@@ -175,7 +175,7 @@ class _AlmacenScreenState extends State<AlmacenScreen> {
                     _grupoCard(
                       _datos,
                       Icons.storage_rounded,
-                      'config.pr nunca se toca.',
+                      'app.db (ajustes) nunca se toca.',
                       _liberar,
                     ),
                     _grupoCard(
